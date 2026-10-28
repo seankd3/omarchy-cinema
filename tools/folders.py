@@ -15,7 +15,7 @@ from pathlib import Path
 
 # One style per film: the folder's outline, its fill, the glyph's colour, the
 # glow, and an accent for one detail. Shapes: "hud" chamfers the corners,
-# "round" softens them.
+# "grid" cuts one corner square to the Grid's lines, "round" softens them.
 STYLES = {
     "jarvis": {
         "shape": "hud",
@@ -25,6 +25,15 @@ STYLES = {
         "glow": "#39c8ff",
         "accent": "#ffb347",
         "inherits": "Yaru-blue-dark,Yaru-dark,Yaru,hicolor",
+    },
+    "tron-legacy": {
+        "shape": "grid",
+        "stroke": "#7ff3ff",
+        "fill": ("#00d9ff", 0.16, 0.02),
+        "glyph": "#f2feff",
+        "glow": "#00d9ff",
+        "accent": "#ff8a1f",
+        "inherits": "Yaru-prussiangreen-dark,Yaru-dark,Yaru,hicolor",
     },
 }
 
@@ -51,6 +60,8 @@ def outline(shape):
     """The folder's silhouette in a 64 by 64 box: back tab, then body."""
     if shape == "hud":
         return "M6 14l4-5h14l4 5h26l4 4v32l-5 5H11l-5-5z"
+    if shape == "grid":
+        return "M6 9h18l5 5h29v34l-6 6H6z"
     return "M8 12a3 3 0 0 1 3-3h13l4 5h25a3 3 0 0 1 3 3v33a3 3 0 0 1-3 3H11a3 3 0 0 1-3-3z"
 
 

@@ -1,0 +1,38 @@
+mode = "dark"
+
+# The Grid: light-line cyan on black glass, white-hot where light is brightest,
+# and Clu's orange for the one thing in charge.
+accent = "#00d9ff"
+selection = "#06323d"
+muted = "#7fb9c4"
+
+background = "#020508"
+dark_background = "#010305"
+darker_background = "#000102"
+lighter_background = "#0a141b"
+
+foreground = "#e9fdff"
+dark_foreground = "#9ddde8"
+light_foreground = "#e9fdff"
+bright_foreground = "#ffffff"
+
+active_border_color = "#9ff8ff"
+active_tab_background = "#00d9ff"
+hyprland_active_border = "rgba(00d9ffee) rgba(c8fbffee) 90deg"
+hyprland_inactive_border = "rgba(0b3a46aa)"
+
+red = "#ff5a3c"
+yellow = "#ffc857"
+orange = "#ff8a1f"
+green = "#3cffb4"
+cyan = "#9ff8ff"
+blue = "#00b4ff"
+magenta = "#c58cff"
+brown = "#a86a2a"
+
+bright_red = "#ff8a73"
+bright_yellow = "#ffdc8f"
+bright_green = "#8cffd6"
+bright_cyan = "#d2fcff"
+bright_blue = "#66d4ff"
+bright_magenta = "#dcbcff"

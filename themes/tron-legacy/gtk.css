@@ -1,0 +1,163 @@
+/* Tron Legacy for GTK apps, Files first: black glass drawn in thin lines of
+   light, white-hot where it matters, Clu's orange only for danger. */
+
+:root {
+  --accent-bg-color: #00a8c8;
+  --accent-fg-color: #ffffff;
+  --accent-color: #9ff8ff;
+  --destructive-bg-color: #d4581c;
+  --destructive-color: #ff8a1f;
+  --success-color: #3cffb4;
+  --warning-color: #ffc857;
+  --error-color: #ff5a3c;
+
+  --window-bg-color: #030709;
+  --window-fg-color: #e9fdff;
+  --view-bg-color: #020508;
+  --view-fg-color: #e9fdff;
+  --headerbar-bg-color: #040a0d;
+  --headerbar-fg-color: #c8fbff;
+  --headerbar-border-color: rgba(0, 217, 255, 0.5);
+  --sidebar-bg-color: #03080b;
+  --sidebar-fg-color: #d6f8fd;
+  --sidebar-border-color: rgba(0, 217, 255, 0.3);
+  --card-bg-color: rgba(0, 217, 255, 0.04);
+  --card-fg-color: #e9fdff;
+  --popover-bg-color: #040a0d;
+  --popover-fg-color: #e9fdff;
+  --dialog-bg-color: #040a0d;
+  --dialog-fg-color: #e9fdff;
+  --border-color: rgba(0, 217, 255, 0.35);
+  --border-opacity: 0.8;
+  --window-radius: 0;
+}
+
+/* Everything is drawn in light: a single bright line under the header. */
+headerbar {
+  box-shadow: inset 0 -1px rgba(159, 248, 255, 0.85), 0 1px 14px rgba(0, 217, 255, 0.25);
+}
+
+.nautilus-pathbar {
+  background: transparent;
+  border: 1px solid rgba(0, 217, 255, 0.5);
+  border-radius: 0;
+}
+
+.nautilus-pathbar button,
+.nautilus-path-button {
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #9ddde8;
+  border-radius: 0;
+}
+
+.nautilus-path-button.current-dir {
+  color: #ffffff;
+  text-shadow: 0 0 10px rgba(0, 217, 255, 0.9);
+}
+
+/* The sidebar: the place you are in is a lit line along its left edge. */
+placessidebar row,
+.navigation-sidebar row {
+  border-radius: 0;
+  margin: 1px 6px;
+}
+
+placessidebar row:hover,
+.navigation-sidebar row:hover {
+  background: rgba(0, 217, 255, 0.06);
+}
+
+placessidebar row:selected,
+.navigation-sidebar row:selected {
+  background: rgba(0, 217, 255, 0.10);
+  box-shadow: inset 2px 0 #c8fbff, inset 0 0 0 1px rgba(0, 217, 255, 0.35), 0 0 16px rgba(0, 217, 255, 0.25);
+  color: #ffffff;
+}
+
+placessidebar row image,
+.navigation-sidebar row image {
+  color: #9ff8ff;
+  -gtk-icon-shadow: 0 0 6px rgba(0, 217, 255, 0.7);
+}
+
+/* Files in the grid: outlined in light on hover, lit solid when chosen. */
+.nautilus-grid-view gridview > child {
+  border-radius: 0;
+  transition: background 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.nautilus-grid-view gridview > child:hover {
+  box-shadow: inset 0 0 0 1px rgba(0, 217, 255, 0.45);
+}
+
+.nautilus-grid-view gridview > child:selected {
+  background: rgba(0, 217, 255, 0.12);
+  box-shadow: inset 0 0 0 1px #c8fbff, 0 0 20px rgba(0, 217, 255, 0.45);
+}
+
+.nautilus-grid-view gridview > child:selected label {
+  color: #ffffff;
+  text-shadow: 0 0 8px rgba(0, 217, 255, 0.9);
+}
+
+.nautilus-list-view columnview > listview > row:selected {
+  background: rgba(0, 217, 255, 0.12);
+  box-shadow: inset 2px 0 #c8fbff;
+}
+
+.nautilus-list-view columnview > listview > row:hover {
+  background: rgba(0, 217, 255, 0.06);
+}
+
+.nautilus-image.file-thumbnail {
+  border: 1px solid rgba(0, 217, 255, 0.55);
+  box-shadow: 0 0 12px rgba(0, 217, 255, 0.35);
+}
+
+rubberband {
+  background: rgba(0, 217, 255, 0.10);
+  border: 1px solid #c8fbff;
+}
+
+.floating-bar {
+  background: #040a0d;
+  border: 1px solid rgba(0, 217, 255, 0.6);
+  border-radius: 0;
+  color: #c8fbff;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+}
+
+/* Buttons and fields: outlines of light, never filled blocks. */
+button {
+  border-radius: 0;
+}
+
+button.suggested-action {
+  background: transparent;
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px #9ff8ff, 0 0 14px rgba(0, 217, 255, 0.5);
+}
+
+entry,
+searchbar entry {
+  background: rgba(0, 217, 255, 0.04);
+  border: 1px solid rgba(0, 217, 255, 0.45);
+  border-radius: 0;
+}
+
+entry:focus-within {
+  border-color: #c8fbff;
+  box-shadow: 0 0 12px rgba(0, 217, 255, 0.45);
+}
+
+popover > contents {
+  border: 1px solid rgba(0, 217, 255, 0.55);
+  border-radius: 0;
+  box-shadow: 0 0 22px rgba(0, 217, 255, 0.25);
+}
+
+selection {
+  background: rgba(0, 217, 255, 0.4);
+}
