@@ -6,7 +6,10 @@ DEPS    := hyprland libdrm libinput libudev pixman-1 wayland-server xkbcommon
 CXXFLAGS = -std=c++23 -O2 -fPIC -fno-gnu-unique -I$(BUILD) $(shell pkg-config --cflags $(DEPS))
 LDLIBS   = $(shell pkg-config --libs $(DEPS)) -lrt
 
-$(BUILD)/backdrop.so: main.cpp $(BUILD)/contract.inc
+# Hyprland's version header stands for the SDK: an update rebuilds the plugin.
+SDK     := $(shell pkg-config --variable=prefix hyprland)/hyprland/src/version.h
+
+$(BUILD)/backdrop.so: main.cpp $(BUILD)/contract.inc $(SDK)
 	$(CXX) $(CXXFLAGS) -shared -o $@ main.cpp $(LDLIBS)
 
 # The shader contract is compiled in, so a theme's shader and the uniforms the

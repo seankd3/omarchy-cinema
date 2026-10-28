@@ -1,16 +1,17 @@
 // Draws the current Omarchy theme's backdrop between the wallpaper and the
-// windows, inside the frame Hyprland is drawing, from the windows' real
-// (animated) geometry, so it never trails them.
+// windows, inside the frame Hyprland is drawing, from the windows' geometry in
+// that frame, so it never trails them.
 //
 // A theme with a backdrop ships backdrop.frag, a fragment shader written
 // against contract.glsl, and loads this plugin from its hyprland.lua. A theme
 // switch reloads Hyprland's config: the shader and palette are read again from
 // the applied theme then, and a theme that does not load the plugin unloads it.
 //
-// Hyprland draws a monitor only when something on it changed. Just before it
-// decides, the plugin compares what the backdrop would show with what it last
-// drew there; if a window moved, the whole monitor is drawn again in that same
-// frame. Otherwise the backdrop's own motion asks for frames at plugin:backdrop:fps.
+// Hyprland advances its animations, then emits render.pre, then reads the
+// frame's damage. At render.pre the plugin reads the windows as they will be
+// drawn; if they differ from what it last drew, it damages the whole monitor
+// and the glass, so this same frame draws the new backdrop. Otherwise the
+// backdrop's own motion asks for frames at plugin:backdrop:fps.
 
 #define WLR_USE_UNSTABLE
 
@@ -18,6 +19,8 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/desktop/state/Fadeout.hpp>
+#include <hyprland/src/desktop/state/FadingOutState.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
@@ -45,12 +48,15 @@ using namespace Render::GL;
 
 namespace {
 
-    constexpr int    MAX_WINDOWS = 32; // contract.glsl's windowRects
-    // Glass shows the backdrop blurred, where slow motion is invisible, so the
-    // glass catches up on every sixth tick and the ticks in between repaint
-    // only the backdrop Hyprland shows unblurred.
+    // The glass shows the backdrop through Hyprland's cached blur, and the
+    // blur is the costly part of a frame. So a tick redraws the whole monitor
+    // over the cached blur, and every sixth tick refreshes the blur too: the
+    // whole frame always agrees with itself, and the glass trails by at most
+    // five ticks of slow motion, blurred.
     constexpr int    GLASS_EVERY = 6;
     constexpr double FOCUS_EASE  = 0.32; // seconds
+    // Texels per row of the window data texture: two per window.
+    constexpr int    DATA_WIDTH = 256;
 
     const char* CONTRACT =
 #include "contract.inc"
@@ -69,18 +75,25 @@ void main() {
 
     using Rect = std::array<float, 4>;
 
+    // A window as the backdrop sees it: where it is drawn, how faded, how round.
+    struct SShape {
+        Rect  rect{};
+        float alpha    = 1;
+        float rounding = 0;
+        bool  operator==(const SShape&) const = default;
+    };
+
     // What the backdrop shows on one monitor, apart from its own motion.
     struct SScene {
-        std::vector<Rect>  rects;
-        std::vector<float> alphas;
-        int                focusedIndex = -1;
-        Rect               focus{};
-        bool               operator==(const SScene&) const = default;
+        std::vector<SShape> shapes;
+        int                 focusedIndex = -1;
+        Rect                focus{};
+        bool                operator==(const SScene&) const = default;
     };
 
     struct SMonitor {
-        SScene                                pending; // read just before this frame
-        SScene                                drawn;   // last drawn
+        SScene                                pending; // read for the frame being drawn
+        SScene                                drawn;
         PHLWINDOWREF                          focusedWindow;
         Rect                                  focusFrom{};
         std::chrono::steady_clock::time_point focusMoved;
@@ -88,25 +101,25 @@ void main() {
     };
 
     struct SProgram {
-        GLuint id = 0, vao = 0, vbo = 0;
-        GLint  proj, resolution, time, accent, background, foreground, focused, rounding, windowCount, windowRects, windowAlpha, focusedIndex;
+        GLuint id = 0, vao = 0, vbo = 0, data = 0;
+        GLint  proj, resolution, time, accent, background, foreground, focused, windowData, windowCount, focusedIndex;
     };
 
     struct SState {
-        HANDLE                                handle = nullptr;
-        std::string                           source; // the theme's shader, empty when it has none
-        std::array<float, 3>                  accent{1, 1, 1}, background{0, 0, 0}, foreground{1, 1, 1};
-        uint64_t                              generation = 1;
-        uint64_t                              compiled   = 0;
-        SProgram                              program;
+        HANDLE                                  handle = nullptr;
+        std::string                             source; // the theme's shader, empty when it has none
+        std::array<float, 3>                    accent{1, 1, 1}, background{0, 0, 0}, foreground{1, 1, 1};
+        uint64_t                                generation = 1;
+        uint64_t                                compiled   = 0;
+        SProgram                                program;
         // Frames a second of the backdrop's own motion; 0 holds it still. 15 by
-        // default: on the P16 with Jarvis on workspace 1, idle, it costs about
-        // 2.3 W, against 5 W at 30 and 1.6 W at 10 (measured 2026-10-28). Windows
-        // are followed every frame whatever this is.
-        SP<Config::Values::CIntValue>         fps;
-        float                                 time  = 0;
-        uint64_t                              ticks = 0;
-        wl_event_source*                      timer = nullptr;
+        // default: on the P16 with Jarvis on workspace 1, idle, 30 cost about
+        // 5 W and 10 about 1.6 W (measured 2026-10-28). Windows are followed
+        // every frame whatever this is.
+        SP<Config::Values::CIntValue>           fps;
+        float                                   time  = 0;
+        uint64_t                                ticks = 0;
+        wl_event_source*                        timer = nullptr;
         std::unordered_map<MONITORID, SMonitor> monitors;
     };
 
@@ -166,13 +179,16 @@ void main() {
     }
 
     void deleteProgram() {
-        if (g->program.id)
-            glDeleteProgram(g->program.id);
-        if (g->program.vbo)
-            glDeleteBuffers(1, &g->program.vbo);
-        if (g->program.vao)
-            glDeleteVertexArrays(1, &g->program.vao);
-        g->program = {};
+        auto& p = g->program;
+        if (p.id)
+            glDeleteProgram(p.id);
+        if (p.vbo)
+            glDeleteBuffers(1, &p.vbo);
+        if (p.vao)
+            glDeleteVertexArrays(1, &p.vao);
+        if (p.data)
+            glDeleteTextures(1, &p.data);
+        p = {};
     }
 
     // Builds the theme's program once per theme read; called with the render
@@ -219,12 +235,13 @@ void main() {
         p.background   = glGetUniformLocation(p.id, "background");
         p.foreground   = glGetUniformLocation(p.id, "foreground");
         p.focused      = glGetUniformLocation(p.id, "focused");
-        p.rounding     = glGetUniformLocation(p.id, "rounding");
+        p.windowData   = glGetUniformLocation(p.id, "windowData");
         p.windowCount  = glGetUniformLocation(p.id, "windowCount");
-        p.windowRects  = glGetUniformLocation(p.id, "windowRects");
-        p.windowAlpha  = glGetUniformLocation(p.id, "windowAlpha");
         p.focusedIndex = glGetUniformLocation(p.id, "focusedIndex");
 
+        GLint vao = 0, buffer = 0;
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+        glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &buffer);
         // The unit square, as Hyprland's own quads are drawn.
         const std::array<float, 8> quad = {1, 0, 0, 0, 1, 1, 0, 1};
         glGenVertexArrays(1, &p.vao);
@@ -234,8 +251,10 @@ void main() {
         glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad.data(), GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
-        glBindVertexArray(0);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, buffer);
+
+        glGenTextures(1, &p.data);
         return true;
     }
 
@@ -243,46 +262,58 @@ void main() {
         return 1.F - std::pow(1.F - t, 3.F);
     }
 
-    // Each window Hyprland will draw on this monitor in this frame, with the
-    // box it draws it in, in monitor-local logical pixels.
-    template <typename F>
-    void forEachWindow(PHLMONITOR monitor, F&& f) {
-        for (const auto& w : Desktop::windowState()->windows()) {
-            if (!w->m_isMapped || w->isHidden() || !w->m_workspace || !g_pHyprRenderer->shouldRenderWindow(w, monitor))
-                continue;
-            const auto position = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + (w->m_pinned ? Vector2D{} : w->m_workspace->m_renderOffset->value()) +
-                w->m_floatingOffset - monitor->m_position;
-            f(w, CBox{position, w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)});
-        }
+    // A window's fade as Hyprland draws it (renderWindow's fadeAlpha, Hyprland
+    // 0.56.2 src/render/Renderer.cpp:588), so the shape fades with the window
+    // through closing, fullscreen, layout changes and workspace moves.
+    float renderedAlpha(const PHLWINDOW& w) {
+        using namespace Desktop::View;
+        const auto workspace     = w->m_workspace;
+        const bool workspaceFade = w->m_monitorMovedFrom != -1 && (!workspace || !workspace->isVisible());
+        return w->alphaValue(WINDOW_ALPHA_FADE) * w->alphaValue(WINDOW_ALPHA_FULLSCREEN) * w->alphaValue(WINDOW_ALPHA_LAYOUT) *
+            (w->m_pinned || workspaceFade || !workspace ? 1.F : workspace->m_alpha->value()) * (workspaceFade ? w->alphaValue(WINDOW_ALPHA_MOVE_TO_WORKSPACE) : 1.F) *
+            w->alphaValue(WINDOW_ALPHA_MOVE_FROM_WORKSPACE);
     }
 
-    // The windows on this monitor, where Hyprland draws them this frame, and
-    // where attention is.
+    // The windows Hyprland draws on this monitor in this frame, and those
+    // fading out after closing, where they are drawn; and where attention is.
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {
         SScene     scene;
         const auto focused = Desktop::focusState()->window();
         PHLWINDOW  focusedHere;
 
-        forEachWindow(monitor, [&](const PHLWINDOW& w, const CBox& box) {
-            if (std::ssize(scene.rects) == MAX_WINDOWS)
-                return;
+        for (const auto& w : Desktop::windowState()->windows()) {
+            if (!w->m_isMapped || w->isHidden() || !w->m_workspace || !g_pHyprRenderer->shouldRenderWindow(w, monitor))
+                continue;
+            const auto position = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + (w->m_pinned ? Vector2D{} : w->m_workspace->m_renderOffset->value()) +
+                w->m_floatingOffset - monitor->m_position;
+            const auto size = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
             if (w == focused) {
-                scene.focusedIndex = scene.rects.size();
+                scene.focusedIndex = scene.shapes.size();
                 focusedHere        = w;
             }
-            scene.rects.push_back({float(box.x), float(box.y), float(box.w), float(box.h)});
-            scene.alphas.push_back(w->alphaValue(Desktop::View::WINDOW_ALPHA_FADE) * (w->m_pinned ? 1.F : w->m_workspace->m_alpha->value()));
-        });
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, renderedAlpha(w), w->rounding()});
+        }
+
+        static auto ROUNDING = CConfigValue<Config::INTEGER>("decoration:rounding");
+        for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
+            const auto plane = fadeout->plane();
+            if (fadeout->monitor().lock() != monitor ||
+                (plane != Desktop::FADEOUT_PLANE_WINDOW_TILED && plane != Desktop::FADEOUT_PLANE_WINDOW_FLOATING && plane != Desktop::FADEOUT_PLANE_WINDOW_OVER_FULLSCREEN))
+                continue;
+            const auto position = fadeout->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) - monitor->m_position;
+            const auto size     = fadeout->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(), float(*ROUNDING)});
+        }
 
         const Rect middle = {float(monitor->m_size.x * 0.3), float(monitor->m_size.y * 0.3), float(monitor->m_size.x * 0.4), float(monitor->m_size.y * 0.4)};
-        const Rect target = scene.focusedIndex < 0 ? middle : scene.rects[scene.focusedIndex];
+        const Rect target = scene.focusedIndex < 0 ? middle : scene.shapes[scene.focusedIndex].rect;
 
         // Focus moving to another window eases across; a focused window that
         // moves is followed exactly.
         const auto now = std::chrono::steady_clock::now();
         if (!state.seen) {
-            state.seen      = true;
-            state.focusFrom = target;
+            state.seen       = true;
+            state.focusFrom  = target;
             state.focusMoved = now - std::chrono::seconds(1);
         } else if (state.focusedWindow.lock() != focusedHere) {
             state.focusFrom  = state.drawn.focus;
@@ -290,8 +321,7 @@ void main() {
         }
         state.focusedWindow = focusedHere;
 
-        const float t = std::min(1.F, float(std::chrono::duration<double>(now - state.focusMoved).count() / FOCUS_EASE));
-        const float k = easeOut(t);
+        const float k = easeOut(std::min(1.F, float(std::chrono::duration<double>(now - state.focusMoved).count() / FOCUS_EASE)));
         for (size_t i = 0; i < 4; i++)
             scene.focus[i] = state.focusFrom[i] + (target[i] - state.focusFrom[i]) * k;
         return scene;
@@ -307,33 +337,39 @@ void main() {
         monitor->m_blurFBDirty = true;
     }
 
-    // Where the backdrop shows unblurred: the monitor minus the tiled windows
-    // whose glass comes from Hyprland's cached blur (or that are opaque).
-    // Nothing when a window would show the live backdrop through it instead
-    // (a floating window blurs what is under it as it is, an unblurred one
-    // shows it as it is), since repainting only part of such a window would
-    // tear it: then the whole monitor is the answer.
-    std::optional<CRegion> unblurred(PHLMONITOR monitor) {
-        static auto BLUR          = CConfigValue<Config::INTEGER>("decoration:blur:enabled");
-        static auto OPTIMIZATIONS = CConfigValue<Config::INTEGER>("decoration:blur:new_optimizations");
-        static auto ROUNDING      = CConfigValue<Config::INTEGER>("decoration:rounding");
-        CRegion     region        = CBox{monitor->m_position, monitor->m_size};
-        bool        whole         = false;
-        forEachWindow(monitor, [&](const PHLWINDOW& w, const CBox& box) {
-            // A window asking for blur itself (foot's glass does) gets the
-            // cached blur only where it asked for it.
-            const auto surface = w->wlSurface();
-            const bool asked   = surface && surface->m_hasBackgroundEffect;
-            const bool whollyBlurred =
-                !asked || CRegion(CBox{{}, box.size()}).subtract(surface->m_blurRegion).empty();
-            const bool cached = *BLUR && *OPTIMIZATIONS && !w->m_isFloating && !w->m_ruleApplicator->noBlur().valueOrDefault() &&
-                !w->m_ruleApplicator->RGBX().valueOrDefault() && whollyBlurred;
-            if (!w->opaque() && !cached)
-                whole = true;
-            // The rounded corners show what is behind them.
-            region.subtract(box.copy().translate(monitor->m_position).expand(-*ROUNDING));
-        });
-        return whole ? std::nullopt : std::optional<CRegion>(region);
+    // Uploads the shapes, two texels each: (x, y, w, h) and (alpha, rounding).
+    void uploadShapes(const std::vector<SShape>& shapes) {
+        const int          texels = std::max<int>(2 * shapes.size(), 1);
+        const int          width  = std::min(texels, DATA_WIDTH);
+        const int          height = (texels + DATA_WIDTH - 1) / DATA_WIDTH;
+        std::vector<float> data(size_t(width) * height * 4, 0.F);
+        for (size_t i = 0; i < shapes.size(); i++) {
+            std::copy(shapes[i].rect.begin(), shapes[i].rect.end(), data.begin() + i * 8);
+            data[i * 8 + 4] = shapes[i].alpha;
+            data[i * 8 + 5] = shapes[i].rounding;
+        }
+
+        GLint unpackBuffer = 0, rowLength = 0, skipRows = 0, skipPixels = 0, alignment = 0;
+        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpackBuffer);
+        glGetIntegerv(GL_UNPACK_ROW_LENGTH, &rowLength);
+        glGetIntegerv(GL_UNPACK_SKIP_ROWS, &skipRows);
+        glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &skipPixels);
+        glGetIntegerv(GL_UNPACK_ALIGNMENT, &alignment);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+        glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, data.data());
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpackBuffer);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, rowLength);
+        glPixelStorei(GL_UNPACK_SKIP_ROWS, skipRows);
+        glPixelStorei(GL_UNPACK_SKIP_PIXELS, skipPixels);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
     }
 
     class CBackdropPass : public IPassElement {
@@ -344,10 +380,23 @@ void main() {
             const auto monitor = m_monitor.lock();
             if (!monitor)
                 return {};
-            auto&      p   = g->program;
-            const CBox box = {0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
-            const auto proj = g_pHyprRenderer->projectBoxToTarget(box);
 
+            // Hyprland skips binding a program it believes is still bound, and
+            // binds its own vertex arrays and textures by unit; so everything
+            // touched here is put back as it was found.
+            GLint program = 0, vao = 0, activeTexture = 0, texture = 0;
+            glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+            glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
+            glActiveTexture(GL_TEXTURE7);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+
+            auto& p = g->program;
+            glBindTexture(GL_TEXTURE_2D, p.data);
+            uploadShapes(m_scene.shapes);
+
+            const CBox box  = {0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
+            const auto proj = g_pHyprRenderer->projectBoxToTarget(box);
             glUseProgram(p.id);
             glUniformMatrix3fv(p.proj, 1, GL_TRUE, proj.getMatrix().data());
             glUniform2f(p.resolution, monitor->m_size.x, monitor->m_size.y);
@@ -356,13 +405,8 @@ void main() {
             glUniform3fv(p.background, 1, g->background.data());
             glUniform3fv(p.foreground, 1, g->foreground.data());
             glUniform4fv(p.focused, 1, m_scene.focus.data());
-            static auto ROUNDING = CConfigValue<Config::INTEGER>("decoration:rounding");
-            glUniform1f(p.rounding, float(*ROUNDING));
-            glUniform1i(p.windowCount, m_scene.rects.size());
-            if (!m_scene.rects.empty()) {
-                glUniform4fv(p.windowRects, m_scene.rects.size(), m_scene.rects.front().data());
-                glUniform1fv(p.windowAlpha, m_scene.alphas.size(), m_scene.alphas.data());
-            }
+            glUniform1i(p.windowData, 7);
+            glUniform1i(p.windowCount, m_scene.shapes.size());
             glUniform1i(p.focusedIndex, m_scene.focusedIndex);
 
             glBindVertexArray(p.vao);
@@ -371,9 +415,12 @@ void main() {
                 g_pHyprOpenGL->scissor(&rect, data.transformDamage);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             });
-            glBindVertexArray(0);
             g_pHyprOpenGL->scissor(nullptr);
-            glUseProgram(0);
+
+            glBindVertexArray(vao);
+            glUseProgram(program);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glActiveTexture(activeTexture);
             return {};
         }
 
@@ -405,7 +452,7 @@ void main() {
         SScene        m_scene;
     };
 
-    void onPreChecks(PHLMONITOR monitor) {
+    void onPre(PHLMONITOR monitor) {
         if (!g || g->source.empty())
             return;
         auto& state   = g->monitors[monitor->m_id];
@@ -444,11 +491,9 @@ void main() {
             if (!monitor->m_enabled || !monitor->m_dpmsStatus || covered(monitor))
                 continue;
             seen = true;
-            const auto region = glass ? std::nullopt : unblurred(monitor);
-            if (region)
-                g_pHyprRenderer->damageRegion(*region);
-            else
-                redraw(monitor);
+            g_pHyprRenderer->damageMonitor(monitor);
+            if (glass)
+                monitor->m_blurFBDirty = true;
         }
         if (seen)
             g->time = std::fmod(g->time + 1.F / fps, 3600.F);
@@ -474,9 +519,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(handle, g->fps);
     readTheme();
 
-    static auto PRECHECKS = Event::bus()->m_events.render.preChecks.listen([](PHLMONITOR monitor) { onPreChecks(monitor); });
-    static auto STAGE     = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) { onStage(stage); });
-    static auto RELOADED  = Event::bus()->m_events.config.reloaded.listen([] {
+    static auto PRE      = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) { onPre(monitor); });
+    static auto STAGE    = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) { onStage(stage); });
+    static auto RELOADED = Event::bus()->m_events.config.reloaded.listen([] {
         if (g)
             readTheme();
     });
@@ -484,7 +529,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g->timer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onTick, nullptr);
     wl_event_source_timer_update(g->timer, 1000 / 15);
 
-    return {"backdrop", "Draws the current Omarchy theme's backdrop between the wallpaper and the windows.", "Sean", "0.1"};
+    return {"backdrop", "Draws the current Omarchy theme's backdrop between the wallpaper and the windows.", "Sean", "0.2"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

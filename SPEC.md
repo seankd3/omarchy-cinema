@@ -30,20 +30,21 @@ draws on that monitor in that frame (`shouldRenderWindow`), so the backdrop
 cannot trail them. Shapes are exact rounded rectangles (signed distance), not
 textures.
 
-**Same frame, no polling.** Hyprland emits `render.preChecks` for a monitor
-before it decides whether to draw. The plugin reads the scene there and, when
-it differs from what it last drew, damages the whole monitor and marks the
-blur cache dirty, so this very frame redraws the backdrop and the glass.
+**Same frame, no polling.** Hyprland advances its animations and layout,
+emits `render.pre`, then reads the frame's damage. The plugin reads the scene
+at `render.pre` (live windows with renderWindow's full fade alpha and their
+rounding, plus windows fading out after closing) and, when it differs from what
+it last drew, damages the whole monitor and marks the blur cache dirty, so this
+very frame redraws the backdrop and the glass. Windows reach the shader as a
+float texture, so there is no window limit.
 
 **Cheap at rest.** The backdrop's own motion ticks at `plugin:backdrop:fps`
-(default 15; idle on workspace 1 that costs about 2.3 W, against 5 W at 30 and
-1.6 W at 10, measured 2026-10-28). A tick repaints only where the backdrop
-shows unblurred: the monitor minus tiled windows whose glass comes from
-Hyprland's cached blur (or which are opaque). Every sixth tick the glass
-catches up (a full redraw). A floating, unblurred or partly blurred window
-shows the live backdrop, so then every tick is a full redraw, since repainting
-part of it would tear. Time stands still with animations off, the session
-locked, or every monitor asleep or fullscreen.
+(default 15). A tick redraws the whole monitor over Hyprland's cached blur;
+every sixth tick refreshes the blur too. The whole frame always agrees with
+itself, and only the glass trails, by at most five ticks of slow, blurred
+motion. Idle on workspace 1 this costs about 1.7 W (GPU 4%), measured
+2026-10-28, interleaved against the plugin unloaded. Time stands still with
+animations off, the session locked, or every monitor asleep or fullscreen.
 
 **Theme switch.** `omarchy-theme-set` swaps `current/theme` and reloads
 Hyprland. The plugin reads `backdrop.frag` and `colors.toml` from

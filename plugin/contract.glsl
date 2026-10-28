@@ -5,8 +5,8 @@
 //
 // Lengths are logical pixels from the screen's top left. The windows are the
 // ones Hyprland is drawing on this screen in this frame, where it is drawing
-// them: mid-animation, mid-drag, sliding between workspaces. `windowAlpha`
-// fades a window in and out with it. `focused` is the focused window's rect
+// them: mid-animation, mid-drag, sliding between workspaces, fading out after
+// closing. windowAlpha(i) fades with the window. `focused` is the focused window's rect
 // (x, y, w, h), easing to a new window when focus moves and then following it
 // exactly; with no focused window it is a rect in the middle of the screen.
 //
@@ -17,6 +17,7 @@
 // the wrap never shows.
 
 precision highp float;
+precision highp sampler2D;
 
 in vec2 v_px;
 layout(location = 0) out vec4 fragColor;
@@ -27,10 +28,9 @@ uniform vec3 accent;
 uniform vec3 background;
 uniform vec3 foreground;
 uniform vec4 focused;
-uniform float rounding;
+// Two texels a window, 256 to a row: (x, y, w, h) and (alpha, rounding).
+uniform sampler2D windowData;
 uniform int windowCount;
-uniform vec4 windowRects[32];
-uniform float windowAlpha[32];
 uniform int focusedIndex;
 
 const float TAU = 6.28318530718;
@@ -61,17 +61,30 @@ vec2 orbit(float seconds, float radius) {
     return vec2(cos(a), sin(a)) * radius;
 }
 
-// Distance from px to a rect's rounded edge: negative inside it.
-float rectDistance(vec2 px, vec4 rect) {
+vec4 windowTexel(int texel) {
+    return texelFetch(windowData, ivec2(texel % 256, texel / 256), 0);
+}
+
+vec4 windowRect(int i) {
+    return windowTexel(2 * i);
+}
+
+float windowAlpha(int i) {
+    return windowTexel(2 * i + 1).x;
+}
+
+// Distance from px to a rect's edge, rounded by `radius`: negative inside it.
+float rectDistance(vec2 px, vec4 rect, float radius) {
     vec2 half_ = rect.zw * 0.5;
-    vec2 q = abs(px - rect.xy - half_) - half_ + rounding;
-    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rounding;
+    vec2 q = abs(px - rect.xy - half_) - half_ + radius;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
 
 // Distance to window i, pushed away as it fades, so a window fading in grows
 // out of nothing and one fading out sinks away.
 float windowDistance(vec2 px, int i) {
-    return rectDistance(px, windowRects[i]) + (1.0 - windowAlpha[i]) * 200.0;
+    vec4 extra = windowTexel(2 * i + 1);
+    return rectDistance(px, windowTexel(2 * i), extra.y) + (1.0 - extra.x) * 200.0;
 }
 
 // Distance to the nearest window: negative inside one.
