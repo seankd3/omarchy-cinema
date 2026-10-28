@@ -14,6 +14,10 @@
 // and the glass, so this same frame draws the new backdrop. Otherwise the
 // backdrop's own motion asks for frames: at the display's rate plugged in, 30
 // a second on battery (plugin:backdrop:fps, plugin:backdrop:battery_fps).
+//
+// A backdrop can also draw text: the cinema-feed service sends the newest
+// plaintext of the agents on this machine to a datagram socket the plugin owns,
+// and a theme that ships glyphs.png draws it (specs/agent-rain.md).
 
 #define WLR_USE_UNSTABLE
 
@@ -39,9 +43,15 @@
 #include <hyprland/src/state/MonitorState.hpp>
 
 #include <GLES3/gl32.h>
+#include <cairo/cairo.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 #include <array>
 #include <chrono>
+#include <cstring>
 #include <cmath>
 #include <filesystem>
 #include <format>
@@ -64,6 +74,12 @@ namespace {
     constexpr double FOCUS_EASE  = 0.32; // seconds
     // Texels per row of the window data texture: two per window.
     constexpr int    DATA_WIDTH = 256;
+    // The feed's snapshot: "CFD1", generation (u64), count and next position
+    // (u32), little-endian like this machine, then the ring of characters.
+    constexpr size_t FEED_RING   = 16384;
+    constexpr size_t FEED_HEADER = 20;
+    constexpr int    FEED_BUDGET = 8; // datagrams taken per wakeup, at most
+    constexpr auto   FEED_STALE  = std::chrono::seconds(10);
 
     const char* CONTRACT =
 #include "contract.inc"
@@ -109,8 +125,11 @@ void main() {
     };
 
     struct SProgram {
-        GLuint id = 0, vao = 0, vbo = 0, data = 0;
-        GLint  proj, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex;
+        GLuint   id = 0, vao = 0, vbo = 0, data = 0, feed = 0, glyphs = 0;
+        GLint    proj, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex;
+        GLint    feedUniform, feedCount, feedPos, glyphsUniform;
+        uint64_t feedUploaded = 0; // the feed change in the texture
+        bool     glyphsUploaded = false;
     };
 
     struct SState {
@@ -149,6 +168,19 @@ void main() {
         // a client can destroy it in the same call that closes it, and
         // rounding() reads only its rules and the config.
         PHLWINDOW                               closing;
+        // The agents' text: the newest valid snapshot the feed sent, counted
+        // by changes taken (a restarted feed counts its generations from 0
+        // again), and when any valid one last came, which says it is alive.
+        int                                     feedFd     = -1;
+        std::string                             feedPath;
+        wl_event_source*                        feedSource = nullptr;
+        std::vector<uint8_t>                    feedRing   = std::vector<uint8_t>(FEED_RING, ' ');
+        uint64_t                                feedGeneration = 0, feedChanges = 0;
+        uint32_t                                feedCount = 0, feedPos = 0;
+        std::chrono::steady_clock::time_point   feedReceived;
+        // The theme's lettering (glyphs.png) as coverage, one byte a pixel.
+        std::vector<uint8_t>                    glyphPixels;
+        int                                     glyphWidth = 0, glyphHeight = 0;
     };
 
     UP<SState> g;
@@ -198,6 +230,26 @@ void main() {
             if (name == "background" || name == "dark_background" || name == "darker_background" || name == "lighter_background")
                 g->backgrounds.push_back(value);
         }
+
+        // The lettering for drawing text, if the theme has any: cairo hands it
+        // over as premultiplied ARGB, of which only the coverage is kept.
+        g->glyphPixels.clear();
+        g->glyphWidth = g->glyphHeight = 0;
+        if (!g->source.empty()) {
+            const auto image = cairo_image_surface_create_from_png((dir + "/glyphs.png").c_str());
+            if (cairo_surface_status(image) == CAIRO_STATUS_SUCCESS && cairo_image_surface_get_format(image) == CAIRO_FORMAT_ARGB32) {
+                const int  width = cairo_image_surface_get_width(image), height = cairo_image_surface_get_height(image);
+                const int  stride = cairo_image_surface_get_stride(image);
+                const auto pixels = cairo_image_surface_get_data(image);
+                g->glyphPixels.resize(size_t(width) * height);
+                for (int y = 0; y < height; y++)
+                    for (int x = 0; x < width; x++)
+                        g->glyphPixels[size_t(y) * width + x] = (reinterpret_cast<const uint32_t*>(pixels + size_t(y) * stride)[x]) >> 24;
+                g->glyphWidth  = width;
+                g->glyphHeight = height;
+            }
+            cairo_surface_destroy(image);
+        }
         g->generation++;
         // The backdrop's clock runs only while the theme has a backdrop; 0
         // disarms the timer.
@@ -238,8 +290,9 @@ void main() {
             glDeleteBuffers(1, &p.vbo);
         if (p.vao)
             glDeleteVertexArrays(1, &p.vao);
-        if (p.data)
-            glDeleteTextures(1, &p.data);
+        for (const auto texture : {p.data, p.feed, p.glyphs})
+            if (texture)
+                glDeleteTextures(1, &texture);
         p = {};
     }
 
@@ -291,6 +344,10 @@ void main() {
         p.windowData   = glGetUniformLocation(p.id, "windowData");
         p.windowCount  = glGetUniformLocation(p.id, "windowCount");
         p.focusedIndex = glGetUniformLocation(p.id, "focusedIndex");
+        p.feedUniform  = glGetUniformLocation(p.id, "feed");
+        p.feedCount    = glGetUniformLocation(p.id, "feedCount");
+        p.feedPos      = glGetUniformLocation(p.id, "feedPos");
+        p.glyphsUniform = glGetUniformLocation(p.id, "glyphs");
 
         GLint vao = 0, buffer = 0;
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
@@ -308,6 +365,8 @@ void main() {
         glBindBuffer(GL_ARRAY_BUFFER, buffer);
 
         glGenTextures(1, &p.data);
+        glGenTextures(1, &p.feed);
+        glGenTextures(1, &p.glyphs);
         return true;
     }
 
@@ -426,17 +485,10 @@ void main() {
     }
 
     // Uploads the shapes, two texels each: (x, y, w, h) and (alpha, rounding).
-    void uploadShapes(const std::vector<SShape>& shapes) {
-        const int          texels = std::max<int>(2 * shapes.size(), 1);
-        const int          width  = std::min(texels, DATA_WIDTH);
-        const int          height = (texels + DATA_WIDTH - 1) / DATA_WIDTH;
-        std::vector<float> data(size_t(width) * height * 4, 0.F);
-        for (size_t i = 0; i < shapes.size(); i++) {
-            std::copy(shapes[i].rect.begin(), shapes[i].rect.end(), data.begin() + i * 8);
-            data[i * 8 + 4] = shapes[i].alpha;
-            data[i * 8 + 5] = shapes[i].rounding;
-        }
-
+    // Fills the texture bound on the active unit from `data`, with the
+    // unpack state set plainly and put back after, since Hyprland's own
+    // uploads rely on what they set.
+    void upload(GLint format, GLsizei width, GLsizei height, GLenum layout, GLenum type, const void* data, GLint filter) {
         GLint unpackBuffer = 0, rowLength = 0, skipRows = 0, skipPixels = 0, alignment = 0;
         glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &unpackBuffer);
         glGetIntegerv(GL_UNPACK_ROW_LENGTH, &rowLength);
@@ -447,17 +499,102 @@ void main() {
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
         glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
         glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, data.data());
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, layout, type, data);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, unpackBuffer);
         glPixelStorei(GL_UNPACK_ROW_LENGTH, rowLength);
         glPixelStorei(GL_UNPACK_SKIP_ROWS, skipRows);
         glPixelStorei(GL_UNPACK_SKIP_PIXELS, skipPixels);
         glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
+    }
+
+    void uploadShapes(const std::vector<SShape>& shapes) {
+        const int          texels = std::max<int>(2 * shapes.size(), 1);
+        const int          width  = std::min(texels, DATA_WIDTH);
+        const int          height = (texels + DATA_WIDTH - 1) / DATA_WIDTH;
+        std::vector<float> data(size_t(width) * height * 4, 0.F);
+        for (size_t i = 0; i < shapes.size(); i++) {
+            std::copy(shapes[i].rect.begin(), shapes[i].rect.end(), data.begin() + i * 8);
+            data[i * 8 + 4] = shapes[i].alpha;
+            data[i * 8 + 5] = shapes[i].rounding;
+        }
+        upload(GL_RGBA32F, width, height, GL_RGBA, GL_FLOAT, data.data(), GL_NEAREST);
+    }
+
+    // Takes the newest valid snapshot waiting on the feed socket, at most
+    // FEED_BUDGET datagrams a wakeup, never waiting: a truncated, oversized or
+    // malformed one is dropped, and any valid one, a repeat too, says the
+    // feed is alive.
+    int onFeed(int fd, uint32_t, void*) {
+        if (!g)
+            return 0;
+        std::array<uint8_t, FEED_HEADER + FEED_RING> buffer;
+        for (int i = 0; i < FEED_BUDGET; i++) {
+            const ssize_t length = recv(fd, buffer.data(), buffer.size(), MSG_DONTWAIT | MSG_TRUNC);
+            if (length < 0)
+                break;
+            if (size_t(length) != buffer.size() || std::memcmp(buffer.data(), "CFD1", 4) != 0)
+                continue;
+            uint64_t generation = 0;
+            uint32_t count = 0, pos = 0;
+            std::memcpy(&generation, buffer.data() + 4, 8);
+            std::memcpy(&count, buffer.data() + 12, 4);
+            std::memcpy(&pos, buffer.data() + 16, 4);
+            if (count > FEED_RING || pos >= FEED_RING)
+                continue;
+            g->feedReceived = std::chrono::steady_clock::now();
+            if (generation == g->feedGeneration && count == g->feedCount && pos == g->feedPos)
+                continue;
+            std::copy(buffer.begin() + FEED_HEADER, buffer.end(), g->feedRing.begin());
+            g->feedGeneration = generation;
+            g->feedCount      = count;
+            g->feedPos        = pos;
+            g->feedChanges++;
+        }
+        return 0;
+    }
+
+    // The socket the feed sends to, private to the user; without a runtime
+    // directory or a socket there is simply no text.
+    void openFeed() {
+        const char* runtime = getenv("XDG_RUNTIME_DIR");
+        if (!runtime || !*runtime)
+            return;
+        const std::string dir = std::string(runtime) + "/omarchy-cinema";
+        mkdir(dir.c_str(), 0700);
+        sockaddr_un address{};
+        address.sun_family = AF_UNIX;
+        const auto path    = dir + "/feed.sock";
+        if (path.size() >= sizeof(address.sun_path))
+            return;
+        std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+        const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        if (fd < 0)
+            return;
+        unlink(path.c_str());
+        if (bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+            close(fd);
+            return;
+        }
+        chmod(path.c_str(), 0600);
+        g->feedFd     = fd;
+        g->feedPath   = path;
+        g->feedSource = wl_event_loop_add_fd(g_pCompositor->m_wlEventLoop, fd, WL_EVENT_READABLE, onFeed, nullptr);
+    }
+
+    void closeFeed() {
+        if (g->feedSource)
+            wl_event_source_remove(g->feedSource);
+        if (g->feedFd >= 0) {
+            close(g->feedFd);
+            unlink(g->feedPath.c_str());
+        }
     }
 
     // Glass: in a film theme, a window's background (the theme's background
@@ -560,16 +697,38 @@ vec4 cinemaGlass(vec4 c) {{
             // Hyprland skips binding a program it believes is still bound, and
             // binds its own vertex arrays and textures by unit; so everything
             // touched here is put back as it was found.
-            GLint program = 0, vao = 0, activeTexture = 0, texture = 0;
+            GLint program = 0, vao = 0, activeTexture = 0;
             glGetIntegerv(GL_CURRENT_PROGRAM, &program);
             glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
             glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
-            glActiveTexture(GL_TEXTURE7);
-            glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+            // Units 5, 6 and 7: the lettering, the feed and the windows.
+            std::array<GLint, 3> textures{};
+            for (int unit = 0; unit < 3; unit++) {
+                glActiveTexture(GL_TEXTURE5 + unit);
+                glGetIntegerv(GL_TEXTURE_BINDING_2D, &textures[unit]);
+            }
 
             auto& p = g->program;
             glBindTexture(GL_TEXTURE_2D, p.data);
             uploadShapes(m_scene.shapes);
+
+            // Text only for a theme with lettering, and only while the feed is
+            // alive; a changed snapshot or lettering is uploaded here, where
+            // the render context is current.
+            const bool lettered = !g->glyphPixels.empty();
+            const bool live     = g->feedFd >= 0 && std::chrono::steady_clock::now() - g->feedReceived <= FEED_STALE;
+            glActiveTexture(GL_TEXTURE5);
+            glBindTexture(GL_TEXTURE_2D, p.glyphs);
+            if (lettered && !p.glyphsUploaded) {
+                upload(GL_R8, g->glyphWidth, g->glyphHeight, GL_RED, GL_UNSIGNED_BYTE, g->glyphPixels.data(), GL_LINEAR);
+                p.glyphsUploaded = true;
+            }
+            glActiveTexture(GL_TEXTURE6);
+            glBindTexture(GL_TEXTURE_2D, p.feed);
+            if (lettered && p.feedUploaded != g->feedChanges) {
+                upload(GL_R8, 128, FEED_RING / 128, GL_RED, GL_UNSIGNED_BYTE, g->feedRing.data(), GL_NEAREST);
+                p.feedUploaded = g->feedChanges;
+            }
 
             const CBox box  = {0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
             const auto proj = g_pHyprRenderer->projectBoxToTarget(box);
@@ -585,6 +744,10 @@ vec4 cinemaGlass(vec4 c) {{
             glUniform1i(p.windowData, 7);
             glUniform1i(p.windowCount, m_scene.shapes.size());
             glUniform1i(p.focusedIndex, m_scene.focusedIndex);
+            glUniform1i(p.glyphsUniform, 5);
+            glUniform1i(p.feedUniform, 6);
+            glUniform1i(p.feedCount, lettered && live && p.feedUploaded ? int(g->feedCount) : 0);
+            glUniform1i(p.feedPos, int(g->feedPos));
 
             glBindVertexArray(p.vao);
             auto& data = g_pHyprRenderer->m_renderData;
@@ -596,7 +759,10 @@ vec4 cinemaGlass(vec4 c) {{
 
             glBindVertexArray(vao);
             glUseProgram(program);
-            glBindTexture(GL_TEXTURE_2D, texture);
+            for (int unit = 0; unit < 3; unit++) {
+                glActiveTexture(GL_TEXTURE5 + unit);
+                glBindTexture(GL_TEXTURE_2D, textures[unit]);
+            }
             glActiveTexture(activeTexture);
             return {};
         }
@@ -733,6 +899,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g->plugged  = plugged();
     g->lastTick = g->lastGlass = g->lastPowerCheck = std::chrono::steady_clock::now();
     g->timer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onTick, nullptr);
+    openFeed();
     readTheme();
     claimFadeouts();
 
@@ -755,6 +922,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 APICALL EXPORT void PLUGIN_EXIT() {
     if (g->timer)
         wl_event_source_remove(g->timer);
+    closeFeed();
     if (g->glassIdle)
         wl_event_source_remove(g->glassIdle);
     if (!g->glassShader.empty())

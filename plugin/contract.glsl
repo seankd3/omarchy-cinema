@@ -37,8 +37,34 @@ uniform sampler2D windowData;
 uniform int windowCount;
 uniform int focusedIndex;
 
+// Text a backdrop can draw: the newest plaintext of the agents on this machine
+// (specs/agent-rain.md), a ring of 16384 characters 128 to a row, of which
+// feedCount are real (0 when there is no feed) and the next goes at feedPos.
+// The theme's glyphs.png is its lettering for them; without one, feedCount is
+// always 0. Read them through feedChar() and glyph().
+uniform sampler2D feed;
+uniform int feedCount;
+uniform int feedPos;
+uniform sampler2D glyphs;
+
 const float TAU = 6.28318530718;
 const float FAR = 1e5;
+
+// The character `i` back from the newest (0 is the newest) as its code, 32 to
+// 126; any `i` from 0 up wraps round the characters there are. (GLSL leaves %
+// of a negative number undefined, so the ring position is wrapped by hand.)
+int feedChar(int i) {
+    int k = feedPos - 1 - i % max(feedCount, 1);
+    k = k < 0 ? k + 16384 : k;
+    return int(texelFetch(feed, ivec2(k % 128, k / 128), 0).r * 255.0 + 0.5);
+}
+
+// How much of glyph `code` covers `uv` (0 to 1 across its cell, y down).
+float glyph(int code, vec2 uv) {
+    int c = clamp(code - 32, 0, 95);
+    vec2 cell = vec2(float(c % 16), float(c / 16));
+    return texture(glyphs, (cell + clamp(uv, 0.0, 1.0)) / vec2(16.0, 6.0)).r;
+}
 
 // 0 to 1 once every `seconds`.
 float cycle(float seconds) {

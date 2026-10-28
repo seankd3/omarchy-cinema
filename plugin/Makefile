@@ -3,7 +3,7 @@
 # the installed headers: a different Hyprland is a different build.
 
 BUILD   ?= build
-DEPS    := hyprland libdrm libinput libudev pixman-1 wayland-server xkbcommon
+DEPS    := hyprland cairo libdrm libinput libudev pixman-1 wayland-server xkbcommon
 CXXFLAGS = -std=c++23 -O2 -fPIC -fno-gnu-unique -I$(BUILD) $(shell pkg-config --cflags $(DEPS))
 LDLIBS   = $(shell pkg-config --libs $(DEPS)) -lrt
 
