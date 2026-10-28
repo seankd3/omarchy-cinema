@@ -78,11 +78,10 @@ void main() {
 
     // A window as the backdrop sees it: where it is drawn, how faded, how round.
     struct SShape {
-        Rect        rect{};
-        float       alpha    = 1;
-        float       rounding = 0;
-        const void* source   = nullptr; // the window or fadeout drawn here
-        bool        operator==(const SShape&) const = default;
+        Rect  rect{};
+        float alpha    = 1;
+        float rounding = 0;
+        bool  operator==(const SShape&) const = default;
     };
 
     // What the backdrop shows on one monitor, apart from its own motion.
@@ -100,8 +99,6 @@ void main() {
         Rect                                  focusFrom{};
         std::chrono::steady_clock::time_point focusMoved;
         bool                                  seen = false;
-        // A fadeout keeps the rounding of the window it took over from.
-        std::unordered_map<const void*, float> fadeoutRounding;
     };
 
     struct SProgram {
@@ -125,6 +122,12 @@ void main() {
         uint64_t                                ticks = 0;
         wl_event_source*                        timer = nullptr;
         std::unordered_map<MONITORID, SMonitor> monitors;
+        // Hyprland keeps a closed window's rounding inside its fadeout, out of
+        // reach, so the plugin keeps it beside: each window fadeout's rounding
+        // from the moment it is made until Hyprland lets it go.
+        std::unordered_map<const void*, float>  fadeoutRounding;
+        std::unordered_set<const void*>         seenFadeouts;
+        std::optional<float>                    closing; // the window being closed
     };
 
     UP<SState> g;
@@ -278,6 +281,30 @@ void main() {
             w->alphaValue(WINDOW_ALPHA_MOVE_FROM_WORKSPACE);
     }
 
+    bool isWindowFadeout(const SP<Desktop::IFadeout>& fadeout) {
+        const auto plane = fadeout->plane();
+        return plane == Desktop::FADEOUT_PLANE_WINDOW_TILED || plane == Desktop::FADEOUT_PLANE_WINDOW_FLOATING || plane == Desktop::FADEOUT_PLANE_WINDOW_OVER_FULLSCREEN;
+    }
+
+    // Hyprland emits window.close, then makes that window's fadeout in the
+    // same call (Hyprland 0.56.2 src/desktop/view/Window.cpp:2575, 2701), so
+    // the window fadeouts that appear after a close event belong to the window
+    // it named. Run at each close event and before reading a scene; forgets
+    // fadeouts Hyprland has let go.
+    void claimFadeouts() {
+        std::unordered_set<const void*> alive;
+        for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
+            if (!isWindowFadeout(fadeout))
+                continue;
+            alive.insert(fadeout.get());
+            if (g->seenFadeouts.insert(fadeout.get()).second && g->closing)
+                g->fadeoutRounding[fadeout.get()] = *g->closing;
+        }
+        g->closing.reset();
+        std::erase_if(g->seenFadeouts, [&](const void* f) { return !alive.contains(f); });
+        std::erase_if(g->fadeoutRounding, [&](const auto& entry) { return !alive.contains(entry.first); });
+    }
+
     // The windows Hyprland draws on this monitor in this frame, and those
     // fading out after closing, where they are drawn; and where attention is.
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {
@@ -295,48 +322,26 @@ void main() {
                 scene.focusedIndex = scene.shapes.size();
                 focusedHere        = w;
             }
-            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, renderedAlpha(w), w->rounding(), w.get()});
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, renderedAlpha(w), w->rounding()});
         }
 
         // Closed windows fading out, on the workspaces Hyprland draws them on:
         // the active one and every special workspace still visible, even one
         // being dismissed (Hyprland 0.56.2 src/render/Renderer.cpp:1205, 3233).
-        // Hyprland keeps a closed window's rounding to itself, so a fadeout
-        // takes it from the window it replaced in the frame before: the shape
-        // that vanished nearest to where the fadeout starts.
+        claimFadeouts();
         static auto ROUNDING = CConfigValue<Config::INTEGER>("decoration:rounding");
-        std::unordered_set<const void*> present;
-        for (const auto& shape : scene.shapes)
-            present.insert(shape.source);
-        for (const auto& fadeout : Desktop::fadingOutState()->fadeouts())
-            present.insert(fadeout.get());
-        std::unordered_map<const void*, float> rounding;
         for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
-            const auto plane     = fadeout->plane();
             const auto workspace = fadeout->workspace().lock();
-            if (fadeout->monitor() != monitor ||
-                (plane != Desktop::FADEOUT_PLANE_WINDOW_TILED && plane != Desktop::FADEOUT_PLANE_WINDOW_FLOATING && plane != Desktop::FADEOUT_PLANE_WINDOW_OVER_FULLSCREEN) ||
+            if (fadeout->monitor() != monitor || !isWindowFadeout(fadeout) ||
                 (workspace && workspace != monitor->m_activeWorkspace && !(workspace->m_isSpecialWorkspace && workspace->m_alpha->value() > 0.F)))
                 continue;
             const auto position = fadeout->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) - monitor->m_position;
             const auto size     = fadeout->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-            const Rect rect     = {float(position.x), float(position.y), float(size.x), float(size.y)};
-            const auto known    = state.fadeoutRounding.find(fadeout.get());
-            float      radius   = known != state.fadeoutRounding.end() ? known->second : float(*ROUNDING);
-            if (known == state.fadeoutRounding.end()) {
-                float nearest = INFINITY;
-                for (const auto& shape : state.drawn.shapes) {
-                    const float distance = std::abs(shape.rect[0] - rect[0]) + std::abs(shape.rect[1] - rect[1]) + std::abs(shape.rect[2] - rect[2]) + std::abs(shape.rect[3] - rect[3]);
-                    if (!present.contains(shape.source) && distance < nearest) {
-                        nearest = distance;
-                        radius  = shape.rounding;
-                    }
-                }
-            }
-            rounding[fadeout.get()] = radius;
-            scene.shapes.push_back({rect, fadeout->alpha(), radius, fadeout.get()});
+            const auto rounding = g->fadeoutRounding.find(fadeout.get());
+            // Only a fadeout already running when the plugin loaded has none.
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(),
+                                    rounding != g->fadeoutRounding.end() ? rounding->second : float(*ROUNDING)});
         }
-        state.fadeoutRounding = std::move(rounding);
 
         const Rect middle = {float(monitor->m_size.x * 0.3), float(monitor->m_size.y * 0.3), float(monitor->m_size.x * 0.4), float(monitor->m_size.y * 0.4)};
         const Rect target = scene.focusedIndex < 0 ? middle : scene.shapes[scene.focusedIndex].rect;
@@ -556,9 +561,16 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                       Config::Values::SIntValueOptions{.min = 0, .max = 120});
     HyprlandAPI::addConfigValueV2(handle, g->fps);
     readTheme();
+    claimFadeouts();
 
     static auto PRE      = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) { onPre(monitor); });
     static auto STAGE    = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) { onStage(stage); });
+    static auto CLOSE    = Event::bus()->m_events.window.close.listen([](PHLWINDOW window) {
+        if (!g)
+            return;
+        claimFadeouts();
+        g->closing = window->rounding();
+    });
     static auto RELOADED = Event::bus()->m_events.config.reloaded.listen([] {
         if (g)
             readTheme();

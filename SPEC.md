@@ -58,10 +58,21 @@ override it, since toggles load after themes), re-asserts the terminal rule so
 terminal text is never faded, and sets its borders and shadow. Terminals get
 their see-through background from Omarchy's Glassy mode.
 
-**Files** (next): each theme ships `gtk.css` (libadwaita variables and
-Nautilus selectors), `icons.theme` and an `icons/` overlay theme, applied by
-Omarchy's own switch; one fixed `@import` in `~/.config/gtk-4.0/gtk.css` and an
-empty `gtk.css.tpl` for stock themes.
+**Files.** Each film theme ships `gtk.css` (libadwaita variables and Nautilus
+selectors) and its folder icons (`tools/folders.py` writes an icon theme,
+`Cinema-<Film>`, at install; the theme's `icons.theme` names it and Omarchy
+applies it). GTK imports the applied theme's stylesheet through one fixed line
+in `~/.config/gtk-4.0/gtk.css`; stock themes get an empty one from
+`~/.config/omarchy/themed/gtk.css.tpl`. Icons change live.
+
+**Open, waiting on Sean:** GTK reads the stylesheet once per process, and
+Files runs as a resident service, so a running Files keeps the last film's
+look until it restarts. Restarting it on a theme switch is his call (it
+replaces his Files windows). If yes, the lifecycle must: never quit Files while
+a file operation runs (defer until idle, then apply the latest look); capture
+each window's locations and canonical workspace before quitting and restore
+exactly that record; and mark the look applied only after the restore is
+verified. A first draft that did none of this was deleted (Sol pass 4).
 
 ## Layout and install
 
