@@ -1,0 +1,80 @@
+#!/bin/bash
+# Captures Files in a theme's style without showing or focusing anything: a
+# private Files (its own D-Bus session, the theme's stylesheet, folder icons
+# and light or dark mode, read from its own settings rather than the desktop
+# portal's) opens on a hidden workspace, kept drawing there by
+# render_unfocused, grim captures that window, and it closes. The capture is the app's own drawing, so glass and
+# the backdrop behind it are not in it.
+#
+#   tools/files-preview themes/<slug>
+#
+# Writes scratch/preview/<slug>-files.png. Run ./install first: it writes the
+# theme's folder icons.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+theme=$(cd "$1" && pwd)
+slug=$(basename "$theme")
+out=$here/scratch/preview/$slug-files.png
+mkdir -p "${out%/*}"
+
+toplevels=$here/tools/build/toplevels
+if [[ ! -x $toplevels ]]; then
+  xml=/usr/share/wayland-protocols/staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml
+  mkdir -p "$here/tools/build"
+  wayland-scanner client-header "$xml" "$here/tools/build/ext-foreign-toplevel-list-v1-client-protocol.h"
+  wayland-scanner private-code "$xml" "$here/tools/build/ext-foreign-toplevel-list-v1-protocol.c"
+  gcc -O2 -I"$here/tools/build" -o "$toplevels" "$here/tools/toplevels.c" \
+    "$here/tools/build/ext-foreign-toplevel-list-v1-protocol.c" $(pkg-config --cflags --libs wayland-client)
+fi
+
+# A home with the folders Files shows on its sidebar and a few files, named
+# so its window can be told from the user's own.
+tmp=$(mktemp -d)
+# Closes the private Files: the nautilus whose arguments name this place.
+close() {
+  local pid
+  for pid in $(pgrep -x nautilus); do
+    tr '\0' ' ' </proc/"$pid"/cmdline 2>/dev/null | grep -qF "$tmp/" && kill "$pid"
+  done
+  rm -rf "$tmp"
+}
+trap close EXIT
+place=$tmp/cinema-preview-$slug
+mkdir -p "$place"/{Documents,Downloads,Music,Pictures,Projects,Templates,Videos} "$tmp/config/gtk-4.0"
+printf '# Notes\n' >"$place/notes.md"
+printf 'id,name\n1,harness\n' >"$place/parts.csv"
+cp "$theme/preview.png" "$place/still.png" 2>/dev/null || true
+
+# Its standard folders (which get the theme's glyphs) and its sidebar's
+# (GTK's bookmarks) are this home's.
+for dir in DOCUMENTS:Documents DOWNLOAD:Downloads MUSIC:Music PICTURES:Pictures TEMPLATES:Templates VIDEOS:Videos; do
+  printf 'XDG_%s_DIR="%s/%s"\n' "${dir%%:*}" "$place" "${dir#*:}"
+done >"$tmp/config/user-dirs.dirs"
+mkdir -p "$tmp/config/gtk-3.0"
+for dir in Downloads Projects Pictures Videos; do
+  printf 'file://%s/%s\n' "$place" "$dir"
+done >"$tmp/config/gtk-3.0/bookmarks"
+
+mode=$(sed -n 's/^mode *= *"\(.*\)"/\1/p' "$theme/colors.toml")
+dark=$([[ $mode == light ]] && echo 0 || echo 1)
+printf '@import url("file://%s/gtk.css");\n' "$theme" >"$tmp/config/gtk-4.0/gtk.css"
+printf '[Settings]\ngtk-icon-theme-name=%s\ngtk-application-prefer-dark-theme=%s\ngtk-font-name=%s\n' \
+  "$(cat "$theme/icons.theme")" "$dark" "$(gsettings get org.gnome.desktop.interface font-name | tr -d "'")" \
+  >"$tmp/config/gtk-4.0/settings.ini"
+
+scheme=$([[ $dark == 1 ]] && echo prefer-dark || echo prefer-light)
+command="dbus-run-session -- env XDG_CONFIG_HOME=$tmp/config GDK_DEBUG=no-portals GIO_USE_VFS=local GIO_USE_VOLUME_MONITOR=unix ADW_DEBUG_COLOR_SCHEME=$scheme nautilus --new-window $place"
+hyprctl eval "hl.exec_cmd('$command', { workspace = 'special:cinema-preview silent', render_unfocused = true })" >/dev/null
+
+id=""
+for _ in $(seq 40); do
+  id=$("$toplevels" | awk -F'\t' -v t="cinema-preview-$slug" '$2 == "org.gnome.Nautilus" && index($3, t) { print $1; exit }')
+  [[ -n $id ]] && break
+  timeout 0.25 tail -f /dev/null || true
+done
+[[ -n $id ]] || { echo "files-preview: Files did not open" >&2; exit 1; }
+# A fresh Files takes a few seconds to list the folder and draw its icons.
+timeout 4 tail -f /dev/null || true
+grim -T "$id" "$out"
+echo "$out"

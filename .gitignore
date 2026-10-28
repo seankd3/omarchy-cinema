@@ -3,3 +3,4 @@ plugin/build/
 themes/*/icons/
 themes/*/icons.theme
 themes/*/FilmOsd.qml
+tools/build/
