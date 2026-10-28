@@ -4,3 +4,4 @@ themes/*/icons/
 themes/*/icons.theme
 themes/*/FilmOsd.qml
 tools/build/
+__pycache__/
