@@ -5,6 +5,8 @@
 --
 --   glass  how much of a window's background stays, 1 solid to 0 clear (0.85
 --          if not given); text and everything else on it stays opaque
+--   frost  how far the glass blurs what is behind it, as Hyprland's blur
+--          size (3 if not given): fine lettering behind it needs less
 --
 -- install puts it at ~/.local/lib/omarchy-cinema/film.lua.
 
@@ -97,7 +99,7 @@ hl.config({
 -- A light film's frost keeps its light: Omarchy's glass dims the blur to 0.75,
 -- which on white glass leaves apps' dimmed secondary text under 4.5:1 (Sol,
 -- 2026-10-28, Oblivion); a dark film keeps Omarchy's dimming.
-local frost = { size = 3, passes = 2, brightness = colors.mode == "light" and 1 or nil }
+local frost = { size = film.frost or 3, passes = 2, brightness = colors.mode == "light" and 1 or nil }
 hl.on("config.reloaded", function()
   hl.config({ decoration = { blur = frost } })
   o.window("org\\.gnome\\.Nautilus", { opacity = "0.999 0.999" })

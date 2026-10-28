@@ -115,11 +115,10 @@ vec4 backdrop(vec2 px) {
         + green * (close.x * 1.0 + close.z * 0.1)
         + HEAD * (far.y * 0.4 + mid.y * 0.9 + close.y * 1.6);
 
-    // Behind the glass the rain falls dim and calm, enough to read through
-    // the windows; out in the open it is brighter, and brightest round the
-    // focused window.
+    // The rain falls behind the glass as it does in the open, and brightest
+    // round the focused window.
     float open = 1.0 - inside;
-    vec3 light = code * mix(0.3, 1.0 + 0.6 * nearFocus, open);
+    vec3 light = code * (1.0 + 0.6 * nearFocus * open);
 
     // The rain parts round the windows: drops flare where they strike a
     // window's top edge, and streams run down its sides.
