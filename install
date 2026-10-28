@@ -1,0 +1,39 @@
+#!/bin/bash
+# Builds every theme's backdrop and links the plugin and the themes into Omarchy.
+# Run it again after changing anything; it fails on the first shader error.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+qsb=$(command -v qsb || echo /usr/lib/qt6/bin/qsb)
+[[ -x $qsb ]] || { echo "qsb not found: sudo pacman -S --needed qt6-shadertools" >&2; exit 1; }
+
+# qsb tells the shader stage from the file name, so each theme's shader is
+# assembled as backdrop.frag in a directory of its own.
+build=$(mktemp -d)
+trap 'rm -rf "$build"' EXIT
+
+for frag in "$here"/themes/*/backdrop.frag; do
+  slug=$(basename "$(dirname "$frag")")
+  mkdir -p "$build/$slug"
+  cat "$here/backdrop/contract.glsl" "$frag" >"$build/$slug/backdrop.frag"
+  "$qsb" --glsl "100 es,120,150" -o "$frag.qsb" "$build/$slug/backdrop.frag"
+  echo "built $slug"
+done
+
+# A link never replaces a real directory: the user's own theme or plugin of
+# the same name stays, and the install stops.
+link() {
+  if [[ -e $2 && ! -L $2 ]]; then
+    echo "$2 exists and is not a link; move it aside first" >&2
+    exit 1
+  fi
+  ln -sfn "$1" "$2"
+}
+
+mkdir -p ~/.config/omarchy/plugins ~/.config/omarchy/themes
+link "$here/backdrop" ~/.config/omarchy/plugins/sean.backdrop
+for theme in "$here"/themes/*/; do
+  link "${theme%/}" ~/.config/omarchy/themes/"$(basename "$theme")"
+done
+
+omarchy plugin enable sean.backdrop >/dev/null
