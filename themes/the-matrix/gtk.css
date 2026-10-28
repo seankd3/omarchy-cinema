@@ -3,8 +3,10 @@
    the rain's head on whatever is chosen. */
 
 :root {
-  --accent-bg-color: #12a845;
-  --accent-fg-color: #e6ffec;
+  /* Switches, checks and accent buttons light in phosphor with black type,
+     as a terminal's cursor does (light type on a mid green read at 3:1). */
+  --accent-bg-color: #2cf26a;
+  --accent-fg-color: #020804;
   --accent-color: #5cff8f;
   --destructive-bg-color: #b8403a;
   --destructive-color: #ff8a82;
@@ -12,14 +14,16 @@
   --warning-color: #d4ec6a;
   --error-color: #f0605a;
 
-  --window-bg-color: #040c06;
+  /* The theme's background shades, so the window, header and sidebar turn
+     to glass like the terminal's and T3 Code's. */
+  --window-bg-color: #020804;
   --window-fg-color: #b8f7c6;
   --view-bg-color: #020804;
   --view-fg-color: #b8f7c6;
-  --headerbar-bg-color: #040d07;
+  --headerbar-bg-color: #000201;
   --headerbar-fg-color: #8cffb0;
   --headerbar-border-color: rgba(44, 242, 106, 0.45);
-  --sidebar-bg-color: #030b05;
+  --sidebar-bg-color: #010503;
   --sidebar-fg-color: #a6f0b8;
   --sidebar-border-color: rgba(44, 242, 106, 0.25);
   --card-bg-color: rgba(44, 242, 106, 0.04);
@@ -165,7 +169,9 @@ popover > contents {
   box-shadow: 0 0 20px rgba(44, 242, 106, 0.2);
 }
 
+/* Selected text as the terminal shows it: colors.toml's selection under its
+   brightest green. */
 selection {
-  background: rgba(44, 242, 106, 0.4);
-  color: #020804;
+  background: #0d3d1c;
+  color: #e6ffec;
 }
