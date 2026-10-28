@@ -76,10 +76,11 @@ hl.config({
     -- Room around and between the windows for the backdrop's light to play in
     -- (Sean, 2026-10-28: "more space between windows and the edge of the
     -- screen to give more breathing room for the effects").
-    -- gaps_in is each window's side of the gap, so 16 makes the space
-    -- between windows match the 32 at the screen's edge.
-    gaps_out = 32,
-    gaps_in = 16,
+    -- gaps_in is each window's side of the gap, so half of gaps_out makes the
+    -- space between windows match the screen's edge. Doubled to 64 (Sean,
+    -- 2026-10-28: "increase the panel spacing double it, preportional").
+    gaps_out = 64,
+    gaps_in = 32,
   },
   group = { col = { border_active = active, border_inactive = inactive } },
   -- The windows glow in the film's light.

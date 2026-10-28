@@ -1,0 +1,10 @@
+# The bar is glass over the reactor (Glassy bar keeps at most 0.35 of this
+# background); its lit lower edge is drawn by the backdrop behind it.
+background       = "#050b14"
+background-alpha = 1.0
+text             = "#bfeaff"
+# Omarchy shares this token between recording, updates, and other alerts.
+active           = "#ffb347"
+scale-with-font  = true
+size-horizontal  = 26
+size-vertical    = 28

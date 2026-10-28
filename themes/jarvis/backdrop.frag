@@ -147,6 +147,18 @@ vec4 backdrop(vec2 px) {
 
     light += mix(cyan, vec3(1.0), 0.5) * motes(px) * (0.2 + 0.5 * near);
 
+    // The bar's lower edge: a thin holographic line, a tick every 40 pixels
+    // hanging from it, and an amber marker sweeping across.
+    if (reserved.x > 0.0) {
+        float below = px.y - reserved.x;
+        light += cyan * glowLine(abs(below), 1.0) * 0.6;
+        float tick = 1.0 - smoothstep(0.5, 1.5, abs(fract(px.x / 40.0 + 0.5) - 0.5) * 40.0);
+        light += cyan * tick * step(0.0, below) * step(below, 6.0) * 0.45;
+        float marker = exp(-abs(px.x - cycle(12.0) * resolution.x) / 50.0);
+        light += AMBER * marker * glowLine(abs(below), 2.0) * 0.9;
+        light += cyan * 0.04 * step(px.y, reserved.x);
+    }
+
     // Bright light saturates toward white, as it does on film.
     return vec4(base + (1.0 - exp(-light * 1.4)), 1.0);
 }

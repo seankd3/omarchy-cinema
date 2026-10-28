@@ -9,6 +9,9 @@
 // closing. windowAlpha(i) fades with the window. `focused` is the focused window's rect
 // (x, y, w, h), easing to a new window when focus moves and then following it
 // exactly; with no focused window it is a rect in the middle of the screen.
+// `reserved` is the room the bar and other panels keep along each edge (top,
+// right, bottom, left): the bar's lower edge is at y = reserved.x, and a
+// backdrop can light it.
 //
 // `time` is seconds and wraps every hour, because Hyprland runs for weeks and
 // a float counting seconds that long loses the precision to animate smoothly.
@@ -28,6 +31,7 @@ uniform vec3 accent;
 uniform vec3 background;
 uniform vec3 foreground;
 uniform vec4 focused;
+uniform vec4 reserved;
 // Two texels a window, 256 to a row: (x, y, w, h) and (alpha, rounding).
 uniform sampler2D windowData;
 uniform int windowCount;

@@ -94,6 +94,7 @@ void main() {
         std::vector<SShape> shapes;
         int                 focusedIndex = -1;
         Rect                focus{};
+        Rect                reserved{}; // room the bar and other panels keep: top, right, bottom, left
         bool                operator==(const SScene&) const = default;
     };
 
@@ -108,7 +109,7 @@ void main() {
 
     struct SProgram {
         GLuint id = 0, vao = 0, vbo = 0, data = 0;
-        GLint  proj, resolution, time, accent, background, foreground, focused, windowData, windowCount, focusedIndex;
+        GLint  proj, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex;
     };
 
     struct SState {
@@ -282,6 +283,7 @@ void main() {
         p.background   = glGetUniformLocation(p.id, "background");
         p.foreground   = glGetUniformLocation(p.id, "foreground");
         p.focused      = glGetUniformLocation(p.id, "focused");
+        p.reserved     = glGetUniformLocation(p.id, "reserved");
         p.windowData   = glGetUniformLocation(p.id, "windowData");
         p.windowCount  = glGetUniformLocation(p.id, "windowCount");
         p.focusedIndex = glGetUniformLocation(p.id, "focusedIndex");
@@ -404,6 +406,8 @@ void main() {
         const float k = easeOut(std::min(1.F, float(std::chrono::duration<double>(now - state.focusMoved).count() / FOCUS_EASE)));
         for (size_t i = 0; i < 4; i++)
             scene.focus[i] = state.focusFrom[i] + (target[i] - state.focusFrom[i]) * k;
+        const auto& area = monitor->m_reservedArea;
+        scene.reserved   = {float(area.top()), float(area.right()), float(area.bottom()), float(area.left())};
         return scene;
     }
 
@@ -493,10 +497,16 @@ void main() {
 const vec3  CINEMA_BACKGROUNDS[{}] = vec3[]({});
 const float CINEMA_GLASS = {:.4f};
 vec4 cinemaGlass(vec4 c) {{
-    if (c.a < 0.999) return c; // the app drew its own transparency
+    // Nothing to judge where the app drew nothing.
+    if (c.a < 0.02) return c;
+    // Judged by colour alone, before the app's own alpha: a terminal that
+    // draws its background half see-through gets the same glass as a window
+    // that draws it solid (Sean: "the transparency in T3 code is also
+    // mimicked in the terminal and other apps").
+    vec3  rgb = c.rgb / c.a;
     float off = 1.0;
     for (int i = 0; i < {}; i++) {{
-        vec3 e = abs(c.rgb - CINEMA_BACKGROUNDS[i]);
+        vec3 e = abs(rgb - CINEMA_BACKGROUNDS[i]);
         off = min(off, max(max(e.r, e.g), e.b));
     }}
     // Only a background colour itself is background, within a step or two of
@@ -504,8 +514,9 @@ vec4 cinemaGlass(vec4 c) {{
     // steps off it, and they are interface, not background: they keep their
     // opacity with the text, icons and lines (Sean, 2026-10-28: "keep the text
     // opaque and other UI elements other than the background").
-    float a = mix(CINEMA_GLASS, 1.0, smoothstep(0.5 / 255.0, 2.5 / 255.0, off));
-    return vec4(c.rgb * a, a);
+    float background = 1.0 - smoothstep(0.5 / 255.0, 2.5 / 255.0, off);
+    float a = mix(c.a, CINEMA_GLASS, background);
+    return vec4(rgb * a, a);
 }}
 
 )",
@@ -566,6 +577,7 @@ vec4 cinemaGlass(vec4 c) {{
             glUniform3fv(p.background, 1, g->background.data());
             glUniform3fv(p.foreground, 1, g->foreground.data());
             glUniform4fv(p.focused, 1, m_scene.focus.data());
+            glUniform4fv(p.reserved, 1, m_scene.reserved.data());
             glUniform1i(p.windowData, 7);
             glUniform1i(p.windowCount, m_scene.shapes.size());
             glUniform1i(p.focusedIndex, m_scene.focusedIndex);
