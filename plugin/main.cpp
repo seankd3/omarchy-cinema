@@ -43,6 +43,7 @@
 #include <regex>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 using namespace Render::GL;
 
@@ -77,10 +78,11 @@ void main() {
 
     // A window as the backdrop sees it: where it is drawn, how faded, how round.
     struct SShape {
-        Rect  rect{};
-        float alpha    = 1;
-        float rounding = 0;
-        bool  operator==(const SShape&) const = default;
+        Rect        rect{};
+        float       alpha    = 1;
+        float       rounding = 0;
+        const void* source   = nullptr; // the window or fadeout drawn here
+        bool        operator==(const SShape&) const = default;
     };
 
     // What the backdrop shows on one monitor, apart from its own motion.
@@ -98,6 +100,8 @@ void main() {
         Rect                                  focusFrom{};
         std::chrono::steady_clock::time_point focusMoved;
         bool                                  seen = false;
+        // A fadeout keeps the rounding of the window it took over from.
+        std::unordered_map<const void*, float> fadeoutRounding;
     };
 
     struct SProgram {
@@ -291,26 +295,48 @@ void main() {
                 scene.focusedIndex = scene.shapes.size();
                 focusedHere        = w;
             }
-            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, renderedAlpha(w), w->rounding()});
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, renderedAlpha(w), w->rounding(), w.get()});
         }
 
-        // Closed windows fading out, chosen as renderFadeouts chooses them
-        // (Hyprland 0.56.2 src/render/Renderer.cpp:3233). Hyprland keeps a
-        // closed window's rounding only with its blur, which every window has
-        // under a film theme; without blur the default rounding stands in.
+        // Closed windows fading out, on the workspaces Hyprland draws them on:
+        // the active one and every special workspace still visible, even one
+        // being dismissed (Hyprland 0.56.2 src/render/Renderer.cpp:1205, 3233).
+        // Hyprland keeps a closed window's rounding to itself, so a fadeout
+        // takes it from the window it replaced in the frame before: the shape
+        // that vanished nearest to where the fadeout starts.
         static auto ROUNDING = CConfigValue<Config::INTEGER>("decoration:rounding");
+        std::unordered_set<const void*> present;
+        for (const auto& shape : scene.shapes)
+            present.insert(shape.source);
+        for (const auto& fadeout : Desktop::fadingOutState()->fadeouts())
+            present.insert(fadeout.get());
+        std::unordered_map<const void*, float> rounding;
         for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
             const auto plane     = fadeout->plane();
-            const auto workspace = fadeout->workspace();
+            const auto workspace = fadeout->workspace().lock();
             if (fadeout->monitor() != monitor ||
                 (plane != Desktop::FADEOUT_PLANE_WINDOW_TILED && plane != Desktop::FADEOUT_PLANE_WINDOW_FLOATING && plane != Desktop::FADEOUT_PLANE_WINDOW_OVER_FULLSCREEN) ||
-                (workspace && workspace != monitor->m_activeWorkspace && workspace != monitor->m_activeSpecialWorkspace))
+                (workspace && workspace != monitor->m_activeWorkspace && !(workspace->m_isSpecialWorkspace && workspace->m_alpha->value() > 0.F)))
                 continue;
             const auto position = fadeout->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) - monitor->m_position;
             const auto size     = fadeout->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-            const auto blur     = fadeout->effects().preBlur;
-            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(), float(blur ? blur->round : *ROUNDING)});
+            const Rect rect     = {float(position.x), float(position.y), float(size.x), float(size.y)};
+            const auto known    = state.fadeoutRounding.find(fadeout.get());
+            float      radius   = known != state.fadeoutRounding.end() ? known->second : float(*ROUNDING);
+            if (known == state.fadeoutRounding.end()) {
+                float nearest = INFINITY;
+                for (const auto& shape : state.drawn.shapes) {
+                    const float distance = std::abs(shape.rect[0] - rect[0]) + std::abs(shape.rect[1] - rect[1]) + std::abs(shape.rect[2] - rect[2]) + std::abs(shape.rect[3] - rect[3]);
+                    if (!present.contains(shape.source) && distance < nearest) {
+                        nearest = distance;
+                        radius  = shape.rounding;
+                    }
+                }
+            }
+            rounding[fadeout.get()] = radius;
+            scene.shapes.push_back({rect, fadeout->alpha(), radius, fadeout.get()});
         }
+        state.fadeoutRounding = std::move(rounding);
 
         const Rect middle = {float(monitor->m_size.x * 0.3), float(monitor->m_size.y * 0.3), float(monitor->m_size.x * 0.4), float(monitor->m_size.y * 0.4)};
         const Rect target = scene.focusedIndex < 0 ? middle : scene.shapes[scene.focusedIndex].rect;
@@ -520,7 +546,7 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     if (__hyprland_api_get_hash() != std::string(__hyprland_api_get_client_hash())) {
-        HyprlandAPI::addNotification(handle, "[backdrop] built for another Hyprland; run the cinema install again", CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+        HyprlandAPI::addNotification(handle, "[backdrop] built for another Hyprland: after a Hyprland update, log in again; otherwise run omarchy-cinema/install", CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
         throw std::runtime_error("[backdrop] version mismatch");
     }
 
