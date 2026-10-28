@@ -134,7 +134,7 @@ void main() {
         // from the moment it is made until Hyprland lets it go.
         std::unordered_map<const void*, float>  fadeoutRounding;
         std::unordered_set<const void*>         seenFadeouts;
-        std::optional<float>                    closing; // the window being closed
+        PHLWINDOWREF                            closing; // the window whose fadeout comes next
     };
 
     UP<SState> g;
@@ -296,16 +296,19 @@ void main() {
     // Hyprland emits window.close, then makes that window's fadeout in the
     // same call (Hyprland 0.56.2 src/desktop/view/Window.cpp:2575, 2701), so
     // the window fadeouts that appear after a close event belong to the window
-    // it named. Run at each close event and before reading a scene; forgets
-    // fadeouts Hyprland has let go.
+    // it named. The radius is read here, once the fadeout exists, because in
+    // between Hyprland may take the window out of fullscreen and apply its
+    // rules again, as the fadeout's own copy sees. Run at each close event and
+    // before reading a scene; forgets fadeouts Hyprland has let go.
     void claimFadeouts() {
         std::unordered_set<const void*> alive;
         for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
             if (!isWindowFadeout(fadeout))
                 continue;
             alive.insert(fadeout.get());
-            if (g->seenFadeouts.insert(fadeout.get()).second && g->closing)
-                g->fadeoutRounding[fadeout.get()] = *g->closing;
+            const auto closing = g->closing.lock();
+            if (g->seenFadeouts.insert(fadeout.get()).second && closing)
+                g->fadeoutRounding[fadeout.get()] = closing->rounding();
         }
         g->closing.reset();
         std::erase_if(g->seenFadeouts, [&](const void* f) { return !alive.contains(f); });
@@ -606,7 +609,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (!g)
             return;
         claimFadeouts();
-        g->closing = window->rounding();
+        g->closing = window;
     });
     static auto RELOADED = Event::bus()->m_events.config.reloaded.listen([] {
         if (g)
