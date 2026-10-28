@@ -152,8 +152,11 @@ vec4 backdrop(vec2 px) {
     // it is only what lies on the focused window itself (on any window while
     // none here is focused), so it never crosses a seam, even mid-glide. It
     // is a faint ghost behind the glass, as present as the focus, and the
-    // hero of an empty screen. Only pixels in its box pay for its edges, and
-    // a window too small to hold it shows none.
+    // hero of an empty screen, which it crossfades with as the first window
+    // opens or the last one fades out (the windows' summed opacity is under 1
+    // only then; a reviewer read this as a containment gap, and it is kept as
+    // the empty desktop's presentation). Only pixels in its box pay for its
+    // edges, and a window too small to hold it shows none.
     float size = min(focused.z / 2.8, focused.w / 1.4);
     vec2 at = vec2(focused.x + focused.z * 0.5,
                    clamp(horizon + size * 0.5, focused.y + 0.7 * size, focused.y + focused.w - 0.7 * size));
