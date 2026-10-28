@@ -2,12 +2,12 @@ mode = "light"
 
 # Tower 49: white and pale grey glass above the clouds at dawn, dark slate text,
 # and the pale blue of the drone and Bubbleship displays. Text colours are
-# deep enough to keep their contrast through the frosted glass, which greys
-# the background a little: the normal colours at least 5:1 on the background,
-# the bright ones 4.5:1, the muted one 3.5:1.
+# deep enough to read on the white: the normal colours at least 5:1 on the
+# background, the bright ones and muted (terminal colour 8, secondary text)
+# 4.5:1.
 accent = "#3d9ad1"
 selection = "#cde4f3"
-muted = "#758391"
+muted = "#64717f"
 
 background = "#f3f6f9"
 dark_background = "#e9eef3"

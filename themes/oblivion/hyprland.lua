@@ -1,5 +1,5 @@
 -- Oblivion is a film theme: backdrop, glass, borders and glow from film.lua.
--- Frosted white glass over the sky, kept fairly solid: Omarchy's frost dims
--- what shows through it, so in a light theme every bit of glass greys the
--- pane and lowers the contrast the apps chose for their dimmer text.
-dofile(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/film.lua")({ glass = 0.8 })
+-- Frosted white glass: the backdrop under the windows is near white and
+-- film.lua keeps a light film's frost bright, so the glass never greys the
+-- pane below the white the apps chose their dimmer text against.
+dofile(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/film.lua")({ glass = 0.7 })

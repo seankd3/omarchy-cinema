@@ -185,10 +185,11 @@ vec4 backdrop(vec2 px) {
 
     // The drone's sensor: a thin ring round the focused window, its arc
     // circling once every 12 seconds with a fading trail. It rides the eased
-    // focus rect, so it glides to the next window when focus moves.
-    float fd = focusedIndex < 0 ? FAR : rectDistance(px, focused, 0.0);
+    // focus rect, so it glides to the next window when focus moves, and is as
+    // present as the focus, so it fades with a closing window.
+    float fd = focusAlpha > 0.0 ? rectDistance(px, focused, 0.0) : FAR;
     if (abs(fd - RING) < 12.0) {
-        float fade = windowAlpha(focusedIndex);
+        float fade = focusAlpha;
         vec4 ring = focused + vec4(-RING, -RING, 2.0 * RING, 2.0 * RING);
         float behind = fract(cycle(12.0) - around(px, ring)) * 2.0 * (ring.z + ring.w);
         float trail = exp(-behind / 380.0);
@@ -198,10 +199,10 @@ vec4 backdrop(vec2 px) {
     }
 
     // Under the glass only the sky's broad light shows, lifted near white:
-    // no cloud, moon, line or sweep behind text. Omarchy's frost dims what it
-    // blurs (brightness 0.75), so the whiter this is, the nearer the pane stays
-    // to the white the apps chose their text colours against.
-    if (inside > 0.0) col = mix(col, mix(daylight(px, horizon), vec3(1.0), 0.85), inside);
+    // no cloud, moon, line or sweep behind text, and never darker than the
+    // background the apps chose their text colours against, so the glass
+    // cannot lower their contrast.
+    if (inside > 0.0) col = mix(col, mix(daylight(px, horizon), vec3(1.0), 0.95), inside);
 
     // The bar's lower edge: a fine pale blue line with a soft glint gliding
     // along it, and the frosted bar above lifted toward white.

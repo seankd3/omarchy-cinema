@@ -2,8 +2,8 @@
    precise lines in the drone's pale blue, light airy type, soft round corners
    and daylight shadows instead of glows. Lines keep the pale blue; what is
    read or pressed (labels, icons, the main button) takes a deeper blue, and
-   dimmed labels stay dark enough to read through the glass, which greys the
-   view a little. */
+   dimmed labels draw at 72% instead of libadwaita's 55%, which on this white
+   is 3.5:1. */
 
 :root {
   --accent-bg-color: #157db2;
