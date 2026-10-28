@@ -59,15 +59,17 @@ vec4 backdrop(vec2 px) {
     float toFocus = abs(focusedWindow(cell.xy));
     wake += 2.0 * exp(-toFocus / 40.0) + 0.35 * exp(-toFocus / 500.0);
 
-    // Octagonal rings leave the focused window's centre every two seconds
-    // and spread for eight, orange turning to red as they fade, a faint wash
-    // behind each front. The cells they cross light up.
+    // An octagonal ring leaves the focused window's centre every six seconds
+    // and spreads for twelve, orange turning to red as it fades, a faint wash
+    // behind its front. The cells it crosses light up. (A ring every two
+    // seconds, twice as fast, kept the whole field moving: too busy to live
+    // with all day.)
     float ringCell = octagon(cell.xy - centre);
     float ringPx = octagon(px - centre);
     float ripple = 0.0;
     vec3 rings = vec3(0.0);
-    for (int k = 0; k < 4; k++) {
-        float f = fract(cycle(8.0) + float(k) * 0.25);
+    for (int k = 0; k < 2; k++) {
+        float f = fract(cycle(12.0) + float(k) * 0.5);
         float r = f * 1800.0;
         float fade = (1.0 - f) * smoothstep(0.0, 0.05, f);
         float behind = r - ringPx;
@@ -77,11 +79,12 @@ vec4 backdrop(vec2 px) {
     light += rings * 1.3 * veil;
 
     // Each cell is a tile with a bright rim and a dark seam to its
-    // neighbours. Awake cells switch on and off on their own beat, so the
-    // field shimmers; a few burn Unit-01 green.
+    // neighbours. Awake cells glow steadily and swell together in broad
+    // patches that drift slowly, so the field breathes instead of glittering
+    // cell by cell; a few burn Unit-01 green.
     float seed = hash(cell.xy * 0.0137 + 0.31);
-    float on = smoothstep(0.0, 0.8, sin(TAU * (cycle(6.0) + seed * 11.0)));
-    float lit = min(wake, 2.5) * (0.2 + 0.8 * on) + ripple * 2.5;
+    float swell = smoothstep(0.25, 0.75, noise(cell.xy * 0.006 + orbit(30.0, 1.2)));
+    float lit = min(wake, 2.5) * (0.5 + 0.7 * swell) + ripple * 1.6;
     vec3 tint = seed > 0.97 ? GREEN * 0.7 : orange;
     float tile = smoothstep(2.0, 3.5, cell.z);
     float rim = glowLine(abs(cell.z - 3.0), 0.9);
