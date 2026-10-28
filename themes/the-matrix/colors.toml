@@ -1,0 +1,39 @@
+mode = "dark"
+
+# The Matrix: the code's phosphor green on near black, white-hot where the
+# rain's head falls. The other hues lean green, as everything on those screens
+# does, but stay apart so code and terminals keep their meaning.
+accent = "#2cf26a"
+selection = "#0d3d1c"
+muted = "#5c9a6c"
+
+background = "#020804"
+dark_background = "#010503"
+darker_background = "#000201"
+lighter_background = "#07140b"
+
+foreground = "#b8f7c6"
+dark_foreground = "#6cc884"
+light_foreground = "#b8f7c6"
+bright_foreground = "#e6ffec"
+
+active_border_color = "#5cff8f"
+active_tab_background = "#2cf26a"
+hyprland_active_border = "rgba(2cf26aee) rgba(b8ffcbee) 90deg"
+hyprland_inactive_border = "rgba(0e3b1caa)"
+
+red = "#f0605a"
+yellow = "#d4ec6a"
+orange = "#e8b45a"
+green = "#2cf26a"
+cyan = "#62e8c4"
+blue = "#58b8d8"
+magenta = "#b98ad8"
+brown = "#7a8a3a"
+
+bright_red = "#ff8a82"
+bright_yellow = "#e6f79a"
+bright_green = "#8cffb0"
+bright_cyan = "#9cf5dc"
+bright_blue = "#8dd2ea"
+bright_magenta = "#d2b2ea"

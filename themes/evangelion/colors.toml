@@ -1,0 +1,38 @@
+mode = "dark"
+
+# NERV headquarters: hot orange and warning red on black, with Unit-01's
+# purple and green for the second voice.
+accent = "#ff7a1a"
+selection = "#45220a"
+muted = "#b38c72"
+
+background = "#0c090e"
+dark_background = "#08060a"
+darker_background = "#040305"
+lighter_background = "#1a1220"
+
+foreground = "#fff4ea"
+dark_foreground = "#d6bfac"
+light_foreground = "#fff4ea"
+bright_foreground = "#ffffff"
+
+active_border_color = "#ffa24a"
+active_tab_background = "#ff7a1a"
+hyprland_active_border = "rgba(ff7a1aee) rgba(ff2e1fee) 45deg"
+hyprland_inactive_border = "rgba(4a2e6aaa)"
+
+red = "#ff3a2b"
+yellow = "#ffc23a"
+orange = "#ff8a26"
+green = "#8be83c"
+cyan = "#5ad1e6"
+blue = "#6b93ff"
+magenta = "#a978ff"
+brown = "#a8642a"
+
+bright_red = "#ff7a6c"
+bright_yellow = "#ffdc80"
+bright_green = "#b6f57e"
+bright_cyan = "#9ae8f4"
+bright_blue = "#9fb8ff"
+bright_magenta = "#cba6ff"

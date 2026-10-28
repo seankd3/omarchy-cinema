@@ -1,0 +1,10 @@
+# The bar is frosted glass over the sky (Glassy bar keeps at most 0.35 of this
+# background); its fine blue lower edge is drawn by the backdrop behind it.
+background       = "#f3f6f9"
+background-alpha = 1.0
+text             = "#1c2733"
+# Omarchy shares this token between recording, updates, and other alerts.
+active           = "#c96a24"
+scale-with-font  = true
+size-horizontal  = 26
+size-vertical    = 28

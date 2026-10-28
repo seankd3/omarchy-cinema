@@ -1,0 +1,199 @@
+/* Roadster for GTK apps, Files first: a fighter-jet display. Black glass,
+   thin red lines, white for what is live, wide-spaced capitals, and the
+   chosen file held in red corner brackets like a target lock. */
+
+:root {
+  --accent-bg-color: #e01e1e;
+  --accent-fg-color: #ffffff;
+  --accent-color: #ff6a6a;
+  --destructive-bg-color: #a80f0f;
+  --destructive-fg-color: #ffffff;
+  --destructive-color: #ff8080;
+  --success-color: #62f0a4;
+  --warning-color: #ffd45e;
+  --error-color: #ff3d3d;
+
+  /* The theme's background shades, so they turn to glass. */
+  --window-bg-color: #070404;
+  --window-fg-color: #f6f3f3;
+  --view-bg-color: #070404;
+  --view-fg-color: #f6f3f3;
+  --headerbar-bg-color: #010000;
+  --headerbar-fg-color: #f6eaea;
+  --headerbar-border-color: #ff2d2d;
+  --sidebar-bg-color: #040202;
+  --sidebar-fg-color: #e6dcdc;
+  --sidebar-border-color: rgba(255, 45, 45, 0.35);
+  --card-bg-color: rgba(255, 45, 45, 0.04);
+  --card-fg-color: #f6f3f3;
+  --popover-bg-color: #160c0c;
+  --popover-fg-color: #f6f3f3;
+  --dialog-bg-color: #160c0c;
+  --dialog-fg-color: #f6f3f3;
+  --border-color: rgba(255, 45, 45, 0.35);
+  --border-opacity: 0.8;
+  --window-radius: 0;
+}
+
+/* The header: a red line underneath with a white marker at its centre, as
+   on the bar. */
+headerbar {
+  background-image: linear-gradient(#ffffff, #ffffff);
+  background-size: 56px 2px;
+  background-position: center bottom;
+  background-repeat: no-repeat;
+  box-shadow: inset 0 -1px #ff2d2d;
+}
+
+.nautilus-pathbar {
+  background: transparent;
+  border: 1px solid rgba(255, 45, 45, 0.45);
+  border-radius: 0;
+}
+
+.nautilus-pathbar button,
+.nautilus-path-button {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #cdb9b9;
+  border-radius: 0;
+}
+
+.nautilus-path-button.current-dir {
+  color: #ffffff;
+  font-weight: 800;
+}
+
+/* The sidebar: the place you are in is a red line along its left edge and
+   white type. */
+placessidebar row,
+.navigation-sidebar row {
+  border-radius: 0;
+  margin: 1px 6px;
+}
+
+placessidebar row:hover,
+.navigation-sidebar row:hover {
+  background: rgba(255, 45, 45, 0.07);
+}
+
+placessidebar row:selected,
+.navigation-sidebar row:selected {
+  background: linear-gradient(90deg, rgba(255, 45, 45, 0.2), rgba(255, 45, 45, 0.02));
+  box-shadow: inset 3px 0 #ff2d2d;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+placessidebar row image,
+.navigation-sidebar row image {
+  color: #ff5a5a;
+}
+
+placessidebar row:selected image,
+.navigation-sidebar row:selected image {
+  color: #ffffff;
+}
+
+/* Files in the grid: corner brackets close in on hover and lock in red
+   when chosen, drawn as eight short bars at the corners. */
+.nautilus-grid-view gridview > child {
+  border-radius: 0;
+  background-repeat: no-repeat;
+  background-position: left top, left top, right top, right top, left bottom, left bottom, right bottom, right bottom;
+  background-size: 14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px;
+  transition: background 100ms ease-out;
+}
+
+.nautilus-grid-view gridview > child:hover {
+  background-image:
+    linear-gradient(rgba(255, 90, 90, 0.55), rgba(255, 90, 90, 0.55)), linear-gradient(rgba(255, 90, 90, 0.55), rgba(255, 90, 90, 0.55)),
+    linear-gradient(rgba(255, 90, 90, 0.55), rgba(255, 90, 90, 0.55)), linear-gradient(rgba(255, 90, 90, 0.55), rgba(255, 90, 90, 0.55)),
+    linear-gradient(rgba(255, 90, 90, 0.55), rgba(255, 90, 90, 0.55)), linear-gradient(rgba(255, 90, 90, 0.55), rgba(255, 90, 90, 0.55)),
+    linear-gradient(rgba(255, 90, 90, 0.55), rgba(255, 90, 90, 0.55)), linear-gradient(rgba(255, 90, 90, 0.55), rgba(255, 90, 90, 0.55));
+}
+
+.nautilus-grid-view gridview > child:selected {
+  background-color: rgba(255, 45, 45, 0.12);
+  background-image:
+    linear-gradient(#ff2d2d, #ff2d2d), linear-gradient(#ff2d2d, #ff2d2d),
+    linear-gradient(#ff2d2d, #ff2d2d), linear-gradient(#ff2d2d, #ff2d2d),
+    linear-gradient(#ff2d2d, #ff2d2d), linear-gradient(#ff2d2d, #ff2d2d),
+    linear-gradient(#ff2d2d, #ff2d2d), linear-gradient(#ff2d2d, #ff2d2d);
+}
+
+.nautilus-grid-view gridview > child:selected label {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.nautilus-list-view columnview > listview > row:selected {
+  background: rgba(255, 45, 45, 0.14);
+  box-shadow: inset 3px 0 #ff2d2d;
+}
+
+.nautilus-list-view columnview > listview > row:hover {
+  background: rgba(255, 45, 45, 0.06);
+}
+
+.nautilus-image.file-thumbnail {
+  border: 1px solid rgba(255, 45, 45, 0.5);
+}
+
+rubberband {
+  background: rgba(255, 45, 45, 0.1);
+  border: 1px solid #ff5a5a;
+}
+
+.floating-bar {
+  background: #160c0c;
+  border: 1px solid rgba(255, 45, 45, 0.5);
+  border-radius: 0;
+  color: #f6eaea;
+  letter-spacing: 0.06em;
+}
+
+/* Buttons and fields: square and outlined; the main action is a solid red
+   plate in white capitals. */
+button {
+  border-radius: 0;
+}
+
+button.suggested-action {
+  background: #e01e1e;
+  color: #ffffff;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+button.destructive-action {
+  background: transparent;
+  color: #ff8080;
+  box-shadow: inset 0 0 0 1px #ff3d3d;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+entry,
+searchbar entry {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0;
+}
+
+entry:focus-within {
+  border-color: #ff2d2d;
+  box-shadow: 0 0 10px rgba(255, 45, 45, 0.35);
+}
+
+popover > contents {
+  border: 1px solid rgba(255, 45, 45, 0.6);
+  border-radius: 0;
+  box-shadow: 0 0 18px rgba(255, 45, 45, 0.2);
+}
+
+selection {
+  background: rgba(255, 45, 45, 0.4);
+}

@@ -1,0 +1,10 @@
+# The bar is glass over the AT field (Glassy bar keeps at most 0.35 of this
+# background); its orange edge and hazard stripe are drawn by the backdrop.
+background       = "#0c090e"
+background-alpha = 1.0
+text             = "#ffe2c8"
+# Omarchy shares this token between recording, updates, and other alerts.
+active           = "#ff3a2b"
+scale-with-font  = true
+size-horizontal  = 26
+size-vertical    = 28

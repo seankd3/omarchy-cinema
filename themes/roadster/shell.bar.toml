@@ -1,0 +1,10 @@
+# The bar is glass over the grid (Glassy bar keeps at most 0.35 of this
+# background); its red edge and sweeping marker are drawn by the backdrop.
+background       = "#070404"
+background-alpha = 1.0
+text             = "#f6eaea"
+# Omarchy shares this token between recording, updates, and other alerts.
+active           = "#ff2d2d"
+scale-with-font  = true
+size-horizontal  = 26
+size-vertical    = 28

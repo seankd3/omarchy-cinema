@@ -1,0 +1,13 @@
+{
+  "stroke": "#ff8a2a",
+  "fill": [
+    "#ff7a1a",
+    0.26,
+    0.04
+  ],
+  "glyph": "#fff1e2",
+  "glow": "#ff6a00",
+  "accent": "#8be83c",
+  "inherits": "Yaru-dark,Yaru,hicolor",
+  "outline": "M2 36L7 17l3-8h18l3 8h26l5 19-5 19H7z"
+}

@@ -1,0 +1,38 @@
+mode = "dark"
+
+# The 2026 Roadster's cockpit: bright red and white lines on black, like a
+# fighter jet's displays.
+accent = "#ff2d2d"
+selection = "#3d0c0c"
+muted = "#a08a8a"
+
+background = "#070404"
+dark_background = "#040202"
+darker_background = "#010000"
+lighter_background = "#160c0c"
+
+foreground = "#f6f3f3"
+dark_foreground = "#c4b6b6"
+light_foreground = "#f6f3f3"
+bright_foreground = "#ffffff"
+
+active_border_color = "#ff6a6a"
+active_tab_background = "#ff2d2d"
+hyprland_active_border = "rgba(ff2d2dee) rgba(ffffffdd) 90deg"
+hyprland_inactive_border = "rgba(4d1717aa)"
+
+red = "#ff3d3d"
+yellow = "#ffd45e"
+orange = "#ff8040"
+green = "#62f0a4"
+cyan = "#80dcff"
+blue = "#6a94ff"
+magenta = "#ff62ad"
+brown = "#a65a32"
+
+bright_red = "#ff8080"
+bright_yellow = "#ffe39a"
+bright_green = "#a3f7ca"
+bright_cyan = "#b8ecff"
+bright_blue = "#a6bfff"
+bright_magenta = "#ff9fcc"

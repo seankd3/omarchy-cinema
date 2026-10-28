@@ -1,0 +1,10 @@
+# The bar is glass over the rain (Glassy bar keeps at most 0.35 of this
+# background); its phosphor lower edge is drawn by the backdrop behind it.
+background       = "#020804"
+background-alpha = 1.0
+text             = "#8cffb0"
+# Omarchy shares this token between recording, updates, and other alerts.
+active           = "#f0605a"
+scale-with-font  = true
+size-horizontal  = 26
+size-vertical    = 28

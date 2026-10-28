@@ -1,0 +1,38 @@
+mode = "light"
+
+# Tower 49: white and pale grey glass above the clouds at dawn, dark slate text,
+# and the pale blue of the drone and Bubbleship displays.
+accent = "#3d9ad1"
+selection = "#cde4f3"
+muted = "#8c9aa8"
+
+background = "#f3f6f9"
+dark_background = "#e9eef3"
+darker_background = "#dde4eb"
+lighter_background = "#e3ecf4"
+
+foreground = "#1c2733"
+dark_foreground = "#566573"
+light_foreground = "#2b3845"
+bright_foreground = "#0b1219"
+
+active_border_color = "#3d9ad1"
+active_tab_background = "#3d9ad1"
+hyprland_active_border = "rgba(3d9ad1ee) rgba(a6d8f2ee) 90deg"
+hyprland_inactive_border = "rgba(a9b9c8aa)"
+
+red = "#c4473d"
+yellow = "#a87d12"
+orange = "#c96a24"
+green = "#2f8a5f"
+cyan = "#1a8aad"
+blue = "#2f72c0"
+magenta = "#8657bf"
+brown = "#7a5636"
+
+bright_red = "#d65e52"
+bright_yellow = "#c2951f"
+bright_green = "#3fa173"
+bright_cyan = "#2aa1c4"
+bright_blue = "#4a8ad6"
+bright_magenta = "#9d70d4"

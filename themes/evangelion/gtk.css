@@ -1,0 +1,197 @@
+/* Evangelion for GTK apps, Files first: NERV's consoles. Black glass framed
+   in hot orange, hard angles and cut corners, condensed type in capitals,
+   black on orange where something is chosen, warning red for danger. */
+
+:root {
+  --accent-bg-color: #ff7a1a;
+  --accent-fg-color: #0c090e;
+  --accent-color: #ff9a4a;
+  --destructive-bg-color: #d8231a;
+  --destructive-fg-color: #ffffff;
+  --destructive-color: #ff5a4a;
+  --success-color: #8be83c;
+  --warning-color: #ffc23a;
+  --error-color: #ff3a2b;
+
+  /* The theme's background shades, so they turn to glass. */
+  --window-bg-color: #0c090e;
+  --window-fg-color: #fff4ea;
+  --view-bg-color: #0c090e;
+  --view-fg-color: #fff4ea;
+  --headerbar-bg-color: #040305;
+  --headerbar-fg-color: #ffe2c8;
+  --headerbar-border-color: #ff7a1a;
+  --sidebar-bg-color: #08060a;
+  --sidebar-fg-color: #f2dcc8;
+  --sidebar-border-color: rgba(255, 122, 26, 0.45);
+  --card-bg-color: rgba(255, 122, 26, 0.05);
+  --card-fg-color: #fff4ea;
+  --popover-bg-color: #1a1220;
+  --popover-fg-color: #fff4ea;
+  --dialog-bg-color: #1a1220;
+  --dialog-fg-color: #fff4ea;
+  --border-color: rgba(255, 122, 26, 0.4);
+  --border-opacity: 0.8;
+  --window-radius: 0;
+}
+
+/* The header sits on a hazard stripe, as NERV's warning panels do. */
+headerbar {
+  background-image: repeating-linear-gradient(-45deg, rgba(255, 122, 26, 0.9) 0, rgba(255, 122, 26, 0.9) 5px, transparent 5px, transparent 10px);
+  background-size: 100% 3px;
+  background-position: left bottom;
+  background-repeat: no-repeat;
+  box-shadow: 0 1px #ff7a1a;
+}
+
+.nautilus-pathbar {
+  background: transparent;
+  border: 1px solid rgba(255, 122, 26, 0.55);
+  border-radius: 0;
+}
+
+.nautilus-pathbar button,
+.nautilus-path-button {
+  font-family: "Nimbus Sans Narrow", "Adwaita Sans", sans-serif;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #e8b48a;
+  border-radius: 0;
+}
+
+/* The place you are in reads like a title card: heavy serif capitals. */
+.nautilus-path-button.current-dir {
+  font-family: "C059", "Nimbus Roman", serif;
+  font-weight: bold;
+  letter-spacing: 0.02em;
+  color: #ffffff;
+}
+
+/* The sidebar: the place you are in is a solid orange block, black type on
+   it, its top corner cut away. */
+placessidebar row,
+.navigation-sidebar row {
+  border-radius: 0;
+  margin: 1px 6px;
+  font-family: "Nimbus Sans Narrow", "Adwaita Sans", sans-serif;
+  letter-spacing: 0.03em;
+}
+
+placessidebar row:hover,
+.navigation-sidebar row:hover {
+  background: rgba(255, 122, 26, 0.08);
+  box-shadow: inset 2px 0 rgba(255, 122, 26, 0.7);
+}
+
+placessidebar row:selected,
+.navigation-sidebar row:selected {
+  background: linear-gradient(135deg, transparent 7px, #ff7a1a 7px);
+  color: #0c090e;
+  font-weight: bold;
+}
+
+placessidebar row image,
+.navigation-sidebar row image {
+  color: #ff9a4a;
+}
+
+placessidebar row:selected image,
+.navigation-sidebar row:selected image,
+placessidebar row:selected label,
+.navigation-sidebar row:selected label {
+  color: #0c090e;
+}
+
+/* Files in the grid: framed in orange on hover, a cut-corner orange plate
+   with a hard underline when chosen. */
+.nautilus-grid-view gridview > child {
+  border-radius: 0;
+  transition: background 100ms linear, box-shadow 100ms linear;
+}
+
+.nautilus-grid-view gridview > child:hover {
+  box-shadow: inset 0 0 0 1px rgba(255, 122, 26, 0.5);
+}
+
+.nautilus-grid-view gridview > child:selected {
+  background: linear-gradient(135deg, transparent 10px, rgba(255, 122, 26, 0.22) 10px);
+  box-shadow: inset 0 -3px #ff7a1a;
+}
+
+.nautilus-grid-view gridview > child:selected label {
+  color: #ffffff;
+  font-weight: bold;
+}
+
+.nautilus-list-view columnview > listview > row:selected {
+  background: linear-gradient(90deg, rgba(255, 122, 26, 0.3), rgba(255, 122, 26, 0.06));
+  box-shadow: inset 4px 0 #ff7a1a;
+}
+
+.nautilus-list-view columnview > listview > row:hover {
+  background: rgba(255, 122, 26, 0.07);
+}
+
+.nautilus-image.file-thumbnail {
+  border: 1px solid rgba(255, 122, 26, 0.6);
+}
+
+rubberband {
+  background: rgba(255, 122, 26, 0.12);
+  border: 1px solid #ff9a4a;
+}
+
+.floating-bar {
+  background: #1a1220;
+  border: 1px solid rgba(255, 122, 26, 0.6);
+  border-left: 4px solid #ff7a1a;
+  border-radius: 0;
+  color: #ffe2c8;
+  font-family: "Nimbus Sans Narrow", "Adwaita Sans", sans-serif;
+  letter-spacing: 0.05em;
+}
+
+/* Buttons and fields: square, outlined in orange; the main action is a
+   solid orange plate with black capitals, danger a red one. */
+button {
+  border-radius: 0;
+}
+
+button.suggested-action {
+  background: #ff7a1a;
+  color: #0c090e;
+  font-family: "Nimbus Sans Narrow", "Adwaita Sans", sans-serif;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+button.destructive-action {
+  background: #d8231a;
+  color: #ffffff;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+entry,
+searchbar entry {
+  background: rgba(255, 122, 26, 0.04);
+  border: 1px solid rgba(255, 122, 26, 0.5);
+  border-radius: 0;
+}
+
+entry:focus-within {
+  border-color: #ff7a1a;
+  box-shadow: inset 3px 0 #ff7a1a;
+}
+
+popover > contents {
+  border: 1px solid rgba(255, 122, 26, 0.7);
+  border-top: 3px solid #ff7a1a;
+  border-radius: 0;
+}
+
+selection {
+  background: rgba(255, 122, 26, 0.45);
+}
