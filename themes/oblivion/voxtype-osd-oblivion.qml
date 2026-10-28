@@ -29,7 +29,8 @@ FilmOsd {
         ctx.roundedRect(x0, y0, w, h, h / 2, h / 2);
         ctx.fillStyle = tint(background, 0.94);
         ctx.fill();
-        ctx.strokeStyle = tint(accent, 0.35);
+        // A clear blue rim, so the capsule stands off a white window.
+        ctx.strokeStyle = tint(accent, 0.65);
         ctx.lineWidth = 1;
         ctx.stroke();
 
@@ -91,14 +92,14 @@ FilmOsd {
         };
         let fade = ctx.createLinearGradient(left, 0, right, 0);
         fade.addColorStop(0, tint(accent, 1));
-        fade.addColorStop(1, tint(accent, 0.15));
+        fade.addColorStop(1, tint(accent, 0.35));
         ctx.beginPath();
         edge(-1);
         edge(1);
-        ctx.fillStyle = tint(accent, 0.07);
+        ctx.fillStyle = tint(accent, 0.12);
         ctx.fill();
         ctx.strokeStyle = fade;
-        ctx.lineWidth = 1.4;
+        ctx.lineWidth = 1.8;
         ctx.stroke();
         // The centre line, and a fine scale under the trace.
         ctx.beginPath();
