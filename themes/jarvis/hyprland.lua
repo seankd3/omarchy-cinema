@@ -6,7 +6,7 @@ hl.plugin.load(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/backdrop.so")
 -- glass blurs what is behind it; terminals keep Omarchy's rule, since a window
 -- rule fades their text, and Glassy mode clears their background instead.
 require("default.hypr.glass")()
-o.transparent_window(".*", "0.9 0.84")
+o.transparent_window(".*", "0.95 0.92")
 o.transparent_window({ tag = "terminal" })
 
 -- A theme's own hyprland.lua replaces the one Omarchy renders from

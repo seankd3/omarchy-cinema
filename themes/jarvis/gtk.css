@@ -12,21 +12,21 @@
   --error-color: #ff6a57;
 
   --window-bg-color: #060d17;
-  --window-fg-color: #d4f1ff;
+  --window-fg-color: #eaf8ff;
   --view-bg-color: #050b14;
-  --view-fg-color: #d4f1ff;
+  --view-fg-color: #eaf8ff;
   --headerbar-bg-color: #08131f;
   --headerbar-fg-color: #bfeaff;
   --headerbar-border-color: rgba(57, 200, 255, 0.35);
   --sidebar-bg-color: #07111c;
-  --sidebar-fg-color: #b5ddf2;
+  --sidebar-fg-color: #d2ecf9;
   --sidebar-border-color: rgba(57, 200, 255, 0.18);
   --card-bg-color: rgba(57, 200, 255, 0.05);
-  --card-fg-color: #d4f1ff;
+  --card-fg-color: #eaf8ff;
   --popover-bg-color: #08131f;
-  --popover-fg-color: #d4f1ff;
+  --popover-fg-color: #eaf8ff;
   --dialog-bg-color: #08131f;
-  --dialog-fg-color: #d4f1ff;
+  --dialog-fg-color: #eaf8ff;
   --border-color: rgba(57, 200, 255, 0.22);
   --border-opacity: 0.6;
 }

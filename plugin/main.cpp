@@ -11,7 +11,8 @@
 // frame's damage. At render.pre the plugin reads the windows as they will be
 // drawn; if they differ from what it last drew, it damages the whole monitor
 // and the glass, so this same frame draws the new backdrop. Otherwise the
-// backdrop's own motion asks for frames at plugin:backdrop:fps.
+// backdrop's own motion asks for frames: at the display's rate plugged in, 30
+// a second on battery (plugin:backdrop:fps, plugin:backdrop:battery_fps).
 
 #define WLR_USE_UNSTABLE
 
@@ -39,6 +40,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <regex>
 #include <sstream>
@@ -51,10 +53,10 @@ namespace {
 
     // The glass shows the backdrop through Hyprland's cached blur, and the
     // blur is the costly part of a frame. So a tick redraws the whole monitor
-    // over the cached blur, and every sixth tick refreshes the blur too: the
-    // whole frame always agrees with itself, and the glass trails by at most
-    // five ticks of slow motion, blurred.
-    constexpr int    GLASS_EVERY = 6;
+    // over the cached blur, and the blur itself is refreshed five times a
+    // second: the whole frame always agrees with itself, and the glass trails
+    // by at most a fifth of a second of slow motion, blurred.
+    constexpr double GLASS_EVERY = 0.2; // seconds
     constexpr double FOCUS_EASE  = 0.32; // seconds
     // Texels per row of the window data texture: two per window.
     constexpr int    DATA_WIDTH = 256;
@@ -113,13 +115,18 @@ void main() {
         uint64_t                                generation = 1;
         uint64_t                                compiled   = 0;
         SProgram                                program;
-        // Frames a second of the backdrop's own motion; 0 holds it still. 15 by
-        // default: on the P16 with Jarvis on workspace 1, idle, 30 cost about
-        // 5 W and 10 about 1.6 W (measured 2026-10-28). Windows are followed
-        // every frame whatever this is.
+        // Frames a second of the backdrop's own motion, plugged in and on
+        // battery; 0 is the display's own rate. Sean: "keep it native? or
+        // atleast 30". Idle on the P16 the display's 120 cost about 9 W and 30
+        // about 3.5 W (measured 2026-10-28), so native is for mains power.
+        // Windows are followed every frame whatever these are.
         SP<Config::Values::CIntValue>           fps;
-        float                                   time  = 0;
-        uint64_t                                ticks = 0;
+        SP<Config::Values::CIntValue>           batteryFps;
+        bool                                    plugged = true;
+        // Seconds of the backdrop's own motion, wrapping hourly, advanced by
+        // the clock while the backdrop is seen.
+        float                                   time = 0;
+        std::chrono::steady_clock::time_point   lastTick, lastGlass, lastPowerCheck;
         wl_event_source*                        timer = nullptr;
         std::unordered_map<MONITORID, SMonitor> monitors;
         // Hyprland keeps a closed window's rounding inside its fadeout, out of
@@ -515,20 +522,43 @@ void main() {
         g_pHyprRenderer->m_renderPass.add(makeUnique<CBackdropPass>(monitor, state.pending));
     }
 
+    // Plugged in: any mains or USB-C supply online.
+    bool plugged() {
+        std::error_code error;
+        for (const auto& supply : std::filesystem::directory_iterator("/sys/class/power_supply", error)) {
+            const auto type = readFile(supply.path() / "type");
+            if ((type.starts_with("Mains") || type.starts_with("USB")) && readFile(supply.path() / "online").starts_with("1"))
+                return true;
+        }
+        return false;
+    }
+
     // The backdrop's own motion. Time stands still while there is nothing to
     // see it on: animations off, the session locked, or every monitor asleep
     // or showing a fullscreen window.
     int onTick(void*) {
         if (!g)
             return 0;
-        const auto fps = g->fps->value();
-        // At 0 the timer looks again twice a second, for the setting to change.
-        wl_event_source_timer_update(g->timer, fps > 0 ? 1000 / fps : 500);
+        const auto now = std::chrono::steady_clock::now();
+        if (now - g->lastPowerCheck > std::chrono::seconds(2)) {
+            g->plugged        = plugged();
+            g->lastPowerCheck = now;
+        }
+
+        float fastest = 0;
+        for (const auto& monitor : State::monitorState()->monitors())
+            fastest = std::max(fastest, monitor->m_refreshRate);
+        const auto setting = (g->plugged ? g->fps : g->batteryFps)->value();
+        const auto rate    = setting > 0 ? float(setting) : std::max(fastest, 1.F);
+        wl_event_source_timer_update(g->timer, std::max(1, int(1000 / rate)));
+
+        const float elapsed = std::min(std::chrono::duration<float>(now - g->lastTick).count(), 0.1F);
+        g->lastTick         = now;
         static auto ANIMATIONS = CConfigValue<Config::INTEGER>("animations:enabled");
-        if (fps <= 0 || g->source.empty() || !*ANIMATIONS || g_pSessionLockManager->isSessionLocked())
+        if (g->source.empty() || !*ANIMATIONS || g_pSessionLockManager->isSessionLocked())
             return 0;
 
-        const bool glass = ++g->ticks % GLASS_EVERY == 0;
+        const bool glass = now - g->lastGlass >= std::chrono::duration<double>(GLASS_EVERY);
         bool       seen  = false;
         for (const auto& monitor : State::monitorState()->monitors()) {
             if (!monitor->m_enabled || !monitor->m_dpmsStatus || covered(monitor))
@@ -538,8 +568,10 @@ void main() {
             if (glass)
                 monitor->m_blurFBDirty = true;
         }
+        if (glass)
+            g->lastGlass = now;
         if (seen)
-            g->time = std::fmod(g->time + 1.F / fps, 3600.F);
+            g->time = std::fmod(g->time + elapsed, 3600.F);
         return 0;
     }
 
@@ -557,9 +589,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g         = makeUnique<SState>();
     g->handle = handle;
-    g->fps    = makeShared<Config::Values::CIntValue>("plugin:backdrop:fps", "Frames a second of the backdrop's own motion; 0 holds it still", 15,
-                                                      Config::Values::SIntValueOptions{.min = 0, .max = 120});
+    g->fps        = makeShared<Config::Values::CIntValue>("plugin:backdrop:fps", "Frames a second of the backdrop's own motion plugged in; 0 is the display's rate",
+                                                          0, Config::Values::SIntValueOptions{.min = 0, .max = 1000});
+    g->batteryFps = makeShared<Config::Values::CIntValue>("plugin:backdrop:battery_fps", "Frames a second of the backdrop's own motion on battery; 0 is the display's rate",
+                                                          30, Config::Values::SIntValueOptions{.min = 0, .max = 1000});
     HyprlandAPI::addConfigValueV2(handle, g->fps);
+    HyprlandAPI::addConfigValueV2(handle, g->batteryFps);
+    g->plugged  = plugged();
+    g->lastTick = g->lastGlass = g->lastPowerCheck = std::chrono::steady_clock::now();
     readTheme();
     claimFadeouts();
 
@@ -577,7 +614,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     });
 
     g->timer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onTick, nullptr);
-    wl_event_source_timer_update(g->timer, 1000 / 15);
+    wl_event_source_timer_update(g->timer, 1000 / 30);
 
     return {"backdrop", "Draws the current Omarchy theme's backdrop between the wallpaper and the windows.", "Sean", "0.2"};
 }

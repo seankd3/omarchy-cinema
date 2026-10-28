@@ -50,3 +50,10 @@ touch "$gtk"
 if ! grep -qxF "$import" "$gtk"; then
   printf '%s\n%s' "$import" "$(cat "$gtk")" >"$gtk"
 fi
+
+# Omarchy runs this after `omarchy update`: the plugin is rebuilt for the
+# Hyprland just installed (Sean, 2026-10-28). It loads at the next login.
+hook=~/.config/omarchy/hooks/post-update.d/omarchy-cinema-rebuild
+mkdir -p "${hook%/*}"
+printf '#!/bin/bash\n# Rebuilds the backdrop plugin for the Hyprland just installed.\nexec %q\n' "$here/install" >"$hook"
+chmod 755 "$hook"
