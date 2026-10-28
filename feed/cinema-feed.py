@@ -48,6 +48,7 @@ class History:
         self.generation = 0
 
     def add(self, stamp, text):
+        text = text[-RING:]  # nothing before a record's last RING characters can reach the ring
         self.arrivals += 1
         bisect.insort(self.records, (stamp, self.arrivals, text))
         self.size += len(text)
