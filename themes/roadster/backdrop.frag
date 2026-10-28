@@ -1,9 +1,10 @@
 // Roadster: the 2026 Roadster's cockpit, drawn like a fighter jet's display.
 // A floor of red dots runs out to a thin white horizon and rushes toward the
 // viewer, with streaks of speed along it. A wireframe wedge turns slowly on
-// the floor under the focused window and glides after it. Every window sits
-// in red corner brackets; a brighter, tighter lock frame holds the focused
-// one and slides to the next window when focus moves.
+// the floor behind the focused window and glides after it. Every window sits
+// in faint red corner brackets; a tighter, brighter lock frame holds the
+// focused one, slides to the next window when focus moves, and lets go with
+// a fade when focus leaves.
 
 const vec3 WHITE = vec3(1.0, 0.94, 0.94);
 const float CAMERA = 15.0; // the eye's height over the floor, in grid cells
@@ -81,14 +82,42 @@ vec2 wedge(vec2 px, vec2 at, float size) {
     return d * size;
 }
 
+// How closely the lock frame, at the `focused` rect that eases between
+// windows, sits on a window: 1 on it, 0 once it has moved half the window's
+// size away.
+float held(vec4 rect) {
+    vec4 d = abs(vec4(rect.xy - focused.xy, rect.xy + rect.zw - focused.xy - focused.zw));
+    return 1.0 - smoothstep(0.0, 0.5 * min(rect.z, rect.w), max(max(d.x, d.y), max(d.z, d.w)));
+}
+
 vec4 backdrop(vec2 px) {
     vec3 red = accent;
     float horizon = resolution.y * 0.42;
-    float inside = 1.0 - smoothstep(-1.0, 1.0, nearestWindow(px));
+    vec3 light = vec3(0.0);
+
+    // One pass over the windows: the nearest edge, how near any is, how much
+    // window there is, and how firmly the lock frame holds one. The frame
+    // holds the focused window fully, and any window it still sits on as
+    // much as that window shows, so when focus leaves (the window closes, or
+    // focus goes to another screen) it fades with the window it leaves
+    // instead of vanishing. Each window's corner brackets give way to the
+    // frame where it sits.
+    float nearest = FAR, near = 0.0, present = 0.0;
+    float lock = focusedIndex >= 0 ? windowAlpha(focusedIndex) : 0.0;
+    for (int i = 0; i < windowCount; i++) {
+        vec4 rect = windowRect(i);
+        float a = windowAlpha(i), d = windowDistance(px, i), h = held(rect);
+        nearest = min(nearest, d);
+        near += exp(-max(d, 0.0) / 120.0);
+        present += a;
+        lock = max(lock, a * h);
+        light += red * glowLine(brackets(px, rect, 22.0, 34.0), 1.0) * 0.4 * a * (1.0 - h);
+    }
+    float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
     // Behind a window's glass, and the bar's, only a trace of the light shows.
     float veil = mix(1.0, 0.16, max(inside, step(px.y, reserved.x)));
-    float near = clamp(windowGlow(px, 120.0), 0.0, 1.0);
-    vec3 light = vec3(0.0);
+    near = min(near, 1.0);
+    present = min(present, 1.0);
 
     // The floor: a red dot at every crossing of a grid, in perspective,
     // coming toward the viewer a cell a second (16 cells every 16 seconds,
@@ -111,7 +140,7 @@ vec4 backdrop(vec2 px) {
         float rows = below * below / (CAMERA * resolution.y);
         float clean = smoothstep(1.7, 4.0, rows);
         float fade = exp(-depth / 140.0);
-        light += red * (dot_ * clean + 0.05 * (1.0 - clean)) * fade * (0.5 + 1.2 * near) * veil;
+        light += red * (dot_ * clean + 0.05 * (1.0 - clean)) * fade * (0.5 + 0.6 * near) * veil;
 
         // Streaks of speed: in a few lanes between the dots, a white dash
         // races in from the distance every three seconds.
@@ -132,33 +161,28 @@ vec4 backdrop(vec2 px) {
     light += WHITE * glowLine(toHorizon, 0.9) * 0.55 * veil;
     light += red * (0.18 * exp(-toHorizon / 40.0) + 0.05 * exp(-toHorizon / 300.0)) * veil;
 
-    // The wedge stands on the floor under the focused window, sized to it,
-    // seen from above so it sits below the horizon, and turns once a minute.
-    // Only pixels in the box it can turn through pay for its edges.
-    float size = focused.z * 0.4;
-    vec2 at = vec2(focused.x + focused.z * 0.5, horizon + size * 0.5);
+    // The wedge turns once a minute on the floor behind the focused window,
+    // sized and placed so the box it turns through stays inside that window:
+    // as low as the floor allows, and never across a seam between windows.
+    // It is the hero of an empty screen, and a faint ghost behind the glass,
+    // as firmly as the lock frame holds. Only pixels in that box pay for its
+    // edges.
+    float size = min(focused.z / 2.8, focused.w / 1.4);
+    vec2 at = vec2(focused.x + focused.z * 0.5,
+                   clamp(horizon + size * 0.5, focused.y + 0.7 * size, focused.y + focused.w - 0.7 * size));
+    float shown = mix(1.0, 0.35 * lock, present);
     vec2 reach = abs(px - at) - vec2(1.4, 0.7) * size;
-    if (max(reach.x, reach.y) < 24.0) {
+    if (shown > 0.0 && max(reach.x, reach.y) < 24.0) {
         vec2 d = wedge(px, at, size);
-        light += mix(red, WHITE, 0.65) * glowLine(d.x, 1.3) * mix(1.0, 0.35, inside);
-        light += red * glowLine(d.y, 1.0) * 0.4 * mix(1.0, 0.35, inside);
+        light += mix(red, WHITE, 0.65) * glowLine(d.x, 1.3) * shown;
+        light += red * glowLine(d.y, 1.0) * 0.4 * shown;
     }
 
-    // Red brackets at every other window's corners; a tighter, brighter lock
-    // frame on the focused window, breathing in and out every two seconds.
-    for (int i = 0; i < windowCount; i++) {
-        if (i == focusedIndex) continue;
-        float d = brackets(px, windowRect(i), 22.0, 34.0);
-        light += red * glowLine(d, 1.2) * 0.55 * windowAlpha(i);
+    // The lock frame: fine light brackets close round the window it holds.
+    if (lock > 0.0) {
+        float d = brackets(px, focused, 12.0, 48.0);
+        light += mix(red, WHITE, 0.3) * glowLine(d, 1.2) * 0.8 * lock;
     }
-    if (focusedIndex >= 0) {
-        float breathe = 0.5 + 0.5 * cos(TAU * cycle(2.0));
-        float d = brackets(px, focused, 10.0 + 3.0 * breathe, 52.0);
-        light += mix(red, WHITE, 0.25) * glowLine(d, 1.8) * (1.1 + 0.4 * breathe) * windowAlpha(focusedIndex);
-    }
-
-    // Red light pools in the gaps between windows.
-    light += red * near * (1.0 - inside) * 0.04;
 
     // The bar's lower edge: a red line with a white marker sweeping along it,
     // starting and ending off screen so its wrap never shows.
