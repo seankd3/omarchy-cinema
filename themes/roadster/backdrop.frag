@@ -84,10 +84,10 @@ vec2 wedge(vec2 px, vec2 at, float size) {
 
 // How closely the lock frame, at the `focused` rect that eases between
 // windows, sits on a window: 1 on it, 0 once it has moved half the window's
-// size away.
+// size away (at least a pixel, so a window mapped at no size is well defined).
 float held(vec4 rect) {
     vec4 d = abs(vec4(rect.xy - focused.xy, rect.xy + rect.zw - focused.xy - focused.zw));
-    return 1.0 - smoothstep(0.0, 0.5 * min(rect.z, rect.w), max(max(d.x, d.y), max(d.z, d.w)));
+    return 1.0 - smoothstep(0.0, max(0.5 * min(rect.z, rect.w), 1.0), max(max(d.x, d.y), max(d.z, d.w)));
 }
 
 vec4 backdrop(vec2 px) {
@@ -165,14 +165,14 @@ vec4 backdrop(vec2 px) {
     // sized and placed so the box it turns through stays inside that window:
     // as low as the floor allows, and never across a seam between windows.
     // It is the hero of an empty screen, and a faint ghost behind the glass,
-    // as firmly as the lock frame holds. Only pixels in that box pay for its
-    // edges.
+    // as firmly as the lock frame holds; a window too small to hold it shows
+    // none. Only pixels in that box pay for its edges.
     float size = min(focused.z / 2.8, focused.w / 1.4);
     vec2 at = vec2(focused.x + focused.z * 0.5,
                    clamp(horizon + size * 0.5, focused.y + 0.7 * size, focused.y + focused.w - 0.7 * size));
     float shown = mix(1.0, 0.35 * lock, present);
     vec2 reach = abs(px - at) - vec2(1.4, 0.7) * size;
-    if (shown > 0.0 && max(reach.x, reach.y) < 24.0) {
+    if (size > 8.0 && shown > 0.0 && max(reach.x, reach.y) < 24.0) {
         vec2 d = wedge(px, at, size);
         light += mix(red, WHITE, 0.65) * glowLine(d.x, 1.3) * shown;
         light += red * glowLine(d.y, 1.0) * 0.4 * shown;
