@@ -8,7 +8,8 @@
 // them: mid-animation, mid-drag, sliding between workspaces, fading out after
 // closing. windowAlpha(i) fades with the window. `focused` is the focused window's rect
 // (x, y, w, h), easing to a new window when focus moves and then following it
-// exactly; with no focused window it is a rect in the middle of the screen.
+// exactly; with no focused window it is a rect in the middle of the screen
+// (focusAlpha says how present it is).
 // `reserved` is the room the bar and other panels keep along each edge (top,
 // right, bottom, left): the bar's lower edge is at y = reserved.x, and a
 // backdrop can light it.
@@ -36,6 +37,11 @@ uniform vec4 reserved;
 uniform sampler2D windowData;
 uniform int windowCount;
 uniform int focusedIndex;
+// How present the focus is, for decorations that follow it: the focused
+// window's own opacity (rising as it opens); when it closes, focusedIndex and
+// `focused` stay on it as it fades out and this falls with it; with no window
+// focused on this screen it eases to 0.
+uniform float focusAlpha;
 
 // Text a backdrop can draw: the newest plaintext of the agents on this machine
 // (specs/agent-rain.md), a ring of 16384 characters 128 to a row, of which

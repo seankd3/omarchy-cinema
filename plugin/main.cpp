@@ -116,6 +116,7 @@ void main() {
         std::vector<SShape> shapes;
         int                 focusedIndex = -1;
         Rect                focus{};
+        float               focusAlpha = 0; // how present the focus is (contract.glsl)
         Rect                reserved{}; // room the bar and other panels keep: top, right, bottom, left
         bool                operator==(const SScene&) const = default;
     };
@@ -124,14 +125,18 @@ void main() {
         SScene                                pending; // read for the frame being drawn
         SScene                                drawn;
         PHLWINDOWREF                          focusedWindow;
+        // The fadeout of the window that had focus here when it closed: the
+        // focus stays on it, by identity, until it has faded.
+        const void*                           focusFadeout = nullptr;
         Rect                                  focusFrom{};
+        float                                 alphaFrom = 0;
         std::chrono::steady_clock::time_point focusMoved;
         bool                                  seen = false;
     };
 
     struct SProgram {
         GLuint   id = 0, vao = 0, vbo = 0, data = 0, feed = 0, glyphs = 0;
-        GLint    proj, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex;
+        GLint    proj, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
         GLint    feedUniform, feedCount, feedPos, glyphsUniform;
         uint64_t feedUploaded = 0; // the feed change in the texture
         bool     glyphsUploaded = false;
@@ -379,6 +384,7 @@ void main() {
         p.windowData   = glGetUniformLocation(p.id, "windowData");
         p.windowCount  = glGetUniformLocation(p.id, "windowCount");
         p.focusedIndex = glGetUniformLocation(p.id, "focusedIndex");
+        p.focusAlpha   = glGetUniformLocation(p.id, "focusAlpha");
         p.feedUniform  = glGetUniformLocation(p.id, "feed");
         p.feedCount    = glGetUniformLocation(p.id, "feedCount");
         p.feedPos      = glGetUniformLocation(p.id, "feedPos");
@@ -439,8 +445,12 @@ void main() {
             if (!isWindowFadeout(fadeout))
                 continue;
             alive.insert(fadeout.get());
-            if (g->seenFadeouts.insert(fadeout.get()).second && g->closing)
+            if (g->seenFadeouts.insert(fadeout.get()).second && g->closing) {
                 g->fadeoutRounding[fadeout.get()] = g->closing->rounding();
+                for (auto& [id, state] : g->monitors)
+                    if (state.focusedWindow.lock() == g->closing)
+                        state.focusFadeout = fadeout.get();
+            }
         }
         g->closing.reset();
         std::erase_if(g->seenFadeouts, [&](const void* f) { return !alive.contains(f); });
@@ -480,30 +490,40 @@ void main() {
             const auto position = fadeout->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) - monitor->m_position;
             const auto size     = fadeout->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
             const auto rounding = g->fadeoutRounding.find(fadeout.get());
+            if (!focusedHere && fadeout.get() == state.focusFadeout)
+                scene.focusedIndex = scene.shapes.size();
             // Only a fadeout already running when the plugin loaded has none.
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(),
                                     rounding != g->fadeoutRounding.end() ? rounding->second : float(*ROUNDING)});
         }
 
+        if (focusedHere || scene.focusedIndex < 0)
+            state.focusFadeout = nullptr; // a new focus, or the fadeout is over
+
         const Rect middle = {float(monitor->m_size.x * 0.3), float(monitor->m_size.y * 0.3), float(monitor->m_size.x * 0.4), float(monitor->m_size.y * 0.4)};
         const Rect target = scene.focusedIndex < 0 ? middle : scene.shapes[scene.focusedIndex].rect;
 
         // Focus moving to another window eases across; a focused window that
-        // moves is followed exactly.
+        // moves is followed exactly. Its presence is the window's own opacity,
+        // fading with it after it closes; with nothing focused here (focus on
+        // another screen, or the last window gone) it eases away.
         const auto now = std::chrono::steady_clock::now();
         if (!state.seen) {
             state.seen       = true;
             state.focusFrom  = target;
             state.focusMoved = now - std::chrono::seconds(1);
-        } else if (state.focusedWindow.lock() != focusedHere) {
+        } else if (state.focusedWindow.lock() != focusedHere && !(focusedHere == nullptr && scene.focusedIndex >= 0)) {
             state.focusFrom  = state.drawn.focus;
+            state.alphaFrom  = state.drawn.focusAlpha;
             state.focusMoved = now;
         }
-        state.focusedWindow = focusedHere;
+        if (focusedHere || scene.focusedIndex < 0)
+            state.focusedWindow = focusedHere;
 
         const float k = easeOut(std::min(1.F, float(std::chrono::duration<double>(now - state.focusMoved).count() / FOCUS_EASE)));
         for (size_t i = 0; i < 4; i++)
             scene.focus[i] = state.focusFrom[i] + (target[i] - state.focusFrom[i]) * k;
+        scene.focusAlpha = scene.focusedIndex >= 0 ? scene.shapes[scene.focusedIndex].alpha : state.alphaFrom * (1.F - k);
         const auto& area = monitor->m_reservedArea;
         scene.reserved   = {float(area.top()), float(area.right()), float(area.bottom()), float(area.left())};
         return scene;
@@ -795,6 +815,7 @@ vec4 cinemaGlass(vec4 c) {{
             glUniform1i(p.windowData, 7);
             glUniform1i(p.windowCount, m_scene.shapes.size());
             glUniform1i(p.focusedIndex, m_scene.focusedIndex);
+            glUniform1f(p.focusAlpha, m_scene.focusAlpha);
             glUniform1i(p.glyphsUniform, 5);
             glUniform1i(p.feedUniform, 6);
             glUniform1i(p.feedCount, lettered && live && p.feedUploaded ? int(g->feedCount) : 0);

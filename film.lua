@@ -94,8 +94,12 @@ hl.config({
 -- and set their own, so this is set once the whole config has loaded.
 -- Glassy mode also fades Files whole, text included; under a film theme its
 -- background turns to glass like every other window's instead.
+-- A light film's frost keeps its light: Omarchy's glass dims the blur to 0.75,
+-- which on white glass leaves apps' dimmed secondary text under 4.5:1 (Sol,
+-- 2026-10-28, Oblivion); a dark film keeps Omarchy's dimming.
+local frost = { size = 3, passes = 2, brightness = colors.mode == "light" and 1 or nil }
 hl.on("config.reloaded", function()
-  hl.config({ decoration = { blur = { size = 3, passes = 2 } } })
+  hl.config({ decoration = { blur = frost } })
   o.window("org\\.gnome\\.Nautilus", { opacity = "0.999 0.999" })
 end)
 end
