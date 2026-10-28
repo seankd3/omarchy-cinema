@@ -26,9 +26,9 @@
   --sidebar-border-color: rgba(255, 45, 45, 0.35);
   --card-bg-color: rgba(255, 45, 45, 0.04);
   --card-fg-color: #f6f3f3;
-  --popover-bg-color: #160c0c;
+  --popover-bg-color: #1c1010;
   --popover-fg-color: #f6f3f3;
-  --dialog-bg-color: #160c0c;
+  --dialog-bg-color: #1c1010;
   --dialog-fg-color: #f6f3f3;
   --border-color: rgba(255, 45, 45, 0.35);
   --border-opacity: 0.8;
@@ -147,7 +147,7 @@ rubberband {
 }
 
 .floating-bar {
-  background: #160c0c;
+  background: #1c1010;
   border: 1px solid rgba(255, 45, 45, 0.5);
   border-radius: 0;
   color: #f6eaea;
