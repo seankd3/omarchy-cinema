@@ -1,10 +1,13 @@
 mode = "light"
 
 # Tower 49: white and pale grey glass above the clouds at dawn, dark slate text,
-# and the pale blue of the drone and Bubbleship displays.
+# and the pale blue of the drone and Bubbleship displays. Text colours are
+# deep enough to keep their contrast through the frosted glass, which greys
+# the background a little: the normal colours at least 5:1 on the background,
+# the bright ones 4.5:1, the muted one 3.5:1.
 accent = "#3d9ad1"
 selection = "#cde4f3"
-muted = "#8c9aa8"
+muted = "#758391"
 
 background = "#f3f6f9"
 dark_background = "#e9eef3"
@@ -21,18 +24,18 @@ active_tab_background = "#3d9ad1"
 hyprland_active_border = "rgba(3d9ad1ee) rgba(a6d8f2ee) 90deg"
 hyprland_inactive_border = "rgba(a9b9c8aa)"
 
-red = "#c4473d"
-yellow = "#a87d12"
-orange = "#c96a24"
-green = "#2f8a5f"
-cyan = "#1a8aad"
-blue = "#2f72c0"
-magenta = "#8657bf"
+red = "#ba3e35"
+yellow = "#8b6100"
+orange = "#aa4e00"
+green = "#16784e"
+cyan = "#007294"
+blue = "#266ab7"
+magenta = "#8152b9"
 brown = "#7a5636"
 
-bright_red = "#d65e52"
-bright_yellow = "#c2951f"
-bright_green = "#3fa173"
-bright_cyan = "#2aa1c4"
-bright_blue = "#4a8ad6"
-bright_magenta = "#9d70d4"
+bright_red = "#bf493f"
+bright_yellow = "#936800"
+bright_green = "#108054"
+bright_cyan = "#007a9b"
+bright_blue = "#3172bb"
+bright_magenta = "#875abc"
