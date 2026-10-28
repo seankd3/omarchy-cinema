@@ -498,7 +498,7 @@ const vec3  CINEMA_BACKGROUNDS[{}] = vec3[]({});
 const float CINEMA_GLASS = {:.4f};
 vec4 cinemaGlass(vec4 c) {{
     // Nothing to judge where the app drew nothing.
-    if (c.a < 0.02) return c;
+    if (c.a <= 0.0) return c;
     // Judged by colour alone, before the app's own alpha: a terminal that
     // draws its background half see-through gets the same glass as a window
     // that draws it solid (Sean: "the transparency in T3 code is also
