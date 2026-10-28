@@ -59,12 +59,20 @@ Sol's plan review (2026-10-28) settled it: terminals and GTK can draw their own
 translucent background with solid text, but Electron apps (T3 Code, Slack,
 LM Studio) create an opaque native window that no theme file can change. So
 the compositor glass stays as the one mechanism for every app, keyed on the
-theme's background colours, and its open findings are fixed in place: glass
-only while Omarchy's *Glassy windows* mode is on (a window rule, not the blur
-pass, decides which windows are glass), compositor opacity 1 for glass
-windows instead of `0.999`, the alpha applied once, colours compared in the
-space the app drew them, and the window shader composed with any shader the
-user has rather than replacing it. Browsers stay solid.
+theme's background colours, with today's contract stated plainly: Hyprland
+blurs only a window it considers translucent, so glass windows are the ones
+Omarchy's *Glassy windows* mode makes translucent (near-opaque `0.999`, with
+`render:use_shader_blur_blend`), and the glass step runs in Hyprland's blur
+pass for those windows. *Opaque windows* turns it off with the rest of glassy
+mode; browsers stay solid. Findings 2 to 5 are fixed where the contract
+allows (close snapshots and subsurfaces keep their glass, the alpha applies
+once, colours compare in the space the app drew them) and the rest are
+documented limits. The plugin replaces Hyprland's surface shader only when
+the user has none of their own; with one, glass stays off and says so.
+Exact opacity 1 would need a per-surface render integration (glass
+eligibility read per surface, the blurred backdrop drawn behind a client
+that declares itself opaque, occlusion updated); that is a later design, not
+this release.
 
 ## What it deletes
 
@@ -73,10 +81,14 @@ user has rather than replacing it. Browsers stay solid.
   rules that make every window transparent outside glassy mode. What stays is
   per-film defaults (borders and glow from `colors.toml`, the glass amount,
   the spacing), which the user's config and the toggles override.
-- **The popup workaround** once Voxtype ships `style = "theme"`: the stock
-  template, install's copy into the applied theme and the per-film file
-  names; install's Voxtype settings shrink to selecting the Quickshell OSD and
-  `style = "theme"`.
+- **The popup workaround** once a Voxtype release ships `style = "theme"`
+  (the supported route is that release from Voxtype's own packages, AUR or
+  release binaries, with its Quickshell frontend installed by
+  `voxtype setup quickshell`): the stock template, install's copy into the
+  applied theme and the per-film file names. Until that release, the
+  workaround stays. Install's Voxtype settings shrink to the Quickshell OSD,
+  `style = "theme"`, and clearing a pinned `plugin_path` or fixed palette,
+  which would win over the style.
 - **The preview's fake glass overlay** (Sol finding 7); the two preview tools
   share `omarchy-cinema preview` and keep their own renderers.
 
@@ -122,8 +134,8 @@ the Discussion's job).
    without their own Files styling.
 4. `omarchy-cinema` command (new, preview, check, install, uninstall); the
    preview tools share one entry point and keep their own renderers.
-5. Popups on Voxtype's `style = "theme"` (after the Voxtype PR merges or is
-   built locally), workaround deleted.
+5. Popups on Voxtype's `style = "theme"` once a Voxtype release has it,
+   workaround deleted.
 6. Live review fixes for Oblivion, The Matrix, Evangelion, Roadster.
 7. README, licence, screenshots, uninstall; then public, then the Omarchy
    Discussion.
