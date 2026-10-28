@@ -18,6 +18,7 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
+#include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
 #include <hyprland/src/desktop/state/Fadeout.hpp>
@@ -33,6 +34,7 @@
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/PassElement.hpp>
+#include <hyprland/src/render/shaders/Shaders.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 
 #include <GLES3/gl32.h>
@@ -41,6 +43,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <regex>
 #include <sstream>
@@ -122,6 +125,10 @@ void main() {
         // Windows are followed every frame whatever these are.
         SP<Config::Values::CIntValue>           fps;
         SP<Config::Values::CIntValue>           batteryFps;
+        // How much of a window's background stays: 1 solid, 0 clear glass.
+        SP<Config::Values::CFloatValue>         glass;
+        std::string                             glassShader; // the surface shader in use, empty for Hyprland's own
+        wl_event_source*                        glassIdle = nullptr;
         bool                                    plugged = true;
         // Seconds of the backdrop's own motion, wrapping hourly, advanced by
         // the clock while the backdrop is seen.
@@ -141,6 +148,8 @@ void main() {
     };
 
     UP<SState> g;
+
+    void applyGlass();
 
     std::string themeDir() {
         const char* state = getenv("XDG_STATE_HOME");
@@ -176,6 +185,15 @@ void main() {
             (match[1] == "accent" ? g->accent : match[1] == "background" ? g->background : g->foreground) = hexColor(match[2]);
         }
         g->generation++;
+        // The glass waits for the rest of the config to load (plugin:backdrop:
+        // glass comes later in the theme), so it is applied from the loop.
+        if (!g->glassIdle)
+            g->glassIdle = wl_event_loop_add_idle(g_pCompositor->m_wlEventLoop, [](void*) {
+                if (!g)
+                    return;
+                g->glassIdle = nullptr;
+                applyGlass();
+            }, nullptr);
     }
 
     GLuint compileStage(GLenum stage, const std::string& source, std::string& log) {
@@ -422,6 +440,78 @@ void main() {
         glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
     }
 
+    // Glass: in a film theme, a window's background (the theme's background
+    // colour) turns to glass, and everything drawn over it (text, icons, lines,
+    // logos) keeps its full opacity (Sean, 2026-10-28: "the transparency should
+    // effect the background but not the text"; "the little logo, line, stuff
+    // like that, should all remain fully opaque").
+    //
+    // Hyprland fades a whole window by its opacity, text included, so the glass
+    // is drawn where Hyprland draws windows: its own surface shader, the
+    // version in this very build, with one step added after the window's pixel
+    // is read. That step un-mixes the pixel from the theme's background, the
+    // way an image editor's colour-to-alpha does: pure background becomes
+    // glass at plugin:backdrop:glass, anything over it stays as opaque as it
+    // was, and anti-aliased text keeps its edge. It runs only in the shader's
+    // blur variant (film.lua turns render:use_shader_blur_blend on), which
+    // Hyprland uses only for windows it blurs: a solid browser, video or photo
+    // is never touched. Hyprland reads shaders from a directory before its
+    // built-in ones, so the patched shader is written to one of the plugin's
+    // and loaded with reloadShaders; Hyprland's own come back when the theme
+    // has no backdrop or the plugin unloads.
+    std::string glassShaderSource() {
+        const auto glass = g->glass->value();
+        if (g->source.empty() || glass >= 1.F)
+            return "";
+        const auto found = std::ranges::find(SHADERS, std::string_view{"surface.frag"}, [](const auto& pair) { return pair.first; });
+        if (found == SHADERS.end())
+            return "";
+        std::string source{found->second};
+        const std::string output = "layout(location = 0) out vec4 fragColor;";
+        const std::string read   = "#if USE_DISCARD && !USE_BLUR";
+        const auto        at     = source.find(output);
+        if (at == std::string::npos || source.find(output, at + 1) != std::string::npos || source.find(read) == std::string::npos) {
+            HyprlandAPI::addNotification(g->handle, "[backdrop] this Hyprland's window shader has changed shape; windows stay solid", CHyprColor{1.0, 0.6, 0.2, 1.0}, 10000);
+            return "";
+        }
+        const auto key = std::format("vec3({:.6f}, {:.6f}, {:.6f})", g->background[0], g->background[1], g->background[2]);
+        source.insert(at, std::format(R"(// omarchy-cinema glass: see the backdrop plugin.
+const vec3  CINEMA_KEY   = {};
+const float CINEMA_GLASS = {:.4f};
+vec4 cinemaGlass(vec4 c) {{
+    if (c.a < 0.999) return c; // the app drew its own transparency
+    vec3  up    = max((c.rgb - CINEMA_KEY) / max(1.0 - CINEMA_KEY, vec3(1e-4)), 0.0);
+    vec3  down  = max((CINEMA_KEY - c.rgb) / max(CINEMA_KEY, vec3(1e-4)), 0.0);
+    float a     = clamp(max(max(max(up.r, up.g), up.b), max(max(down.r, down.g), down.b)), 0.0, 1.0);
+    vec3  drawn = c.rgb - (1.0 - a) * CINEMA_KEY;
+    return vec4(drawn + (1.0 - a) * CINEMA_GLASS * CINEMA_KEY, a + (1.0 - a) * CINEMA_GLASS);
+}}
+
+)",
+                                         key, glass));
+        source.insert(source.find(read), "#if USE_BLUR\n    pixColor = cinemaGlass(pixColor);\n#endif\n\n");
+        return source;
+    }
+
+    std::string glassDir() {
+        const char* runtime = getenv("XDG_RUNTIME_DIR");
+        return std::string(runtime && *runtime ? runtime : "/tmp") + "/omarchy-cinema/shaders";
+    }
+
+    // Loads the glass shader the theme asks for, or Hyprland's own, when that
+    // changed. Hyprland's hyprctl reloadshaders does the same from its loop.
+    void applyGlass() {
+        const auto wanted = glassShaderSource();
+        if (wanted == g->glassShader)
+            return;
+        if (!wanted.empty()) {
+            std::filesystem::create_directories(glassDir());
+            std::ofstream(glassDir() + "/surface.frag") << wanted;
+        }
+        if (g_pHyprRenderer->reloadShaders(wanted.empty() ? "" : glassDir()))
+            g->glassShader = wanted;
+    }
+
     class CBackdropPass : public IPassElement {
       public:
         CBackdropPass(PHLMONITOR monitor, SScene scene) : m_monitor(monitor), m_scene(std::move(scene)) {}
@@ -598,8 +688,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                           0, Config::Values::SIntValueOptions{.min = 0, .max = 1000});
     g->batteryFps = makeShared<Config::Values::CIntValue>("plugin:backdrop:battery_fps", "Frames a second of the backdrop's own motion on battery; 0 is the display's rate",
                                                           30, Config::Values::SIntValueOptions{.min = 0, .max = 1000});
+    g->glass      = makeShared<Config::Values::CFloatValue>("plugin:backdrop:glass", "How much of a window's background stays: 1 solid, 0 clear glass", 1.F,
+                                                            Config::Values::SFloatValueOptions{.min = 0.F, .max = 1.F});
     HyprlandAPI::addConfigValueV2(handle, g->fps);
     HyprlandAPI::addConfigValueV2(handle, g->batteryFps);
+    HyprlandAPI::addConfigValueV2(handle, g->glass);
     g->plugged  = plugged();
     g->lastTick = g->lastGlass = g->lastPowerCheck = std::chrono::steady_clock::now();
     readTheme();
@@ -627,6 +720,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 APICALL EXPORT void PLUGIN_EXIT() {
     if (g->timer)
         wl_event_source_remove(g->timer);
+    if (g->glassIdle)
+        wl_event_source_remove(g->glassIdle);
+    if (!g->glassShader.empty())
+        g_pHyprRenderer->reloadShaders("");
     g_pHyprRenderer->m_renderPass.removeAllOfType("CBackdropPass");
     g_pHyprOpenGL->makeEGLCurrent();
     deleteProgram();

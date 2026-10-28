@@ -55,11 +55,22 @@ Hyprland. The plugin reads `backdrop.frag` and `colors.toml` from
 at the next draw. A theme that does not load the plugin unloads it. A shader
 that does not compile is reported once and draws nothing.
 
-**Glass** reuses Omarchy's: the theme's `hyprland.lua` calls
-`default.hypr.glass` and `o.transparent_window` (Window Opacity can still
-override it, since toggles load after themes), re-asserts the terminal rule so
-terminal text is never faded, and sets its borders and shadow. Terminals get
-their see-through background from Omarchy's Glassy mode.
+**Glass: the background turns to glass, text stays opaque.** Sean: "the
+transparency should effect the background but not the text, all text should
+stay opauqe"; "the little logo, line, stuff like that, should all remain fully
+opaque. Just the background elements should have the transparency." Hyprland's
+window opacity fades a whole window, so the plugin adds one step to Hyprland's
+own window shader (`surface.frag`, taken from the running build): it un-mixes
+each pixel from the theme's background colour (colour-to-alpha), so pure
+background becomes glass at `plugin:backdrop:glass` and everything drawn over
+it keeps its opacity. The step runs only in the shader's blur variant, which
+`render:use_shader_blur_blend` selects for windows Hyprland blurs; glass
+windows are 0.999 opaque to be blurred, browsers stay at 1 and are never
+touched. The patched shader is loaded with Hyprland's `reloadShaders`, only
+when it changes; Hyprland's own returns when the theme has no backdrop or the
+plugin unloads, and a Hyprland whose shader no longer has the expected shape
+gets solid windows and a notice. Glassy mode's 0.75 fade on Files is replaced
+by the same glass. Borders, glow and frost are set by `film.lua`, one per film.
 
 **Files.** Each film theme ships `gtk.css` (libadwaita variables and Nautilus
 selectors) and its folder icons (`tools/folders.py` writes an icon theme,

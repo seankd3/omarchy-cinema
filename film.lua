@@ -3,7 +3,8 @@
 -- the applied theme's colors.toml. A film theme's hyprland.lua calls this with
 -- what differs by film:
 --
---   opacity  the glass, focused and not ("0.95 0.92" if not given)
+--   glass  how much of a window's background stays, 1 solid to 0 clear (0.85
+--          if not given); text and everything else on it stays opaque
 --
 -- install puts it at ~/.local/lib/omarchy-cinema/film.lua.
 
@@ -54,14 +55,18 @@ film = film or {}
 -- does not load it unloads it.
 hl.plugin.load(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/backdrop.so")
 
--- Every window is glass over the backdrop, through Omarchy's own frosted glass.
--- Terminals keep Omarchy's rule, since a window rule fades their text, and
--- Glassy mode clears their background instead. 0.95 and 0.92 keep text near
--- full brightness (Sean, 2026-10-28: "the text is a bit dark"). Browsers stay
--- solid: a web page behind glass is hard to read (Sean: "except chrome").
+-- Every window is glass over the backdrop: its background turns to glass and
+-- its text stays opaque (Sean, 2026-10-28: "the transparency should effect the
+-- background but not the text"). The plugin draws that in Hyprland's window
+-- shader at plugin:backdrop:glass, in the version Hyprland uses for windows it
+-- blurs, which is the one use_shader_blur_blend selects. Hyprland blurs only
+-- behind windows it can see through, so glass windows are 0.999 opaque: no
+-- visible fade, but blurred behind. Browsers stay solid (Sean: "except
+-- chrome"), as anything at 1 does. Terminals keep their text crisp the same
+-- way; Glassy mode clears their background.
 require("default.hypr.glass")()
-o.transparent_window(".*", film.opacity or "0.95 0.92")
-o.transparent_window({ tag = "terminal" })
+o.transparent_window(".*", "0.999 0.999")
+o.transparent_window({ tag = "terminal" }, "0.999 0.999")
 o.window({ tag = "chromium-based-browser" }, { opacity = "1 1" })
 o.window({ tag = "firefox-based-browser" }, { opacity = "1 1" })
 
@@ -81,13 +86,18 @@ hl.config({
   decoration = {
     shadow = { enabled = true, range = 22, render_power = 3, color = glow("40"), color_inactive = glow("10") },
   },
+  render = { use_shader_blur_blend = true },
+  plugin = { backdrop = { glass = film.glass or 0.85 } },
 })
 
 -- Over a moving backdrop Omarchy's light frost leaves text behind the glass
 -- legible enough to fight the text on it, so the frost is heavier. Omarchy's
 -- glass toggles load after the theme and set their own, so this is set once
 -- the whole config has loaded.
+-- Glassy mode also fades Files whole, text included; under a film theme its
+-- background turns to glass like every other window's instead.
 hl.on("config.reloaded", function()
   hl.config({ decoration = { blur = { size = 8, passes = 3 } } })
+  o.window("org\\.gnome\\.Nautilus", { opacity = "0.999 0.999" })
 end)
 end
