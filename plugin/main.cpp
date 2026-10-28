@@ -499,10 +499,12 @@ vec4 cinemaGlass(vec4 c) {{
         vec3 e = abs(c.rgb - CINEMA_BACKGROUNDS[i]);
         off = min(off, max(max(e.r, e.g), e.b));
     }}
-    // Near a background colour is background: apps shade their panels a few
-    // steps off it (Slack's are 9 or 10 off). Text, icons and lines sit far
-    // further out and keep their opacity.
-    float a = mix(CINEMA_GLASS, 1.0, smoothstep(6.0 / 255.0, 16.0 / 255.0, off));
+    // Only a background colour itself is background, within a step or two of
+    // rounding. Panels, cards, fields, rows and dividers are shaded a few
+    // steps off it, and they are interface, not background: they keep their
+    // opacity with the text, icons and lines (Sean, 2026-10-28: "keep the text
+    // opaque and other UI elements other than the background").
+    float a = mix(CINEMA_GLASS, 1.0, smoothstep(0.5 / 255.0, 2.5 / 255.0, off));
     return vec4(c.rgb * a, a);
 }}
 
