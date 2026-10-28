@@ -44,6 +44,8 @@
 
 #include <GLES3/gl32.h>
 #include <cairo/cairo.h>
+#include <fcntl.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -80,6 +82,9 @@ namespace {
     constexpr size_t FEED_HEADER = 20;
     constexpr int    FEED_BUDGET = 8; // datagrams taken per wakeup, at most
     constexpr auto   FEED_STALE  = std::chrono::seconds(10);
+    // The lettering is 16 by 6 cells; anything larger than this is not an
+    // atlas, and is refused from its header before it is decoded.
+    constexpr uint32_t GLYPHS_MAX_WIDTH = 1024, GLYPHS_MAX_HEIGHT = 512;
 
     const char* CONTRACT =
 #include "contract.inc"
@@ -171,16 +176,20 @@ void main() {
         // The agents' text: the newest valid snapshot the feed sent, counted
         // by changes taken (a restarted feed counts its generations from 0
         // again), and when any valid one last came, which says it is alive.
-        int                                     feedFd     = -1;
+        // The socket's path belongs to whichever Hyprland holds feed.lock.
+        int                                     feedFd     = -1, feedLock = -1;
         std::string                             feedPath;
         wl_event_source*                        feedSource = nullptr;
         std::vector<uint8_t>                    feedRing   = std::vector<uint8_t>(FEED_RING, ' ');
         uint64_t                                feedGeneration = 0, feedChanges = 0;
         uint32_t                                feedCount = 0, feedPos = 0;
         std::chrono::steady_clock::time_point   feedReceived;
-        // The theme's lettering (glyphs.png) as coverage, one byte a pixel.
+        // The theme's lettering (glyphs.png) as coverage, one byte a pixel,
+        // and the file it was decoded from, so an unchanged one is not
+        // decoded again on every config reload.
         std::vector<uint8_t>                    glyphPixels;
         int                                     glyphWidth = 0, glyphHeight = 0;
+        std::string                             glyphStamp;
     };
 
     UP<SState> g;
@@ -204,6 +213,49 @@ void main() {
     std::array<float, 3> hexColor(const std::string& hex) {
         const auto value = std::stoul(hex, nullptr, 16);
         return {((value >> 16) & 0xff) / 255.F, ((value >> 8) & 0xff) / 255.F, (value & 0xff) / 255.F};
+    }
+
+    // The lettering for drawing text, if the theme has any. A reload that
+    // leaves the file as it was keeps what was decoded; a file over the atlas
+    // bound is refused from its header, so a config reload never decodes
+    // more than a small image. Cairo hands it over as premultiplied ARGB, of
+    // which only the coverage is kept.
+    void readGlyphs(const std::string& path) {
+        std::error_code  error;
+        const auto       size  = std::filesystem::file_size(path, error);
+        const auto       mtime = error ? std::filesystem::file_time_type{} : std::filesystem::last_write_time(path, error);
+        const auto       stamp = error ? std::string() : std::format("{}:{}:{}", path, size, mtime.time_since_epoch().count());
+        if (!stamp.empty() && stamp == g->glyphStamp)
+            return;
+        g->glyphStamp = stamp;
+        g->glyphPixels.clear();
+        g->glyphWidth = g->glyphHeight = 0;
+        if (stamp.empty())
+            return;
+
+        // PNG: an 8-byte signature, then IHDR's length and type, then its
+        // width and height, big-endian.
+        std::ifstream             file(path, std::ios::binary);
+        std::array<uint8_t, 24>   header{};
+        if (!file.read(reinterpret_cast<char*>(header.data()), header.size()) || std::memcmp(header.data() + 12, "IHDR", 4) != 0)
+            return;
+        const auto big = [&](int at) { return uint32_t(header[at]) << 24 | uint32_t(header[at + 1]) << 16 | uint32_t(header[at + 2]) << 8 | header[at + 3]; };
+        if (big(16) > GLYPHS_MAX_WIDTH || big(20) > GLYPHS_MAX_HEIGHT)
+            return;
+
+        const auto image = cairo_image_surface_create_from_png(path.c_str());
+        if (cairo_surface_status(image) == CAIRO_STATUS_SUCCESS && cairo_image_surface_get_format(image) == CAIRO_FORMAT_ARGB32) {
+            const int  width = cairo_image_surface_get_width(image), height = cairo_image_surface_get_height(image);
+            const int  stride = cairo_image_surface_get_stride(image);
+            const auto pixels = cairo_image_surface_get_data(image);
+            g->glyphPixels.resize(size_t(width) * height);
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    g->glyphPixels[size_t(y) * width + x] = (reinterpret_cast<const uint32_t*>(pixels + size_t(y) * stride)[x]) >> 24;
+            g->glyphWidth  = width;
+            g->glyphHeight = height;
+        }
+        cairo_surface_destroy(image);
     }
 
     // The shader and its palette, both from the theme Omarchy has just applied.
@@ -231,26 +283,9 @@ void main() {
                 g->backgrounds.push_back(value);
         }
 
-        // The lettering for drawing text, if the theme has any: cairo hands it
-        // over as premultiplied ARGB, of which only the coverage is kept.
-        g->glyphPixels.clear();
-        g->glyphWidth = g->glyphHeight = 0;
-        if (!g->source.empty()) {
-            const auto image = cairo_image_surface_create_from_png((dir + "/glyphs.png").c_str());
-            if (cairo_surface_status(image) == CAIRO_STATUS_SUCCESS && cairo_image_surface_get_format(image) == CAIRO_FORMAT_ARGB32) {
-                const int  width = cairo_image_surface_get_width(image), height = cairo_image_surface_get_height(image);
-                const int  stride = cairo_image_surface_get_stride(image);
-                const auto pixels = cairo_image_surface_get_data(image);
-                g->glyphPixels.resize(size_t(width) * height);
-                for (int y = 0; y < height; y++)
-                    for (int x = 0; x < width; x++)
-                        g->glyphPixels[size_t(y) * width + x] = (reinterpret_cast<const uint32_t*>(pixels + size_t(y) * stride)[x]) >> 24;
-                g->glyphWidth  = width;
-                g->glyphHeight = height;
-            }
-            cairo_surface_destroy(image);
-        }
+        readGlyphs(dir + "/glyphs.png");
         g->generation++;
+
         // The backdrop's clock runs only while the theme has a backdrop; 0
         // disarms the timer.
         wl_event_source_timer_update(g->timer, g->source.empty() ? 0 : 1);
@@ -548,8 +583,10 @@ void main() {
             std::memcpy(&pos, buffer.data() + 16, 4);
             if (count > FEED_RING || pos >= FEED_RING)
                 continue;
+            // Every valid snapshot is the feed's whole state: a restarted feed
+            // repeats generations, so only the content says whether it changed.
             g->feedReceived = std::chrono::steady_clock::now();
-            if (generation == g->feedGeneration && count == g->feedCount && pos == g->feedPos)
+            if (count == g->feedCount && pos == g->feedPos && std::equal(buffer.begin() + FEED_HEADER, buffer.end(), g->feedRing.begin()))
                 continue;
             std::copy(buffer.begin() + FEED_HEADER, buffer.end(), g->feedRing.begin());
             g->feedGeneration = generation;
@@ -561,13 +598,25 @@ void main() {
     }
 
     // The socket the feed sends to, private to the user; without a runtime
-    // directory or a socket there is simply no text.
+    // directory or a socket there is simply no text. One Hyprland at a time
+    // owns its path, the one holding feed.lock for as long as it runs: it
+    // alone replaces a stale socket and removes it at exit, so a second
+    // Hyprland in the session (a nested test) neither takes the feed nor
+    // deletes the first one's socket.
     void openFeed() {
         const char* runtime = getenv("XDG_RUNTIME_DIR");
         if (!runtime || !*runtime)
             return;
         const std::string dir = std::string(runtime) + "/omarchy-cinema";
         mkdir(dir.c_str(), 0700);
+        const int lock = open((dir + "/feed.lock").c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+        if (lock < 0)
+            return;
+        if (flock(lock, LOCK_EX | LOCK_NB) != 0) {
+            close(lock);
+            return;
+        }
+        g->feedLock = lock;
         sockaddr_un address{};
         address.sun_family = AF_UNIX;
         const auto path    = dir + "/feed.sock";
@@ -595,6 +644,8 @@ void main() {
             close(g->feedFd);
             unlink(g->feedPath.c_str());
         }
+        if (g->feedLock >= 0)
+            close(g->feedLock);
     }
 
     // Glass: in a film theme, a window's background (the theme's background

@@ -60,10 +60,14 @@ int feedChar(int i) {
 }
 
 // How much of glyph `code` covers `uv` (0 to 1 across its cell, y down).
+// The sample stays half a texel inside the cell, so the filter never reaches
+// the next character.
 float glyph(int code, vec2 uv) {
     int c = clamp(code - 32, 0, 95);
     vec2 cell = vec2(float(c % 16), float(c / 16));
-    return texture(glyphs, (cell + clamp(uv, 0.0, 1.0)) / vec2(16.0, 6.0)).r;
+    vec2 texels = vec2(textureSize(glyphs, 0)) / vec2(16.0, 6.0);
+    vec2 inside = clamp(uv * texels, vec2(0.5), texels - 0.5) / texels;
+    return texture(glyphs, (cell + inside) / vec2(16.0, 6.0)).r;
 }
 
 // 0 to 1 once every `seconds`.

@@ -27,7 +27,8 @@ SOCKET = os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()
 RING = 16384
 ACTIVE = 600  # a log written in the last ten minutes is followed
 FIRST_READ = 64 * 1024  # a newly followed log starts this far from its end
-LOOK_EVERY = 2.0  # seconds between looks for logs
+LOOK_EVERY = 0.6  # seconds between looks for logs: a new session is followed within a second
+LETTERED = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.join(HOME, ".local/state")), "omarchy/current/theme/glyphs.png")
 SEND_EVERY = 0.25  # at most four snapshots a second
 ALIVE_EVERY = 5.0  # the current snapshot again, so the plugin knows the feed is up
 VERSION = b"CFD1"  # magic, then generation u64, count u32, next position u32
@@ -137,6 +138,7 @@ class Log:
         self.adapter = codex_text if "/.codex/" in path else claude_text
 
     def read(self, stat):
+        """The new records' text as (timestamp, text), in the log's order."""
         if stat.st_ino != self.inode or stat.st_size < self.offset:
             # Replaced or truncated: start again from its start.
             self.inode, self.offset, self.partial, self.skip_first = stat.st_ino, 0, b"", False
@@ -158,7 +160,8 @@ class Log:
             except ValueError:
                 continue
             if isinstance(record, dict):
-                out.extend(t for t in self.adapter(record) if t)
+                stamp = str(record.get("timestamp", ""))
+                out.extend((stamp, t) for t in self.adapter(record) if t)
         return out
 
 
@@ -169,6 +172,12 @@ def main():
     sock.setblocking(False)
     sent_generation, last_send, last_look = -1, 0.0, 0.0
     while True:
+        # Nothing to do while the applied theme draws no text.
+        if not os.path.exists(LETTERED):
+            logs = {}
+            ring.clear()
+            time.sleep(1.0)
+            continue
         now = time.monotonic()
         if now - last_look >= LOOK_EVERY:
             last_look = now
@@ -186,15 +195,19 @@ def main():
             if not logs:
                 ring.clear()
 
+        # Every log's new records, merged in the order they were written, so
+        # the newest text is the last in, whichever log it came from.
+        records = []
         for log in list(logs.values()):
             try:
-                texts = log.read(os.stat(log.path))
+                records.extend(log.read(os.stat(log.path)))
             except OSError:
                 continue
-            for text in texts:
-                text = printable(text)
-                if text:
-                    ring.add(text + " ")
+        records.sort(key=lambda record: record[0])
+        for _, text in records:
+            text = printable(text)
+            if text:
+                ring.add(text + " ")
 
         changed = ring.generation != sent_generation
         if (changed and now - last_send >= SEND_EVERY) or now - last_send >= ALIVE_EVERY:
