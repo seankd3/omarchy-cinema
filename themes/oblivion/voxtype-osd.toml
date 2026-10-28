@@ -1,0 +1,4 @@
+# Oblivion's dictation popup. Voxtype's Quickshell OSD loads it from the current
+# theme, in the colours of its colors.toml.
+name = "oblivion"
+qml_entry = "voxtype-osd-oblivion.qml"

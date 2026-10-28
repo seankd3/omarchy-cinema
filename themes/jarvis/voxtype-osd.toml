@@ -1,0 +1,4 @@
+# Jarvis's dictation popup. Voxtype's Quickshell OSD loads it from the current
+# theme, in the colours of its colors.toml.
+name = "jarvis"
+qml_entry = "voxtype-osd-jarvis.qml"

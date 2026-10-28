@@ -88,11 +88,27 @@ each window's locations and canonical workspace before quitting and restore
 exactly that record; and mark the look applied only after the restore is
 verified. A first draft that did none of this was deleted (Sol pass 4).
 
+**Dictation popup.** Voxtype's Quickshell OSD takes its style from
+`~/.local/state/omarchy/current/theme`: the applied theme's `voxtype-osd.toml`.
+A film theme ships one naming its own `voxtype-osd-<slug>.qml`, a `FilmOsd`
+(`osd/FilmOsd.qml`, copied beside it at install) with the film's drawing on a
+canvas: placement, the last 1.2 s of voice, a clock and the light stroke are
+shared. Every other theme gets an empty manifest from
+`~/.config/omarchy/themed/voxtype-osd.toml.tpl`, which is Voxtype's own popup
+in that theme's colours. Voxtype's theme follower re-resolves the style when
+the theme changes, so the popup switches live; each film's file has its own
+name because the OSD reloads its QML only when the path changes. The popups
+are canvas, not shader effects, so `tools/osd-preview` renders them off screen
+exactly as they draw live. No HUD text.
+
 ## Layout and install
 
 ```
 plugin/        main.cpp, contract.glsl, Makefile (g++ against installed headers)
-themes/<slug>/ colors.toml, hyprland.lua, backdrop.frag, backgrounds/, ...
+osd/           FilmOsd.qml (each film's dictation popup builds on it), the
+               stock themes' voxtype-osd.toml template
+themes/<slug>/ colors.toml, hyprland.lua, backdrop.frag, backgrounds/,
+               voxtype-osd.toml and voxtype-osd-<slug>.qml, ...
 install        build the plugin into ~/.local/lib/omarchy-cinema/backdrop.so
                (a new file, then renamed: Hyprland maps the old one), link each
                theme into ~/.config/omarchy/themes/<slug> (never over a real
@@ -122,3 +138,5 @@ for `omarchy theme install` (a git-installed theme loses its `hyprland.lua`).
 4. Idle cost measured against the plugin unloaded, interleaved.
 5. Unload while drawing, reload, missing and broken shader: Hyprland survives
    (nested instance first).
+6. Dictating in each film shows its popup, and in a stock theme Voxtype's own;
+   switching theme while Voxtype runs switches the popup.

@@ -1,0 +1,28 @@
+#!/bin/bash
+# Renders a film theme's dictation popup off screen while recording and while
+# transcribing, over its backdrop render from tools/preview.py:
+#
+#   tools/osd-preview themes/<slug>
+#
+# Writes scratch/preview/<slug>-osd-{recording,transcribing}.png, the bottom of
+# the screen where the popup sits.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+theme=$(cd "$1" && pwd)
+slug=$(basename "$theme")
+out=$here/scratch/preview
+backdrop=$out/$slug-windows-12.png
+[[ -f $backdrop ]] || uv run -q "$here/tools/preview.py" "$theme" 12 >/dev/null
+# The film's popup builds on FilmOsd, which ./install puts beside it.
+install -m 644 "$here/osd/FilmOsd.qml" "$theme/FilmOsd.qml"
+
+for state in recording transcribing; do
+  QT_QPA_PLATFORM=offscreen QML_XHR_ALLOW_FILE_READ=1 \
+    timeout 20 /usr/lib/qt6/bin/qml "$here/tools/osd-preview.qml" -- \
+    "$theme" "$backdrop" "$state" "$out/$slug-osd-$state.full.png"
+  # The bottom middle of the screen, where the popup sits.
+  magick "$out/$slug-osd-$state.full.png" -gravity south -crop 1200x330+0+0 +repage "$out/$slug-osd-$state.png"
+  rm "$out/$slug-osd-$state.full.png"
+  echo "$out/$slug-osd-$state.png"
+done

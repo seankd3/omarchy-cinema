@@ -1,0 +1,4 @@
+# Roadster's dictation popup. Voxtype's Quickshell OSD loads it from the current
+# theme, in the colours of its colors.toml.
+name = "roadster"
+qml_entry = "voxtype-osd-roadster.qml"

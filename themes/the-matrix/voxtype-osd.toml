@@ -1,0 +1,4 @@
+# The Matrix's dictation popup. Voxtype's Quickshell OSD loads it from the current
+# theme, in the colours of its colors.toml.
+name = "the-matrix"
+qml_entry = "voxtype-osd-the-matrix.qml"

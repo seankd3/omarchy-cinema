@@ -44,6 +44,9 @@ for theme in "$here"/themes/*/; do
   fi
   icons=$(python3 "$here/tools/folders.py" "$theme")
   link "$theme/icons" ~/.local/share/icons/"$icons"
+  # A film's dictation popup builds on FilmOsd, which must sit beside it:
+  # Omarchy copies the theme on its own when it applies it.
+  [[ -f $theme/voxtype-osd.toml ]] && install -m 644 "$here/osd/FilmOsd.qml" "$theme/FilmOsd.qml"
   link "$theme" ~/.config/omarchy/themes/"$(basename "$theme")"
 done
 
@@ -61,6 +64,21 @@ mkdir -p "${gtk%/*}"
 touch "$gtk"
 if ! grep -qxF "$import" "$gtk"; then
   printf '%s\n%s' "$import" "$(cat "$gtk")" >"$gtk"
+fi
+
+# Voxtype's dictation popup follows the theme the same way: its style is the
+# applied theme's voxtype-osd.toml, which a film theme ships with its own
+# popup and every other theme gets from this template, keeping Voxtype's.
+# Voxtype re-reads it when the theme changes, so the popup switches with it.
+template=~/.config/omarchy/themed/voxtype-osd.toml.tpl
+[[ -e $template ]] || install -m 644 "$here/osd/voxtype-osd.toml.tpl" "$template"
+if command -v voxtype >/dev/null; then
+  if [[ -d ${XDG_DATA_HOME:-$HOME/.local/share}/voxtype/quickshell || -d /usr/share/voxtype/quickshell ]]; then
+    voxtype config set osd.style "~/.local/state/omarchy/current/theme" >/dev/null
+    voxtype config set osd.frontend quickshell >/dev/null
+  else
+    echo "Voxtype's Quickshell OSD is not installed, so its popup stays as it is: run voxtype setup quickshell, then ./install" >&2
+  fi
 fi
 
 # Omarchy runs this after `omarchy update`: the plugin is rebuilt for the

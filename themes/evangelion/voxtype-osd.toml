@@ -1,0 +1,4 @@
+# Evangelion's dictation popup. Voxtype's Quickshell OSD loads it from the current
+# theme, in the colours of its colors.toml.
+name = "evangelion"
+qml_entry = "voxtype-osd-evangelion.qml"
