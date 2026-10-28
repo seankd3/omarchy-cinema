@@ -31,12 +31,12 @@ fi
 # A home with the folders Files shows on its sidebar and a few files, named
 # so its window can be told from the user's own.
 tmp=$(mktemp -d)
-# Closes the private Files: the nautilus whose arguments name this place.
+# The private Files and everything its D-Bus session starts (portals, dconf,
+# the accessibility bus) run in one systemd scope, and stopping the scope
+# ends them all.
+scope=cinema-files-preview-$$
 close() {
-  local pid
-  for pid in $(pgrep -x nautilus); do
-    tr '\0' ' ' </proc/"$pid"/cmdline 2>/dev/null | grep -qF "$tmp/" && kill "$pid"
-  done
+  systemctl --user stop "$scope.scope" 2>/dev/null || true
   rm -rf "$tmp"
 }
 trap close EXIT
@@ -64,7 +64,7 @@ printf '[Settings]\ngtk-icon-theme-name=%s\ngtk-application-prefer-dark-theme=%s
   >"$tmp/config/gtk-4.0/settings.ini"
 
 scheme=$([[ $dark == 1 ]] && echo prefer-dark || echo prefer-light)
-command="dbus-run-session -- env XDG_CONFIG_HOME=$tmp/config GDK_DEBUG=no-portals GIO_USE_VFS=local GIO_USE_VOLUME_MONITOR=unix ADW_DEBUG_COLOR_SCHEME=$scheme nautilus --new-window $place"
+command="systemd-run --user --scope --quiet --unit=$scope dbus-run-session -- env XDG_CONFIG_HOME=$tmp/config GDK_DEBUG=no-portals GIO_USE_VFS=local GIO_USE_VOLUME_MONITOR=unix ADW_DEBUG_COLOR_SCHEME=$scheme nautilus --new-window $place"
 hyprctl eval "hl.exec_cmd('$command', { workspace = 'special:cinema-preview silent', render_unfocused = true })" >/dev/null
 
 id=""
