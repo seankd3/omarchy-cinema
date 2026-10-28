@@ -28,13 +28,19 @@ FilmOsd {
         ctx.closePath();
     }
 
-    // A regular octagon of radius `r` at (x, y), flat on every side.
-    function octagon(ctx, x, y, r) {
-        for (let k = 0; k < 8; k++) {
-            const th = (k + 0.5) * Math.PI / 4;
-            if (k === 0) ctx.moveTo(x + r * Math.cos(th), y + r * Math.sin(th));
-            else ctx.lineTo(x + r * Math.cos(th), y + r * Math.sin(th));
-        }
+    // An octagon at (x, y), flat on every side, `rx` from its centre to its
+    // left and right sides and `ry` to its top and bottom: regular while the
+    // two are equal, drawn out sideways when `rx` is the larger.
+    function octagon(ctx, x, y, rx, ry) {
+        const c = Math.min(rx, ry) * (2 - Math.SQRT2);
+        ctx.moveTo(x + rx, y - ry + c);
+        ctx.lineTo(x + rx - c, y - ry);
+        ctx.lineTo(x - rx + c, y - ry);
+        ctx.lineTo(x - rx, y - ry + c);
+        ctx.lineTo(x - rx, y + ry - c);
+        ctx.lineTo(x - rx + c, y + ry);
+        ctx.lineTo(x + rx - c, y + ry);
+        ctx.lineTo(x + rx, y + ry - c);
         ctx.closePath();
     }
 
@@ -124,21 +130,19 @@ FilmOsd {
         }
 
         // AT field rings: thrown out by loud speech, or steadily while
-        // thinking; each spreads and fades, inside the pane.
+        // thinking; each spreads to the pane's ends and fades. Once a ring
+        // is as tall as the pane it draws out sideways, so it stays a whole
+        // octagon (cut by the pane, a wide one showed only its two sides,
+        // which read as dividers).
         const strength = thinking ? 1 : Math.min(1, level * 2);
         if (strength < 0.15) return;
         const beat = thinking ? 0.7 : 0.45;
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(pane.x, pane.y, pane.width, pane.height - 8);
-        ctx.clip();
-        ctx.beginPath();
         for (let k = 0; k < 3; k++) {
             const phase = (t / beat + k / 3) % 1;
-            octagon(ctx, box.width / 2, cy, 14 + phase * w * 0.55);
-            light(ctx, thinking ? red : accent, 1.4, (1 - phase) * strength * a);
+            const r = 13 + phase * w / 2;
             ctx.beginPath();
+            octagon(ctx, box.width / 2, cy, r, Math.min(r, 34));
+            light(ctx, thinking ? red : accent, 1.4, (1 - phase) * strength * a);
         }
-        ctx.restore();
     }
 }
