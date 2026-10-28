@@ -35,7 +35,7 @@ The shader contract (all a backdrop can know):
   rectangles at half resolution. Red is any window, green the focused one.
   `halo`: the same blurred at an eighth of the size, a soft falloff (not a
   distance field) for light that pools around and between windows.
-- `focus`: the focused window's rect (logical px) when it is on this screen,
+- `focused`: the focused window's rect (logical px) when it is on this screen,
   else a rect in the middle of the screen. No cursor: nothing needs it.
 
 **Theme handoff.** `omarchy-theme-set` writes `current/theme.generation` after

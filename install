@@ -1,39 +1,25 @@
 #!/bin/bash
-# Builds every theme's backdrop and links the plugin and the themes into Omarchy.
-# Run it again after changing anything; it fails on the first shader error.
+# Builds the backdrop plugin for the installed Hyprland and links the themes
+# into Omarchy. Run it again after changing the plugin and after every Hyprland
+# update: the plugin refuses to load into a Hyprland it was not built for.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-qsb=$(command -v qsb || echo /usr/lib/qt6/bin/qsb)
-[[ -x $qsb ]] || { echo "qsb not found: sudo pacman -S --needed qt6-shadertools" >&2; exit 1; }
 
-# qsb tells the shader stage from the file name, so each theme's shader is
-# assembled as backdrop.frag in a directory of its own.
-build=$(mktemp -d)
-trap 'rm -rf "$build"' EXIT
+make -s -C "$here/plugin" BUILD="$here/plugin/build"
+mkdir -p ~/.local/lib/omarchy-cinema
+# A new file, not an overwrite: Hyprland has the old one mapped while it runs.
+install -m 755 "$here/plugin/build/backdrop.so" ~/.local/lib/omarchy-cinema/backdrop.so.new
+mv ~/.local/lib/omarchy-cinema/backdrop.so.new ~/.local/lib/omarchy-cinema/backdrop.so
 
-for frag in "$here"/themes/*/backdrop.frag; do
-  slug=$(basename "$(dirname "$frag")")
-  mkdir -p "$build/$slug"
-  cat "$here/backdrop/contract.glsl" "$frag" >"$build/$slug/backdrop.frag"
-  "$qsb" --glsl "100 es,120,150" -o "$frag.qsb" "$build/$slug/backdrop.frag"
-  echo "built $slug"
-done
-
-# A link never replaces a real directory: the user's own theme or plugin of
-# the same name stays, and the install stops.
-link() {
-  if [[ -e $2 && ! -L $2 ]]; then
-    echo "$2 exists and is not a link; move it aside first" >&2
+# A link never replaces a real directory: the user's own theme of the same
+# name stays, and the install stops.
+mkdir -p ~/.config/omarchy/themes
+for theme in "$here"/themes/*/; do
+  target=~/.config/omarchy/themes/$(basename "$theme")
+  if [[ -e $target && ! -L $target ]]; then
+    echo "$target exists and is not a link; move it aside first" >&2
     exit 1
   fi
-  ln -sfn "$1" "$2"
-}
-
-mkdir -p ~/.config/omarchy/plugins ~/.config/omarchy/themes
-link "$here/backdrop" ~/.config/omarchy/plugins/sean.backdrop
-for theme in "$here"/themes/*/; do
-  link "${theme%/}" ~/.config/omarchy/themes/"$(basename "$theme")"
+  ln -sfn "${theme%/}" "$target"
 done
-
-omarchy plugin enable sean.backdrop >/dev/null

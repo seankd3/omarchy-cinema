@@ -1,3 +1,7 @@
+-- The live backdrop: the plugin draws this theme's backdrop.frag behind the
+-- windows. A theme that does not load it unloads it.
+hl.plugin.load(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/backdrop.so")
+
 -- Jarvis: every window is glass over the live backdrop. Omarchy's own frosted
 -- glass blurs what is behind it; terminals keep Omarchy's rule, since a window
 -- rule fades their text, and Glassy mode clears their background instead.
