@@ -90,14 +90,15 @@ hl.config({
   plugin = { backdrop = { glass = film.glass or 0.85 } },
 })
 
--- Over a moving backdrop Omarchy's light frost leaves text behind the glass
--- legible enough to fight the text on it, so the frost is heavier. Omarchy's
--- glass toggles load after the theme and set their own, so this is set once
--- the whole config has loaded.
+-- A light frost: text on the glass is opaque, so nothing behind it competes,
+-- and the backdrop's lines should read through (Sean, 2026-10-28: "I don't
+-- really see this transparency getting applied"; the heavier 8 x 3 frost had
+-- smeared Tron's grid to black). Omarchy's glass toggles load after the theme
+-- and set their own, so this is set once the whole config has loaded.
 -- Glassy mode also fades Files whole, text included; under a film theme its
 -- background turns to glass like every other window's instead.
 hl.on("config.reloaded", function()
-  hl.config({ decoration = { blur = { size = 8, passes = 3 } } })
+  hl.config({ decoration = { blur = { size = 3, passes = 2 } } })
   o.window("org\\.gnome\\.Nautilus", { opacity = "0.999 0.999" })
 end)
 end

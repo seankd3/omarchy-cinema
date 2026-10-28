@@ -499,9 +499,10 @@ vec4 cinemaGlass(vec4 c) {{
         vec3 e = abs(c.rgb - CINEMA_BACKGROUNDS[i]);
         off = min(off, max(max(e.r, e.g), e.b));
     }}
-    // Within a step or two of a background colour is background; anything
-    // further is something drawn on it and keeps its opacity.
-    float a = mix(CINEMA_GLASS, 1.0, smoothstep(1.5 / 255.0, 6.0 / 255.0, off));
+    // Near a background colour is background: apps shade their panels a few
+    // steps off it (Slack's are 9 or 10 off). Text, icons and lines sit far
+    // further out and keep their opacity.
+    float a = mix(CINEMA_GLASS, 1.0, smoothstep(6.0 / 255.0, 16.0 / 255.0, off));
     return vec4(c.rgb * a, a);
 }}
 
