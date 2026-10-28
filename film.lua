@@ -51,10 +51,6 @@ local inactive = gradient(colors.hyprland_inactive_border or "rgba(595959aa)")
 return function(film)
 film = film or {}
 
--- The plugin draws the theme's backdrop.frag behind the windows. A theme that
--- does not load it unloads it.
-hl.plugin.load(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/backdrop.so")
-
 -- Every window is glass over the backdrop: its background turns to glass and
 -- its text stays opaque (Sean, 2026-10-28: "the transparency should effect the
 -- background but not the text"). The plugin draws that in Hyprland's window

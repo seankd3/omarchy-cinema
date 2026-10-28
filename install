@@ -2,6 +2,8 @@
 # Builds the backdrop plugin for the installed Hyprland and links the themes
 # into Omarchy. Run it again after changing anything and after every Hyprland
 # update: the plugin refuses to load into a Hyprland it was not built for.
+# A new build takes effect at the next login: never load or unload it in the
+# running Hyprland (that hung the desktop on 2026-10-28).
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)

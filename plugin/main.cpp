@@ -198,6 +198,8 @@ void main() {
                 g->backgrounds.push_back(value);
         }
         g->generation++;
+        if (g->timer && !g->source.empty())
+            wl_event_source_timer_update(g->timer, 1);
         // The glass waits for the rest of the config to load (plugin:backdrop:
         // glass comes later in the theme), so it is applied from the loop.
         if (!g->glassIdle)
@@ -663,9 +665,11 @@ vec4 cinemaGlass(vec4 c) {{
 
     // The backdrop's own motion. Time stands still while there is nothing to
     // see it on: animations off, the session locked, or every monitor asleep
-    // or showing a fullscreen window.
+    // or showing a fullscreen window. A theme without a backdrop stops the
+    // timer altogether, since the plugin stays loaded under every theme;
+    // readTheme starts it again.
     int onTick(void*) {
-        if (!g)
+        if (!g || g->source.empty())
             return 0;
         const auto now = std::chrono::steady_clock::now();
         if (now - g->lastPowerCheck > std::chrono::seconds(2)) {
@@ -683,7 +687,7 @@ vec4 cinemaGlass(vec4 c) {{
         const float elapsed = std::min(std::chrono::duration<float>(now - g->lastTick).count(), 0.1F);
         g->lastTick         = now;
         static auto ANIMATIONS = CConfigValue<Config::INTEGER>("animations:enabled");
-        if (g->source.empty() || !*ANIMATIONS || g_pSessionLockManager->isSessionLocked())
+        if (!*ANIMATIONS || g_pSessionLockManager->isSessionLocked())
             return 0;
 
         const bool glass = now - g->lastGlass >= std::chrono::duration<double>(GLASS_EVERY);

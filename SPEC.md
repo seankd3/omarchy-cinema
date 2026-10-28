@@ -52,8 +52,15 @@ animations off, the session locked, or every monitor asleep or fullscreen.
 **Theme switch.** `omarchy-theme-set` swaps `current/theme` and reloads
 Hyprland. The plugin reads `backdrop.frag` and `colors.toml` from
 `current/theme` on load and on every config reload, and compiles the program
-at the next draw. A theme that does not load the plugin unloads it. A shader
-that does not compile is reported once and draws nothing.
+at the next draw. A shader that does not compile is reported once and draws
+nothing.
+
+**Loaded once a session.** `~/.config/hypr/hyprland.lua` loads the plugin at
+login and nothing unloads it while Hyprland runs; a theme without
+`backdrop.frag` leaves it idle (no draw, no timer). Native code is never
+swapped in a running Hyprland: on 2026-10-28 an unload, load and theme switch
+hung the desktop and it took a forced power-off. A new build takes effect at
+the next login, and is tried first in a nested Hyprland.
 
 **Glass: the background turns to glass, text stays opaque.** Sean: "the
 transparency should effect the background but not the text, all text should
@@ -130,13 +137,13 @@ for `omarchy theme install` (a git-installed theme loses its `hyprland.lua`).
 
 ## Acceptance
 
-1. `./install` builds and links; `omarchy theme set jarvis` loads the plugin
-   with no config errors.
+1. `./install` builds and links; after a login the plugin is loaded with no
+   config errors, and `omarchy theme set jarvis` draws its backdrop.
 2. Dragging and resizing a window, workspace slides and focus changes: the
    backdrop follows in the same frame (Sean's eye on the real machine).
 3. Workspace 1 before and after screenshots, read for legibility.
-4. Idle cost measured against the plugin unloaded, interleaved.
-5. Unload while drawing, reload, missing and broken shader: Hyprland survives
-   (nested instance first).
+4. Idle cost measured against a stock theme (plugin idle), interleaved.
+5. Missing and broken shader, and switching between film and stock themes:
+   Hyprland survives, in a nested instance.
 6. Dictating in each film shows its popup, and in a stock theme Voxtype's own;
    switching theme while Voxtype runs switches the popup.
