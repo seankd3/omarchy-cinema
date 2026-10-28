@@ -194,11 +194,14 @@ void main() {
         uint64_t                                feedGeneration = 0, feedChanges = 0;
         uint32_t                                feedCount = 0, feedPos = 0;
         std::chrono::steady_clock::time_point   feedReceived;
-        // How present the text is, easing toward whether there is any.
-        float                                   feedPresence = 0;
         // The feed said no agent is running: its last text is kept, to drain.
         bool                                    feedEmpty = true;
-        std::chrono::steady_clock::time_point   presenceAt;
+        // How present the text is: a timed move toward whether there is any,
+        // from where it stood when that last changed, read against the clock
+        // whenever it is drawn, so it takes FEED_EASE at any frame rate.
+        bool                                    presenceTarget = false;
+        float                                   presenceFrom   = 0;
+        std::chrono::steady_clock::time_point   presenceChanged;
         // The theme's lettering (glyphs.png) as coverage, one byte a pixel,
         // and the file it was decoded from, so an unchanged one is not
         // decoded again on every config reload.
@@ -807,9 +810,16 @@ vec4 cinemaGlass(vec4 c) {{
             const bool lettered = !g->glyphPixels.empty();
             const bool live     = g->feedFd >= 0 && now - g->feedReceived <= FEED_STALE;
             const bool text     = lettered && live && !g->feedEmpty && g->feedCount > 0;
-            const float step    = std::min(std::chrono::duration<float>(now - g->presenceAt).count(), 0.1F) / FEED_EASE;
-            g->presenceAt       = now;
-            g->feedPresence     = std::clamp(g->feedPresence + (text ? step : -step), 0.F, 1.F);
+            const auto presence = [&] {
+                const float moved = std::chrono::duration<float>(now - g->presenceChanged).count() / FEED_EASE;
+                return std::clamp(g->presenceFrom + (g->presenceTarget ? moved : -moved), 0.F, 1.F);
+            };
+            if (text != g->presenceTarget) {
+                g->presenceFrom    = presence();
+                g->presenceChanged = now;
+                g->presenceTarget  = text;
+            }
+            const float feedPresence = presence();
             glActiveTexture(GL_TEXTURE5);
             glBindTexture(GL_TEXTURE_2D, p.glyphs);
             if (lettered && !p.glyphsUploaded) {
@@ -840,9 +850,9 @@ vec4 cinemaGlass(vec4 c) {{
             glUniform1f(p.focusAlpha, m_scene.focusAlpha);
             glUniform1i(p.glyphsUniform, 5);
             glUniform1i(p.feedUniform, 6);
-            glUniform1i(p.feedCount, lettered && g->feedPresence > 0 && p.feedUploaded ? int(g->feedCount) : 0);
+            glUniform1i(p.feedCount, lettered && feedPresence > 0 && p.feedUploaded ? int(g->feedCount) : 0);
             glUniform1i(p.feedPos, int(g->feedPos));
-            glUniform1f(p.feedPresence, g->feedPresence);
+            glUniform1f(p.feedPresence, feedPresence);
 
             glBindVertexArray(p.vao);
             auto& data = g_pHyprRenderer->m_renderData;

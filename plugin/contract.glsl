@@ -38,9 +38,11 @@ uniform sampler2D windowData;
 uniform int windowCount;
 uniform int focusedIndex;
 // How present the focus is, for decorations that follow it: the focused
-// window's own opacity (rising as it opens); when it closes, focusedIndex and
-// `focused` stay on it as it fades out and this falls with it; with no window
-// focused on this screen it eases to 0.
+// window's own opacity (rising as it opens). When it closes and Hyprland
+// focuses another window, the focus moves there (the closing window's own
+// decorations fade with windowAlpha); when it closes with nothing else
+// focused, focusedIndex and `focused` stay on it as it fades out and this
+// falls with it; with no window focused on this screen it eases to 0.
 uniform float focusAlpha;
 
 // Text a backdrop can draw: the newest plaintext of the agents on this machine
