@@ -2,12 +2,12 @@
 // slowly toward the tower, the sun low on the horizon and the broken moon faint
 // in the daylight. Every window is a pane of the tower's glass, traced by a fine
 // blue line and lit along the edges that face the sun; round the focused one a
-// drone's sensor ring circles, sweeping a fan of pale blue light through the
-// gaps.
+// drone's sensor ring circles.
 //
 // The theme is light, so the backdrop paints, not glows: lines are ink mixed
-// over the sky, and light is a lift toward white. Everything stays pale, so
-// the frosted white glass of the windows reads as white with dark text on it.
+// over the sky, and light is a lift toward white. Under the windows only a
+// near white wash of the sky's light shows, so the frosted glass reads as
+// white paper with dark text on it.
 
 const vec3 ZENITH = vec3(0.60, 0.70, 0.81);
 const vec3 SKY = vec3(0.80, 0.86, 0.91);
@@ -81,10 +81,15 @@ float brokenMoon(vec2 px, vec2 at, float R) {
     return moon;
 }
 
+// The sky's broad light: haze at the horizon deepening to blue overhead.
+vec3 daylight(vec2 px, float horizon) {
+    float up = clamp((horizon - px.y) / horizon, 0.0, 1.0);
+    return mix(mix(HAZE, SKY, smoothstep(0.0, 0.3, up)), ZENITH, smoothstep(0.25, 1.0, up));
+}
+
 vec3 sky(vec2 px, float horizon, vec2 sun) {
     float up = clamp((horizon - px.y) / horizon, 0.0, 1.0);
-    vec3 col = mix(HAZE, SKY, smoothstep(0.0, 0.3, up));
-    col = mix(col, ZENITH, smoothstep(0.25, 1.0, up));
+    vec3 col = daylight(px, horizon);
     // High cirrus, combed sideways by the wind, drifting on a slow circle.
     vec2 q = px * vec2(0.0011, 0.009) + orbit(1800.0, 3.0);
     float wisp = smoothstep(0.55, 0.95, noise(q) * 0.7 + noise(q * 2.7 + 1.3) * 0.4);
@@ -135,16 +140,6 @@ float around(vec2 px, vec4 rect) {
     return s / (2.0 * (w + h));
 }
 
-// The point `s` of the way round a rect's edge, the inverse of around().
-vec2 pointAround(float s, vec4 rect) {
-    float w = rect.z, h = rect.w;
-    float t = s * 2.0 * (w + h);
-    if (t < w) return rect.xy + vec2(t, 0.0);
-    if (t < w + h) return rect.xy + vec2(w, t - w);
-    if (t < 2.0 * w + h) return rect.xy + vec2(2.0 * w + h - t, h);
-    return rect.xy + vec2(0.0, 2.0 * (w + h) - t);
-}
-
 vec4 backdrop(vec2 px) {
     float horizon = resolution.y * 0.56;
     vec2 sun = vec2(resolution.x * 0.74, horizon - resolution.y * 0.035);
@@ -169,11 +164,8 @@ vec4 backdrop(vec2 px) {
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
     near = clamp(near, 0.0, 1.0);
 
-    // Behind the glass the sky stays, softened, so the pane reads as calm white.
-    col = mix(col, mix(col, HAZE, 0.5), inside);
-
     // The gaps between panes are lit a little, as glass gathers daylight.
-    col = mix(col, vec3(1.0), near * (1.0 - inside) * 0.18);
+    col = mix(col, vec3(1.0), near * 0.18);
 
     if (closest >= 0 && nearest > -1.0 && nearest < 60.0) {
         float fade = windowAlpha(closest);
@@ -186,39 +178,30 @@ vec4 backdrop(vec2 px) {
         vec2 n = q / max(length(q), 1e-3);
         vec2 toSun = normalize(sun - (rect.xy + rect.zw * 0.5));
         float facing = 0.35 + 0.65 * max(dot(n, toSun), 0.0);
-        float rim = exp(-max(nearest, 0.0) / 2.5) * (1.0 - inside);
+        float rim = exp(-max(nearest, 0.0) / 2.5);
         float glint = exp(-abs(px.x - rect.x - cycle(20.0) * rect.z) / 140.0) * step(px.y, rect.y + rect.w * 0.5);
         col = mix(col, vec3(1.0), rim * fade * (0.45 * facing + 0.5 * glint));
     }
 
     // The drone's sensor: a thin ring round the focused window, its arc
-    // circling once every 12 seconds and lighting fine ticks as it passes,
-    // and a fan of pale blue light sweeping behind it through the gaps.
-    float fd = focusedWindow(px);
-    if (fd > -1.0 && fd < 200.0) {
+    // circling once every 12 seconds with a fading trail. It rides the eased
+    // focus rect, so it glides to the next window when focus moves.
+    float fd = focusedIndex < 0 ? FAR : rectDistance(px, focused, 0.0);
+    if (abs(fd - RING) < 12.0) {
         float fade = windowAlpha(focusedIndex);
-        vec4 ring = windowRect(focusedIndex) + vec4(-RING, -RING, 2.0 * RING, 2.0 * RING);
-        float length_ = 2.0 * (ring.z + ring.w);
-        float head = cycle(12.0);
-        float at = around(px, ring);
-        float behind = fract(head - at) * length_;
+        vec4 ring = focused + vec4(-RING, -RING, 2.0 * RING, 2.0 * RING);
+        float behind = fract(cycle(12.0) - around(px, ring)) * 2.0 * (ring.z + ring.w);
         float trail = exp(-behind / 380.0);
         float onRing = 1.0 - smoothstep(0.3, 1.0, abs(fd - RING));
         col = mix(col, accent, onRing * (0.25 + 0.75 * trail) * fade);
         col = mix(col, accent, (1.0 - smoothstep(0.0, 6.0, behind)) * exp(-abs(fd - RING) / 3.0) * 0.6 * fade);
-        // The ticks stay put on the ring; the arc lights them as it passes.
-        float tick = (1.0 - smoothstep(0.4, 1.0, abs(fract(at * length_ / 14.0 + 0.5) - 0.5) * 14.0))
-            * step(RING, fd) * step(fd, RING + 6.0);
-        col = mix(col, accent, tick * trail * 0.7 * fade);
-        // The fan turns about the window's middle, pointing at the arc's head,
-        // and is lit outside the window only.
-        vec2 c = ring.xy + ring.zw * 0.5;
-        vec2 h = pointAround(head, ring) - c;
-        float sweep = fract((atan(h.y, h.x) - atan(px.y - c.y, px.x - c.x)) / TAU);
-        float fan = exp(-sweep * 12.0) * (1.0 - smoothstep(0.985, 1.0, sweep))
-            * exp(-max(fd, 0.0) / 90.0) * smoothstep(0.0, 4.0, fd) * step(reserved.x, px.y);
-        col = mix(col, mix(accent, vec3(1.0), 0.5), fan * 0.4 * fade);
     }
+
+    // Under the glass only the sky's broad light shows, lifted near white:
+    // no cloud, moon, line or sweep behind text. Omarchy's frost dims what it
+    // blurs (brightness 0.75), so the whiter this is, the nearer the pane stays
+    // to the white the apps chose their text colours against.
+    if (inside > 0.0) col = mix(col, mix(daylight(px, horizon), vec3(1.0), 0.85), inside);
 
     // The bar's lower edge: a fine pale blue line with a soft glint gliding
     // along it, and the frosted bar above lifted toward white.
