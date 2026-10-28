@@ -10,6 +10,11 @@
 // focused window. The gaps between windows glow faintly green.
 
 const vec3 HEAD = vec3(0.78, 1.0, 0.84);
+// The brightest the rain is behind the glass. colors.toml's muted (#5c9a6c)
+// keeps 4.5:1 over a background of relative luminance 0.0199 or less; glass
+// 0.2 over #020804 with Omarchy's 0.75 blur brightness stays under that while
+// the rain behind is at most 0.19 in every channel.
+const float UNDER_GLASS = 0.19;
 // Periods (seconds) a drop takes to fall one repeat, four to a depth from the
 // nearest, slower further back; each divides 3600. Near drops average about
 // 340 px a second, mid 210 and far 130: a screen in four seconds up close,
@@ -115,10 +120,13 @@ vec4 backdrop(vec2 px) {
         + green * (close.x * 1.0 + close.z * 0.1)
         + HEAD * (far.y * 0.4 + mid.y * 0.9 + close.y * 1.6);
 
-    // The rain falls behind the glass as it does in the open, and brightest
+    // Behind the glass the rain keeps its shape but not its glare: no channel
+    // goes over UNDER_GLASS, so a drop passing behind secondary text never
+    // takes it under 4.5:1 (Sol, 2026-10-28). Out in the open it is brightest
     // round the focused window.
     float open = 1.0 - inside;
-    vec3 light = code * (1.0 + 0.6 * nearFocus * open);
+    float peak = max(code.r, max(code.g, code.b));
+    vec3 light = mix(code * min(1.0, UNDER_GLASS / max(peak, 1e-4)), code * (1.0 + 0.6 * nearFocus), open);
 
     // The rain parts round the windows: drops flare where they strike a
     // window's top edge, and streams run down its sides.
