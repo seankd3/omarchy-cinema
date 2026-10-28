@@ -45,13 +45,18 @@ uniform float focusAlpha;
 
 // Text a backdrop can draw: the newest plaintext of the agents on this machine
 // (specs/agent-rain.md), a ring of 16384 characters 128 to a row, of which
-// feedCount are real (0 when there is no feed) and the next goes at feedPos.
+// feedCount are real and the next goes at feedPos. When the agents stop, the
+// last text stays while feedPresence falls, and feedCount is 0 once it is gone.
 // The theme's glyphs.png is its lettering for them; without one, feedCount is
 // always 0. Read them through feedChar() and glyph().
 uniform sampler2D feed;
 uniform int feedCount;
 uniform int feedPos;
 uniform sampler2D glyphs;
+// How present the text is: easing to 1 over about three seconds while there is
+// text, and back to 0 when there is none (no agent running), so a backdrop
+// can let its text drain away rather than vanish.
+uniform float feedPresence;
 
 const float TAU = 6.28318530718;
 const float FAR = 1e5;

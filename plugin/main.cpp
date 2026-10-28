@@ -82,6 +82,7 @@ namespace {
     constexpr size_t FEED_HEADER = 20;
     constexpr int    FEED_BUDGET = 8; // datagrams taken per wakeup, at most
     constexpr auto   FEED_STALE  = std::chrono::seconds(10);
+    constexpr float  FEED_EASE   = 3.F; // seconds for the text to come or drain away
     // The lettering is 16 by 6 cells; anything larger than this is not an
     // atlas, and is refused from its header before it is decoded.
     constexpr uint32_t GLYPHS_MAX_WIDTH = 1024, GLYPHS_MAX_HEIGHT = 512;
@@ -124,10 +125,14 @@ void main() {
     struct SMonitor {
         SScene                                pending; // read for the frame being drawn
         SScene                                drawn;
+        // What the focus decoration follows: the focused window, or, once it
+        // has closed with nothing else focused here, its fadeout until that
+        // has faded. A source is a window's stable id, which its fadeout
+        // keeps; 0 is none. Any change of source eases from what was drawn.
         PHLWINDOWREF                          focusedWindow;
-        // The fadeout of the window that had focus here when it closed: the
-        // focus stays on it, by identity, until it has faded.
-        const void*                           focusFadeout = nullptr;
+        WP<Desktop::IFadeout>                 focusFadeout;
+        uint64_t                              focusFadeoutOf = 0;
+        uint64_t                              source         = 0;
         Rect                                  focusFrom{};
         float                                 alphaFrom = 0;
         std::chrono::steady_clock::time_point focusMoved;
@@ -137,7 +142,7 @@ void main() {
     struct SProgram {
         GLuint   id = 0, vao = 0, vbo = 0, data = 0, feed = 0, glyphs = 0;
         GLint    proj, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
-        GLint    feedUniform, feedCount, feedPos, glyphsUniform;
+        GLint    feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
         uint64_t feedUploaded = 0; // the feed change in the texture
         bool     glyphsUploaded = false;
     };
@@ -189,6 +194,11 @@ void main() {
         uint64_t                                feedGeneration = 0, feedChanges = 0;
         uint32_t                                feedCount = 0, feedPos = 0;
         std::chrono::steady_clock::time_point   feedReceived;
+        // How present the text is, easing toward whether there is any.
+        float                                   feedPresence = 0;
+        // The feed said no agent is running: its last text is kept, to drain.
+        bool                                    feedEmpty = true;
+        std::chrono::steady_clock::time_point   presenceAt;
         // The theme's lettering (glyphs.png) as coverage, one byte a pixel,
         // and the file it was decoded from, so an unchanged one is not
         // decoded again on every config reload.
@@ -389,6 +399,7 @@ void main() {
         p.feedCount    = glGetUniformLocation(p.id, "feedCount");
         p.feedPos      = glGetUniformLocation(p.id, "feedPos");
         p.glyphsUniform = glGetUniformLocation(p.id, "glyphs");
+        p.feedPresence  = glGetUniformLocation(p.id, "feedPresence");
 
         GLint vao = 0, buffer = 0;
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
@@ -448,8 +459,10 @@ void main() {
             if (g->seenFadeouts.insert(fadeout.get()).second && g->closing) {
                 g->fadeoutRounding[fadeout.get()] = g->closing->rounding();
                 for (auto& [id, state] : g->monitors)
-                    if (state.focusedWindow.lock() == g->closing)
-                        state.focusFadeout = fadeout.get();
+                    if (state.focusedWindow.lock() == g->closing) {
+                        state.focusFadeout   = fadeout;
+                        state.focusFadeoutOf = g->closing->m_stableID;
+                    }
             }
         }
         g->closing.reset();
@@ -490,7 +503,7 @@ void main() {
             const auto position = fadeout->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) - monitor->m_position;
             const auto size     = fadeout->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
             const auto rounding = g->fadeoutRounding.find(fadeout.get());
-            if (!focusedHere && fadeout.get() == state.focusFadeout)
+            if (!focusedHere && fadeout == state.focusFadeout.lock())
                 scene.focusedIndex = scene.shapes.size();
             // Only a fadeout already running when the plugin loaded has none.
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(),
@@ -498,7 +511,9 @@ void main() {
         }
 
         if (focusedHere || scene.focusedIndex < 0)
-            state.focusFadeout = nullptr; // a new focus, or the fadeout is over
+            state.focusFadeout.reset(); // a new focus, or the fadeout is over
+        const uint64_t source = focusedHere ? focusedHere->m_stableID : scene.focusedIndex >= 0 ? state.focusFadeoutOf : 0;
+        state.focusedWindow   = focusedHere;
 
         const Rect middle = {float(monitor->m_size.x * 0.3), float(monitor->m_size.y * 0.3), float(monitor->m_size.x * 0.4), float(monitor->m_size.y * 0.4)};
         const Rect target = scene.focusedIndex < 0 ? middle : scene.shapes[scene.focusedIndex].rect;
@@ -512,13 +527,12 @@ void main() {
             state.seen       = true;
             state.focusFrom  = target;
             state.focusMoved = now - std::chrono::seconds(1);
-        } else if (state.focusedWindow.lock() != focusedHere && !(focusedHere == nullptr && scene.focusedIndex >= 0)) {
+        } else if (source != state.source) {
             state.focusFrom  = state.drawn.focus;
             state.alphaFrom  = state.drawn.focusAlpha;
             state.focusMoved = now;
         }
-        if (focusedHere || scene.focusedIndex < 0)
-            state.focusedWindow = focusedHere;
+        state.source = source;
 
         const float k = easeOut(std::min(1.F, float(std::chrono::duration<double>(now - state.focusMoved).count() / FOCUS_EASE)));
         for (size_t i = 0; i < 4; i++)
@@ -606,6 +620,9 @@ void main() {
             // Every valid snapshot is the feed's whole state: a restarted feed
             // repeats generations, so only the content says whether it changed.
             g->feedReceived = std::chrono::steady_clock::now();
+            g->feedEmpty    = count == 0;
+            if (count == 0)
+                continue; // the last text stays, for the backdrop to let it drain away
             if (count == g->feedCount && pos == g->feedPos && std::equal(buffer.begin() + FEED_HEADER, buffer.end(), g->feedRing.begin()))
                 continue;
             std::copy(buffer.begin() + FEED_HEADER, buffer.end(), g->feedRing.begin());
@@ -786,8 +803,13 @@ vec4 cinemaGlass(vec4 c) {{
             // Text only for a theme with lettering, and only while the feed is
             // alive; a changed snapshot or lettering is uploaded here, where
             // the render context is current.
+            const auto now      = std::chrono::steady_clock::now();
             const bool lettered = !g->glyphPixels.empty();
-            const bool live     = g->feedFd >= 0 && std::chrono::steady_clock::now() - g->feedReceived <= FEED_STALE;
+            const bool live     = g->feedFd >= 0 && now - g->feedReceived <= FEED_STALE;
+            const bool text     = lettered && live && !g->feedEmpty && g->feedCount > 0;
+            const float step    = std::min(std::chrono::duration<float>(now - g->presenceAt).count(), 0.1F) / FEED_EASE;
+            g->presenceAt       = now;
+            g->feedPresence     = std::clamp(g->feedPresence + (text ? step : -step), 0.F, 1.F);
             glActiveTexture(GL_TEXTURE5);
             glBindTexture(GL_TEXTURE_2D, p.glyphs);
             if (lettered && !p.glyphsUploaded) {
@@ -818,8 +840,9 @@ vec4 cinemaGlass(vec4 c) {{
             glUniform1f(p.focusAlpha, m_scene.focusAlpha);
             glUniform1i(p.glyphsUniform, 5);
             glUniform1i(p.feedUniform, 6);
-            glUniform1i(p.feedCount, lettered && live && p.feedUploaded ? int(g->feedCount) : 0);
+            glUniform1i(p.feedCount, lettered && g->feedPresence > 0 && p.feedUploaded ? int(g->feedCount) : 0);
             glUniform1i(p.feedPos, int(g->feedPos));
+            glUniform1f(p.feedPresence, g->feedPresence);
 
             glBindVertexArray(p.vao);
             auto& data = g_pHyprRenderer->m_renderData;

@@ -79,6 +79,7 @@ def render(theme, t, windows, focused):
         "focusedIndex": focused if windows else -1,
         "focused": windows[focused] if windows else (LOGICAL[0] * 0.3, LOGICAL[1] * 0.3, LOGICAL[0] * 0.4, LOGICAL[1] * 0.4),
         "windowData": 0,
+        "focusAlpha": 1.0 if windows else 0.0,
     }
     for name, value in values.items():
         if name in program:
@@ -91,6 +92,23 @@ def render(theme, t, windows, focused):
     texture = ctx.texture((len(data), 1), 4, data.tobytes(), dtype="f4")
     texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
     texture.use(0)
+
+    # A theme with lettering draws the agents' text: the preview fills the feed
+    # with this repository's spec, as if agents were writing it.
+    glyphs_png = theme / "glyphs.png"
+    if glyphs_png.exists() and "feed" in program:
+        atlas = Image.open(glyphs_png).convert("RGBA").getchannel("A")
+        glyphs = ctx.texture(atlas.size, 1, atlas.tobytes())
+        glyphs.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        glyphs.use(1)
+        text = " ".join("".join(c if " " <= c <= "~" else " " for c in (ROOT / "SPEC.md").read_text()).split())
+        ring = (text * (16384 // max(len(text), 1) + 1))[:16384].encode("ascii")
+        feed = ctx.texture((128, 128), 1, ring)
+        feed.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        feed.use(2)
+        for name, value in {"glyphs": 1, "feed": 2, "feedCount": 16384, "feedPos": 0, "feedPresence": 1.0}.items():
+            if name in program:
+                program[name].value = value
 
     quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
     vao = ctx.vertex_array(program, [(quad, "2f", "pos")])

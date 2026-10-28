@@ -26,7 +26,7 @@ LOGS = [
 SOCKET = os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"), "omarchy-cinema/feed.sock")
 
 RING = 16384
-ACTIVE = 600  # a log written in the last ten minutes is followed
+ACTIVE = 120  # an agent is running while its log was written in the last two minutes
 FIRST_READ = 64 * 1024  # a newly followed log starts this far from its end
 LOOK_EVERY = 0.6  # seconds between looks for logs: a new session is followed within a second
 LETTERED = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.join(HOME, ".local/state")), "omarchy/current/theme/glyphs.png")
