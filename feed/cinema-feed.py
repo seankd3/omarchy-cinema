@@ -10,6 +10,7 @@ complete snapshot over a datagram socket it never waits on. The text lives
 only in this process and the plugin; nothing is written anywhere.
 """
 
+import bisect
 import glob
 import json
 import os
@@ -34,28 +35,38 @@ ALIVE_EVERY = 5.0  # the current snapshot again, so the plugin knows the feed is
 VERSION = b"CFD1"  # magic, then generation u64, count u32, next position u32
 
 
-class Ring:
+class History:
+    """The newest text, kept in the order it was written whatever order the
+    logs are read in: a log found late, or read after another, slots its
+    records in by their timestamps, so its older text never displaces newer.
+    It holds just enough records for a ring's worth of characters."""
+
     def __init__(self):
-        self.chars = bytearray(b" " * RING)
-        self.count = 0
-        self.pos = 0
+        self.records = []  # (timestamp, arrival, text), in time order
+        self.size = 0
+        self.arrivals = 0
         self.generation = 0
 
-    def add(self, text):
-        data = text.encode("ascii")
-        for byte in data[-RING:]:
-            self.chars[self.pos] = byte
-            self.pos = (self.pos + 1) % RING
-        self.count = min(RING, self.count + len(data))
+    def add(self, stamp, text):
+        self.arrivals += 1
+        bisect.insort(self.records, (stamp, self.arrivals, text))
+        self.size += len(text)
+        while self.records and self.size - len(self.records[0][2]) >= RING:
+            self.size -= len(self.records.pop(0)[2])
         self.generation += 1
 
     def clear(self):
-        if self.count:
-            self.count = 0
+        if self.records:
+            self.records, self.size = [], 0
             self.generation += 1
 
     def snapshot(self):
-        return VERSION + struct.pack("<QII", self.generation, self.count, self.pos) + bytes(self.chars)
+        """The ring: the newest characters from its start, the next going
+        after the newest."""
+        data = "".join(text for _, _, text in self.records)[-RING:].encode("ascii")
+        count = len(data)
+        chars = data + b" " * (RING - count)
+        return VERSION + struct.pack("<QII", self.generation, count, count % RING) + chars
 
 
 def printable(text):
@@ -166,7 +177,7 @@ class Log:
 
 
 def main():
-    ring = Ring()
+    history = History()
     logs = {}
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     sock.setblocking(False)
@@ -175,7 +186,7 @@ def main():
         # Nothing to do while the applied theme draws no text.
         if not os.path.exists(LETTERED):
             logs = {}
-            ring.clear()
+            history.clear()
             time.sleep(1.0)
             continue
         now = time.monotonic()
@@ -193,29 +204,25 @@ def main():
                         active[path] = logs.get(path) or Log(path, stat)
             logs = active
             if not logs:
-                ring.clear()
+                history.clear()
 
-        # Every log's new records, merged in the order they were written, so
-        # the newest text is the last in, whichever log it came from.
-        records = []
         for log in list(logs.values()):
             try:
-                records.extend(log.read(os.stat(log.path)))
+                records = log.read(os.stat(log.path))
             except OSError:
                 continue
-        records.sort(key=lambda record: record[0])
-        for _, text in records:
-            text = printable(text)
-            if text:
-                ring.add(text + " ")
+            for stamp, text in records:
+                text = printable(text)
+                if text:
+                    history.add(stamp, text + " ")
 
-        changed = ring.generation != sent_generation
+        changed = history.generation != sent_generation
         if (changed and now - last_send >= SEND_EVERY) or now - last_send >= ALIVE_EVERY:
             try:
-                sock.sendto(ring.snapshot(), SOCKET)
+                sock.sendto(history.snapshot(), SOCKET)
             except (BlockingIOError, FileNotFoundError, ConnectionRefusedError, OSError):
                 pass  # no plugin listening, or it is busy: the next snapshot replaces this one
-            sent_generation, last_send = ring.generation, now
+            sent_generation, last_send = history.generation, now
         time.sleep(0.1)
 
 
