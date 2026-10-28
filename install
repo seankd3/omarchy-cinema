@@ -32,6 +32,16 @@ link() {
 mkdir -p ~/.config/omarchy/themes ~/.local/share/icons
 for theme in "$here"/themes/*/; do
   theme=${theme%/}
+  # A film still being built stays out of Omarchy's theme list until it has
+  # everything a film theme has.
+  missing=""
+  for file in colors.toml hyprland.lua backdrop.frag gtk.css shell.bar.toml folders.json; do
+    [[ -f $theme/$file ]] || missing+=" $file"
+  done
+  if [[ -n $missing ]]; then
+    echo "skipped $(basename "$theme"): no$missing" >&2
+    continue
+  fi
   icons=$(python3 "$here/tools/folders.py" "$theme")
   link "$theme/icons" ~/.local/share/icons/"$icons"
   link "$theme" ~/.config/omarchy/themes/"$(basename "$theme")"
