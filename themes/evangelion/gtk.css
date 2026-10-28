@@ -3,8 +3,11 @@
    black on orange where something is chosen, warning red for danger. */
 
 :root {
+  /* Only window backgrounds use colors.toml's background shades, which turn
+     to glass: the black type and the popovers' plum stay a few steps off
+     them, so they keep their opacity (tools/check-glass.py). */
   --accent-bg-color: #ff7a1a;
-  --accent-fg-color: #0c090e;
+  --accent-fg-color: #000000;
   --accent-color: #ff9a4a;
   --destructive-bg-color: #d8231a;
   --destructive-fg-color: #ffffff;
@@ -26,9 +29,9 @@
   --sidebar-border-color: rgba(255, 122, 26, 0.45);
   --card-bg-color: rgba(255, 122, 26, 0.05);
   --card-fg-color: #fff4ea;
-  --popover-bg-color: #1a1220;
+  --popover-bg-color: #1f1626;
   --popover-fg-color: #fff4ea;
-  --dialog-bg-color: #1a1220;
+  --dialog-bg-color: #1f1626;
   --dialog-fg-color: #fff4ea;
   --border-color: rgba(255, 122, 26, 0.4);
   --border-opacity: 0.8;
@@ -87,7 +90,7 @@ placessidebar row:hover,
 placessidebar row:selected,
 .navigation-sidebar row:selected {
   background: linear-gradient(135deg, transparent 7px, #ff7a1a 7px);
-  color: #0c090e;
+  color: #000000;
   font-weight: bold;
 }
 
@@ -100,7 +103,7 @@ placessidebar row:selected image,
 .navigation-sidebar row:selected image,
 placessidebar row:selected label,
 .navigation-sidebar row:selected label {
-  color: #0c090e;
+  color: #000000;
 }
 
 /* Files in the grid: framed in orange on hover, a cut-corner orange plate
@@ -143,7 +146,7 @@ rubberband {
 }
 
 .floating-bar {
-  background: #1a1220;
+  background: #1f1626;
   border: 1px solid rgba(255, 122, 26, 0.6);
   border-left: 4px solid #ff7a1a;
   border-radius: 0;
@@ -160,7 +163,7 @@ button {
 
 button.suggested-action {
   background: #ff7a1a;
-  color: #0c090e;
+  color: #000000;
   font-family: "Nimbus Sans Narrow", "Adwaita Sans", sans-serif;
   font-weight: bold;
   text-transform: uppercase;

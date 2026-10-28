@@ -4,9 +4,12 @@
 
 :root {
   /* Switches, checks and accent buttons light in phosphor with black type,
-     as a terminal's cursor does (light type on a mid green read at 3:1). */
+     as a terminal's cursor does (light type on a mid green read at 3:1).
+     Only window backgrounds use colors.toml's background shades, which turn
+     to glass: every other colour, this black included, stays a few steps
+     off them (tools/check-glass.py). */
   --accent-bg-color: #2cf26a;
-  --accent-fg-color: #020804;
+  --accent-fg-color: #001000;
   --accent-color: #5cff8f;
   --destructive-bg-color: #b8403a;
   --destructive-color: #ff8a82;
