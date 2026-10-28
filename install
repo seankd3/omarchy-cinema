@@ -112,6 +112,31 @@ if command -v voxtype >/dev/null; then
   fi
 fi
 
+# The agents' text for backdrops that draw it (The Matrix rains it): a user
+# service that follows the agents' logs while a theme with lettering is
+# applied and idles otherwise (specs/agent-rain.md). It writes nothing; its
+# output goes nowhere, and its errors, which never carry agent text, reach the
+# journal.
+unit=~/.config/systemd/user/omarchy-cinema-feed.service
+mkdir -p "${unit%/*}"
+cat >"$unit" <<EOF
+[Unit]
+Description=Omarchy Cinema: the agents' text for backdrops that draw it
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/python3 $here/feed/cinema-feed.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=null
+
+[Install]
+WantedBy=graphical-session.target
+EOF
+systemctl --user daemon-reload
+systemctl --user enable --now omarchy-cinema-feed.service >/dev/null 2>&1 || echo "omarchy-cinema-feed did not start: systemctl --user status omarchy-cinema-feed" >&2
+
 # Omarchy runs this after `omarchy update`: the plugin is rebuilt for the
 # Hyprland just installed (Sean, 2026-10-28). It loads at the next login.
 hook=~/.config/omarchy/hooks/post-update.d/omarchy-cinema-rebuild
