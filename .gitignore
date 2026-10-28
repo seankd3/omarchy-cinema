@@ -1,2 +1,4 @@
 scratch/
 plugin/build/
+themes/*/icons/
+themes/*/icons.theme

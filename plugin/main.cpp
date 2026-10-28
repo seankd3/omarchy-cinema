@@ -294,15 +294,22 @@ void main() {
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, renderedAlpha(w), w->rounding()});
         }
 
+        // Closed windows fading out, chosen as renderFadeouts chooses them
+        // (Hyprland 0.56.2 src/render/Renderer.cpp:3233). Hyprland keeps a
+        // closed window's rounding only with its blur, which every window has
+        // under a film theme; without blur the default rounding stands in.
         static auto ROUNDING = CConfigValue<Config::INTEGER>("decoration:rounding");
         for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
-            const auto plane = fadeout->plane();
-            if (fadeout->monitor().lock() != monitor ||
-                (plane != Desktop::FADEOUT_PLANE_WINDOW_TILED && plane != Desktop::FADEOUT_PLANE_WINDOW_FLOATING && plane != Desktop::FADEOUT_PLANE_WINDOW_OVER_FULLSCREEN))
+            const auto plane     = fadeout->plane();
+            const auto workspace = fadeout->workspace();
+            if (fadeout->monitor() != monitor ||
+                (plane != Desktop::FADEOUT_PLANE_WINDOW_TILED && plane != Desktop::FADEOUT_PLANE_WINDOW_FLOATING && plane != Desktop::FADEOUT_PLANE_WINDOW_OVER_FULLSCREEN) ||
+                (workspace && workspace != monitor->m_activeWorkspace && workspace != monitor->m_activeSpecialWorkspace))
                 continue;
             const auto position = fadeout->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) - monitor->m_position;
             const auto size     = fadeout->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(), float(*ROUNDING)});
+            const auto blur     = fadeout->effects().preBlur;
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(), float(blur ? blur->round : *ROUNDING)});
         }
 
         const Rect middle = {float(monitor->m_size.x * 0.3), float(monitor->m_size.y * 0.3), float(monitor->m_size.x * 0.4), float(monitor->m_size.y * 0.4)};
@@ -452,13 +459,18 @@ void main() {
         SScene        m_scene;
     };
 
+    // Hyprland's own render.pre listener decides whether to blur the glass
+    // again, and runs before this one: so once the scene has changed, that
+    // decision is made again, by Hyprland's own rule.
     void onPre(PHLMONITOR monitor) {
         if (!g || g->source.empty())
             return;
         auto& state   = g->monitors[monitor->m_id];
         state.pending = readScene(monitor, state);
-        if (state.pending != state.drawn)
-            redraw(monitor);
+        if (state.pending == state.drawn)
+            return;
+        redraw(monitor);
+        g_pHyprOpenGL->preRender(monitor);
     }
 
     void onStage(eRenderStage stage) {

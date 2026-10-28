@@ -1,25 +1,52 @@
 #!/bin/bash
 # Builds the backdrop plugin for the installed Hyprland and links the themes
-# into Omarchy. Run it again after changing the plugin and after every Hyprland
+# into Omarchy. Run it again after changing anything and after every Hyprland
 # update: the plugin refuses to load into a Hyprland it was not built for.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 
-make -s -C "$here/plugin" BUILD="$here/plugin/build"
+# The headers' version file names the Hyprland they describe (version and
+# commit), so its hash names the build; timestamps would not tell an update.
+sdk=$(sha256sum "$(pkg-config --variable=prefix hyprland)/hyprland/src/version.h" | cut -c1-16)
+make -s -C "$here/plugin" BUILD="$here/plugin/build/$sdk"
 mkdir -p ~/.local/lib/omarchy-cinema
 # A new file, not an overwrite: Hyprland has the old one mapped while it runs.
-install -m 755 "$here/plugin/build/backdrop.so" ~/.local/lib/omarchy-cinema/backdrop.so.new
+install -m 755 "$here/plugin/build/$sdk/backdrop.so" ~/.local/lib/omarchy-cinema/backdrop.so.new
 mv ~/.local/lib/omarchy-cinema/backdrop.so.new ~/.local/lib/omarchy-cinema/backdrop.so
 
-# A link never replaces a real directory: the user's own theme of the same
-# name stays, and the install stops.
-mkdir -p ~/.config/omarchy/themes
-for theme in "$here"/themes/*/; do
-  target=~/.config/omarchy/themes/$(basename "$theme")
-  if [[ -e $target && ! -L $target ]]; then
-    echo "$target exists and is not a link; move it aside first" >&2
+# A link never replaces a real directory or file: the user's own theme of the
+# same name stays, and the install stops.
+link() {
+  if [[ -e $2 && ! -L $2 ]]; then
+    echo "$2 exists and is not a link; move it aside first" >&2
     exit 1
   fi
-  ln -sfn "${theme%/}" "$target"
+  ln -sfn "$1" "$2"
+}
+
+# Each theme's folder icons are an icon theme of their own. GTK finds it by
+# its directory name; the theme's icons.theme names it, and Omarchy sets it.
+mkdir -p ~/.config/omarchy/themes ~/.local/share/icons
+for theme in "$here"/themes/*/; do
+  theme=${theme%/}
+  icons=$(python3 "$here/tools/folders.py" "$theme")
+  link "$theme/icons" ~/.local/share/icons/"$icons"
+  link "$theme" ~/.config/omarchy/themes/"$(basename "$theme")"
 done
+
+# GTK reads one stylesheet per user. It imports the applied theme's, which a
+# film theme ships and every other theme gets empty from this template, so a
+# stock theme looks as it always has.
+template=~/.config/omarchy/themed/gtk.css.tpl
+if [[ ! -e $template ]]; then
+  mkdir -p "${template%/*}"
+  printf '/* No GTK styling of its own: film themes ship a gtk.css. */\n' >"$template"
+fi
+import='@import url("file://'"$HOME"'/.local/state/omarchy/current/theme/gtk.css");'
+gtk=~/.config/gtk-4.0/gtk.css
+mkdir -p "${gtk%/*}"
+touch "$gtk"
+if ! grep -qxF "$import" "$gtk"; then
+  printf '%s\n%s' "$import" "$(cat "$gtk")" >"$gtk"
+fi

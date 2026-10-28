@@ -40,3 +40,11 @@ hl.config({
     },
   },
 })
+
+-- Over a moving backdrop Omarchy's light frost leaves text behind the glass
+-- legible enough to fight the text on it, so the frost is heavier. Omarchy's
+-- glass toggles load after the theme and set their own, so this is set once
+-- the whole config has loaded.
+hl.on("config.reloaded", function()
+  hl.config({ decoration = { blur = { size = 8, passes = 3 } } })
+end)

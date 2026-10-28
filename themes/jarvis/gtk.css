@@ -1,0 +1,152 @@
+/* Jarvis for GTK apps, Files first: deep navy panels lit from the edges in
+   holographic cyan, amber for warnings and the one thing that matters now. */
+
+:root {
+  --accent-bg-color: #1aa3d9;
+  --accent-fg-color: #f2fbff;
+  --accent-color: #7fe3ff;
+  --destructive-bg-color: #c9442f;
+  --destructive-color: #ff8a73;
+  --success-color: #5ff2c2;
+  --warning-color: #ffb347;
+  --error-color: #ff6a57;
+
+  --window-bg-color: #060d17;
+  --window-fg-color: #d4f1ff;
+  --view-bg-color: #050b14;
+  --view-fg-color: #d4f1ff;
+  --headerbar-bg-color: #08131f;
+  --headerbar-fg-color: #bfeaff;
+  --headerbar-border-color: rgba(57, 200, 255, 0.35);
+  --sidebar-bg-color: #07111c;
+  --sidebar-fg-color: #b5ddf2;
+  --sidebar-border-color: rgba(57, 200, 255, 0.18);
+  --card-bg-color: rgba(57, 200, 255, 0.05);
+  --card-fg-color: #d4f1ff;
+  --popover-bg-color: #08131f;
+  --popover-fg-color: #d4f1ff;
+  --dialog-bg-color: #08131f;
+  --dialog-fg-color: #d4f1ff;
+  --border-color: rgba(57, 200, 255, 0.22);
+  --border-opacity: 0.6;
+}
+
+/* The header: a lit edge underneath, the location in instrument type. */
+headerbar {
+  box-shadow: inset 0 -1px rgba(95, 216, 255, 0.45), 0 1px 12px rgba(57, 200, 255, 0.12);
+}
+
+.nautilus-pathbar {
+  background: rgba(57, 200, 255, 0.06);
+  border: 1px solid rgba(95, 216, 255, 0.28);
+}
+
+.nautilus-pathbar button,
+.nautilus-path-button {
+  font-family: "JetBrainsMono Nerd Font", monospace;
+  letter-spacing: 0.06em;
+  color: #9fd9f2;
+}
+
+.nautilus-path-button.current-dir {
+  color: #e6f8ff;
+  text-shadow: 0 0 8px rgba(95, 216, 255, 0.8);
+}
+
+/* The sidebar: the place you are in is marked by a cyan bar and its glow. */
+placessidebar row,
+.navigation-sidebar row {
+  border-radius: 0;
+  margin: 1px 6px;
+}
+
+placessidebar row:hover,
+.navigation-sidebar row:hover {
+  background: rgba(57, 200, 255, 0.07);
+}
+
+placessidebar row:selected,
+.navigation-sidebar row:selected {
+  background: linear-gradient(90deg, rgba(57, 200, 255, 0.22), rgba(57, 200, 255, 0.04));
+  box-shadow: inset 3px 0 #5fd8ff, 0 0 14px rgba(57, 200, 255, 0.18);
+  color: #f2fbff;
+}
+
+placessidebar row image,
+.navigation-sidebar row image {
+  color: #7fe3ff;
+  -gtk-icon-shadow: 0 0 6px rgba(57, 200, 255, 0.6);
+}
+
+/* Files in the grid: a glow on hover, a lit frame when chosen. */
+.nautilus-grid-view gridview > child {
+  border-radius: 2px;
+  transition: background 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.nautilus-grid-view gridview > child:hover {
+  background: rgba(57, 200, 255, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(95, 216, 255, 0.25);
+}
+
+.nautilus-grid-view gridview > child:selected {
+  background: rgba(57, 200, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(127, 227, 255, 0.75), 0 0 18px rgba(57, 200, 255, 0.35);
+}
+
+.nautilus-grid-view gridview > child:selected label {
+  color: #f2fbff;
+  text-shadow: 0 0 6px rgba(95, 216, 255, 0.7);
+}
+
+.nautilus-list-view columnview > listview > row:selected {
+  background: rgba(57, 200, 255, 0.16);
+  box-shadow: inset 3px 0 #5fd8ff;
+}
+
+.nautilus-list-view columnview > listview > row:hover {
+  background: rgba(57, 200, 255, 0.07);
+}
+
+.nautilus-image.file-thumbnail {
+  border: 1px solid rgba(95, 216, 255, 0.35);
+  box-shadow: 0 0 10px rgba(57, 200, 255, 0.25);
+}
+
+rubberband {
+  background: rgba(57, 200, 255, 0.12);
+  border: 1px solid rgba(127, 227, 255, 0.8);
+}
+
+.floating-bar {
+  background: #08131f;
+  border: 1px solid rgba(95, 216, 255, 0.4);
+  color: #bfeaff;
+  font-family: "JetBrainsMono Nerd Font", monospace;
+}
+
+/* Buttons and fields: thin lit outlines rather than filled blocks. */
+button.suggested-action {
+  background: linear-gradient(180deg, #2bb6ec, #1488bd);
+  box-shadow: 0 0 12px rgba(57, 200, 255, 0.45);
+}
+
+entry,
+searchbar entry {
+  background: rgba(57, 200, 255, 0.05);
+  border: 1px solid rgba(95, 216, 255, 0.3);
+}
+
+entry:focus-within {
+  border-color: #7fe3ff;
+  box-shadow: 0 0 10px rgba(57, 200, 255, 0.35);
+}
+
+popover > contents {
+  border: 1px solid rgba(95, 216, 255, 0.35);
+  box-shadow: 0 0 20px rgba(57, 200, 255, 0.18);
+}
+
+selection {
+  background: rgba(57, 200, 255, 0.35);
+}
