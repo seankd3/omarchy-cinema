@@ -7,8 +7,11 @@
 
 const vec3 HEAD = vec3(0.78, 1.0, 0.84);
 // Periods (seconds) a drop takes to fall one repeat, four to a depth from the
-// nearest, slower further back; each divides 3600.
-const float PERIODS[6] = float[](3.0, 4.0, 5.0, 6.0, 8.0, 10.0);
+// nearest, slower further back; each divides 3600. Near drops average about
+// 340 px a second, mid 210 and far 130: a screen in four seconds up close,
+// the film's pace and calm enough to work beside (twice that read as busy at
+// 120 fps).
+const float PERIODS[6] = float[](6.0, 8.0, 10.0, 12.0, 16.0, 20.0);
 
 // A line `d` pixels away: a crisp core `w` pixels wide in a soft glow.
 float glowLine(float d, float w) {
@@ -146,14 +149,15 @@ vec4 backdrop(vec2 px) {
         float over = rect.y - px.y;
         if (side > 0.0 && px.y > rect.y - 20.0 && px.y < rect.y + rect.w + 20.0) {
             // Two columns of glyphs hugging the side, anchored to the window
-            // so they travel with it, falling faster than the open rain.
+            // so they travel with it, at the mid rain's pace: they run beside
+            // the text, where fast motion would pull the eye.
             vec2 cell = vec2(13.0, 18.0);
             vec2 at = vec2(side / cell.x, (px.y - rect.y) / cell.y);
             float id = floor(at.x) + float(closest) * 7.0 + (px.x < rect.x ? 0.0 : 3.0);
             // Each runs most of its repeat lit, so the side reads as one
             // stream; the open rain thins where it runs, diverted into it.
             float band = step(at.x, 2.0);
-            float period = 2.0 + floor(hash(vec2(id, 91.0)) * 3.0);
+            float period = 4.0 + floor(hash(vec2(id, 91.0)) * 3.0);
             vec3 stream = column(at, cell, id * 5.3, 960.0, period, hash(vec2(id, 93.0)), 700.0) * band;
             light *= 1.0 - 0.6 * band * fade;
             light += (green * (stream.x * 1.3 + stream.z * 0.14) + HEAD * stream.y * 1.8) * focus * fade;
