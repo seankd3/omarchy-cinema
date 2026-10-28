@@ -37,27 +37,34 @@ FilmOsd {
         }
     }
 
-    draw: function (ctx) {
-        const t = time, a = appear;
-        const w = columns * cellW, x0 = (box.width - w) / 2, y0 = 22;
-        const h = rows * cellH;
+    readonly property real w: columns * cellW
+    readonly property real x0: (box.width - w) / 2
+    readonly property real y0: 22
 
-        // A dark pane under the rain, so it reads over any window, fading
-        // out at its ends; on it, a dim wall of code that turns over slowly.
+    // A dark pane under the rain, so it reads over any window, fading out at
+    // its ends; on it, a dim wall of code that turns over four times a second.
+    stillKey: Math.floor(time * 4)
+    still: function (ctx) {
+        const h = rows * cellH;
         let pane = ctx.createLinearGradient(x0 - 16, 0, x0 + w + 16, 0);
         pane.addColorStop(0, tint(background, 0));
-        pane.addColorStop(0.08, tint(background, 0.94 * a));
-        pane.addColorStop(0.92, tint(background, 0.94 * a));
+        pane.addColorStop(0.08, tint(background, 0.94));
+        pane.addColorStop(0.92, tint(background, 0.94));
         pane.addColorStop(1, tint(background, 0));
         ctx.fillStyle = pane;
         ctx.fillRect(x0 - 16, y0 - 8, w + 32, h + 18);
         ctx.beginPath();
         for (let c = 0; c < columns; c++)
             for (let r = 0; r < rows; r++)
-                glyph(ctx, x0 + c * cellW, y0 + r * cellH, c * 31 + r * 7 + Math.floor(t * 0.7 + hash(c * 5 + r)) * 101);
-        ctx.strokeStyle = tint(accent, 0.1 * a);
+                glyph(ctx, x0 + c * cellW, y0 + r * cellH, c * 31 + r * 7 + Math.floor(stillKey / 4 * 0.7 + hash(c * 5 + r)) * 101);
+        ctx.strokeStyle = tint(accent, 0.1);
         ctx.lineWidth = 1.1;
         ctx.stroke();
+    }
+
+    draw: function (ctx) {
+        const t = time, a = appear;
+        const h = rows * cellH;
 
         // How far down each stream reaches, and the row of its head.
         const reach = [];
@@ -73,7 +80,8 @@ FilmOsd {
         }
 
         // The tails, a row at a time so each row fades a step further from
-        // its head; then the heads, white.
+        // its head, as plain strokes (a halo on every glyph costs more than it
+        // shows); then the heads, white and lit.
         for (let back = rows - 1; back >= 1; back--) {
             ctx.beginPath();
             for (let c = 0; c < columns; c++) {
@@ -81,7 +89,9 @@ FilmOsd {
                 if (r < 0 || r >= rows || (thinking && back > 4)) continue;
                 glyph(ctx, x0 + c * cellW, y0 + r * cellH, c * 31 + r * 7 + Math.floor(t * 9 + hash(c) * 50) % 6);
             }
-            light(ctx, accent, 1.2, Math.pow(0.78, back) * (thinking ? 0.7 : 1) * a);
+            ctx.strokeStyle = tint(accent, Math.pow(0.78, back) * (thinking ? 0.7 : 1) * a);
+            ctx.lineWidth = 1.3;
+            ctx.stroke();
         }
         ctx.beginPath();
         for (let c = 0; c < columns; c++) {

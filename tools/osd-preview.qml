@@ -15,7 +15,8 @@ Window {
     readonly property string themeDir: args[0]
     readonly property string slug: themeDir.split("/").filter(s => s.length).pop()
 
-    // Voxtype's runtime style, as its Omarchy palette reads colors.toml.
+    // Voxtype's runtime style: the three colours of colors.toml a film's
+    // popup uses, by Voxtype's role names.
     QtObject {
         id: style
         property var config: ({ position: "bottom-center", margin_px: 24, colors: {} })
@@ -38,10 +39,7 @@ Window {
                 colors: {
                     accent: read.accent,
                     foreground: read.foreground,
-                    background: "#d9" + read.background.slice(1),
-                    success: read.color2,
-                    warning: read.color3,
-                    error: read.color1,
+                    background: read.background,
                 },
             };
         }

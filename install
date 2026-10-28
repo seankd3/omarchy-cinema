@@ -72,10 +72,39 @@ fi
 # Voxtype re-reads it when the theme changes, so the popup switches with it.
 template=~/.config/omarchy/themed/voxtype-osd.toml.tpl
 [[ -e $template ]] || install -m 644 "$here/osd/voxtype-osd.toml.tpl" "$template"
+
+# The applied theme was copied before this ran and may lack its popup, and
+# Voxtype's OSD will not start on a style that is not there: give it what
+# Omarchy gives it at the next switch.
+current=~/.local/state/omarchy/current/theme
+applied=~/.config/omarchy/themes/$(cat ~/.local/state/omarchy/current/theme.name 2>/dev/null)
+if [[ -d $current ]]; then
+  if [[ -f $applied/voxtype-osd.toml ]]; then
+    install -m 644 "$applied"/voxtype-osd.toml "$applied"/voxtype-osd-*.qml "$applied"/FilmOsd.qml "$current/"
+  elif [[ ! -f $current/voxtype-osd.toml ]]; then
+    install -m 644 "$template" "$current/voxtype-osd.toml"
+  fi
+fi
+
+# Voxtype's settings for that, changed only where they differ: its style is
+# the applied theme, drawn by its Quickshell OSD, and nothing pins it to one
+# look (a plugin path wins over the style; a palette other than Omarchy's
+# stops it following the theme). Voxtype reads them when it starts.
 if command -v voxtype >/dev/null; then
   if [[ -d ${XDG_DATA_HOME:-$HOME/.local/share}/voxtype/quickshell || -d /usr/share/voxtype/quickshell ]]; then
-    voxtype config set osd.style "~/.local/state/omarchy/current/theme" >/dev/null
-    voxtype config set osd.frontend quickshell >/dev/null
+    changed=""
+    setting() {
+      [[ $(voxtype config get "$1") == "$2" ]] && return
+      if [[ $2 == null ]]; then voxtype config unset "$1" >/dev/null; else voxtype config set "$1" "$2" >/dev/null; fi
+      changed+=" $1"
+    }
+    setting osd.style "~/.local/state/omarchy/current/theme"
+    setting osd.frontend quickshell
+    setting osd.plugin_path null
+    [[ $(voxtype config get osd.palette) == omarchy ]] || setting osd.palette null
+    if [[ -n $changed ]]; then
+      echo "Voxtype's popup follows the theme once Voxtype restarts (changed$changed): systemctl --user restart voxtype" >&2
+    fi
   else
     echo "Voxtype's Quickshell OSD is not installed, so its popup stays as it is: run voxtype setup quickshell, then ./install" >&2
   fi

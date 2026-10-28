@@ -1,4 +1,4 @@
-// Evangelion's dictation popup: a strip of the backdrop's honeycomb between
+// Evangelion's dictation popup: a strip of the backdrop's honeycomb over
 // hazard stripes. The voice lights the cells orange, the newest in the middle
 // and older spreading out, with now and then a cell in Unit-01's green; loud
 // speech throws octagonal AT field rings out across it. While the words are
@@ -38,48 +38,68 @@ FilmOsd {
         ctx.closePath();
     }
 
-    draw: function (ctx) {
-        const t = time, a = appear;
-        const dx = cell * 1.5, dy = cell * Math.sqrt(3);
-        const w = (columns - 1) * dx, x0 = (box.width - w) / 2;
-        const cy = box.height / 2, top = cy - dy * (rows - 1) / 2 - dy / 4;
-        const shown = Math.floor(columns / 2 * a);
+    readonly property real dx: cell * 1.5
+    readonly property real dy: cell * Math.sqrt(3)
+    readonly property real w: (columns - 1) * dx
+    readonly property real x0: (box.width - w) / 2
+    readonly property real cy: box.height / 2
+    readonly property real firstRow: cy - dy * (rows - 1) / 2 - dy / 4
+    readonly property rect pane: Qt.rect(x0 - 26, cy - 46, w + 52, 92)
 
-        // A dark pane between two orange rules, hazard stripes under it.
-        const px0 = x0 - 26, pw = w + 52, py0 = cy - 46, ph = 92;
-        ctx.fillStyle = tint(background, 0.9 * a);
-        ctx.fillRect(px0, py0, pw, ph);
+    function cellAt(c, r) {
+        return [x0 + c * dx, firstRow + r * dy + (c % 2 ? dy / 2 : 0)];
+    }
+
+    // A dark pane between two orange rules, hazard stripes under it, and the
+    // honeycomb's outlines.
+    still: function (ctx) {
+        const p = pane;
+        ctx.fillStyle = tint(background, 0.9);
+        ctx.fillRect(p.x, p.y, p.width, p.height);
         ctx.save();
         ctx.beginPath();
-        ctx.rect(px0, py0 + ph - 8, pw, 8);
+        ctx.rect(p.x, p.y + p.height - 8, p.width, 8);
         ctx.clip();
         ctx.beginPath();
-        const scroll = (t * (thinking ? 40 : 12)) % 16;
-        for (let x = px0 - 16 + scroll; x < px0 + pw + 16; x += 16) {
-            ctx.moveTo(x, py0 + ph);
-            ctx.lineTo(x + 8, py0 + ph - 8);
-            ctx.lineTo(x + 16, py0 + ph - 8);
-            ctx.lineTo(x + 8, py0 + ph);
+        for (let x = p.x - 16; x < p.x + p.width + 16; x += 16) {
+            ctx.moveTo(x, p.y + p.height);
+            ctx.lineTo(x + 8, p.y + p.height - 8);
+            ctx.lineTo(x + 16, p.y + p.height - 8);
+            ctx.lineTo(x + 8, p.y + p.height);
             ctx.closePath();
         }
-        ctx.fillStyle = tint(accent, 0.85 * a);
+        ctx.fillStyle = tint(accent, 0.85);
         ctx.fill();
         ctx.restore();
         ctx.beginPath();
-        ctx.moveTo(px0, py0);
-        ctx.lineTo(px0 + pw, py0);
-        ctx.moveTo(px0, py0 + ph - 8);
-        ctx.lineTo(px0 + pw, py0 + ph - 8);
-        light(ctx, accent, 1.2, 0.9 * a);
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x + p.width, p.y);
+        ctx.moveTo(p.x, p.y + p.height - 8);
+        ctx.lineTo(p.x + p.width, p.y + p.height - 8);
+        light(ctx, accent, 1.2, 0.9);
+        ctx.beginPath();
+        for (let c = 0; c < columns; c++)
+            for (let r = 0; r < rows; r++) {
+                const [x, y] = cellAt(c, r);
+                hexagon(ctx, x, y, cell - 1.5);
+            }
+        ctx.strokeStyle = tint(accent, 0.22);
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
 
-        // The cells: outlines throughout, filled where the voice reaches.
-        let dim = [], lit = [[], [], []]; // orange, green, red
+    draw: function (ctx) {
+        const t = time, a = appear;
+        const shown = Math.floor(columns / 2 * a);
+
+        // The cells the voice reaches, lit in four steps of brightness and
+        // drawn a step at a time.
+        let lit = [[], [], []]; // orange, green, red
         for (let c = 0; c < columns; c++) {
             const k = Math.abs(c - (columns - 1) / 2);
             if (k > shown + 0.5) continue;
             const s = thinking ? 0 : voice(samples - 1 - Math.floor(k * 3.5));
             for (let r = 0; r < rows; r++) {
-                const x = x0 + c * dx, y = top + r * dy + (c % 2 ? dy / 2 : 0);
                 const reach = Math.abs(r - (rows - 1) / 2 + (c % 2 ? 0.5 : 0) - 0.25);
                 let e = Math.max(0, Math.min(1, s * 2.4 - reach * 0.7));
                 let kind = hash(c * 13 + r + Math.floor(t * 3)) < 0.06 ? 1 : 0;
@@ -87,20 +107,16 @@ FilmOsd {
                     e = Math.pow(Math.max(0, Math.sin(k * 0.45 - t * 6)), 6);
                     kind = 2;
                 }
-                if (e > 0.05) lit[kind].push([x, y, e]);
-                else dim.push([x, y]);
+                if (e > 0.05) lit[kind].push(cellAt(c, r).concat([Math.ceil(e * 4) / 4]));
             }
         }
-        ctx.beginPath();
-        for (const [x, y] of dim) hexagon(ctx, x, y, cell - 1.5);
-        ctx.strokeStyle = tint(accent, 0.22 * a);
-        ctx.lineWidth = 1;
-        ctx.stroke();
         const tones = [accent, green, red];
         for (let kind = 0; kind < 3; kind++) {
-            for (const [x, y, e] of lit[kind]) {
+            for (const e of [0.25, 0.5, 0.75, 1]) {
+                const cells = lit[kind].filter(c => c[2] === e);
+                if (!cells.length) continue;
                 ctx.beginPath();
-                hexagon(ctx, x, y, cell - 1.5);
+                for (const [x, y] of cells) hexagon(ctx, x, y, cell - 1.5);
                 ctx.fillStyle = tint(tones[kind], 0.65 * e * a);
                 ctx.fill();
                 light(ctx, tones[kind], 1.2, (0.4 + 0.6 * e) * a);
@@ -108,19 +124,20 @@ FilmOsd {
         }
 
         // AT field rings: thrown out by loud speech, or steadily while
-        // thinking; each spreads and fades.
+        // thinking; each spreads and fades, inside the pane.
+        const strength = thinking ? 1 : Math.min(1, level * 2);
+        if (strength < 0.15) return;
         const beat = thinking ? 0.7 : 0.45;
         ctx.save();
         ctx.beginPath();
-        ctx.rect(px0, py0, pw, ph - 8);
+        ctx.rect(pane.x, pane.y, pane.width, pane.height - 8);
         ctx.clip();
+        ctx.beginPath();
         for (let k = 0; k < 3; k++) {
-            const phase = ((t / beat + k / 3) % 1);
-            const strength = thinking ? 1 : Math.min(1, level * 2);
-            if (strength < 0.15) continue;
-            ctx.beginPath();
+            const phase = (t / beat + k / 3) % 1;
             octagon(ctx, box.width / 2, cy, 14 + phase * w * 0.55);
             light(ctx, thinking ? red : accent, 1.4, (1 - phase) * strength * a);
+            ctx.beginPath();
         }
         ctx.restore();
     }
