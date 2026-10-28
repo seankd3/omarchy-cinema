@@ -115,6 +115,8 @@ void main() {
         HANDLE                                  handle = nullptr;
         std::string                             source; // the theme's shader, empty when it has none
         std::array<float, 3>                    accent{1, 1, 1}, background{0, 0, 0}, foreground{1, 1, 1};
+        // The colours the theme paints backgrounds in: these turn to glass.
+        std::vector<std::array<float, 3>>       backgrounds;
         uint64_t                                generation = 1;
         uint64_t                                compiled   = 0;
         SProgram                                program;
@@ -176,13 +178,23 @@ void main() {
         const auto shader = readFile(dir + "/backdrop.frag");
         g->source         = shader.empty() ? "" : std::string(CONTRACT) + "\n#line 1\n" + shader;
 
-        static const std::regex PALETTE(R"re(^\s*(accent|background|foreground)\s*=\s*"#([0-9a-fA-F]{6})")re");
+        static const std::regex PALETTE(R"re(^\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})")re");
         std::istringstream      colors(readFile(dir + "/colors.toml"));
+        g->backgrounds.clear();
         for (std::string line; std::getline(colors, line);) {
             std::smatch match;
             if (!std::regex_search(line, match, PALETTE))
                 continue;
-            (match[1] == "accent" ? g->accent : match[1] == "background" ? g->background : g->foreground) = hexColor(match[2]);
+            const auto name  = match[1].str();
+            const auto value = hexColor(match[2]);
+            if (name == "accent")
+                g->accent = value;
+            else if (name == "foreground")
+                g->foreground = value;
+            if (name == "background")
+                g->background = value;
+            if (name == "background" || name == "dark_background" || name == "darker_background" || name == "lighter_background")
+                g->backgrounds.push_back(value);
         }
         g->generation++;
         // The glass waits for the rest of the config to load (plugin:backdrop:
@@ -449,10 +461,10 @@ void main() {
     // Hyprland fades a whole window by its opacity, text included, so the glass
     // is drawn where Hyprland draws windows: its own surface shader, the
     // version in this very build, with one step added after the window's pixel
-    // is read. That step un-mixes the pixel from the theme's background, the
-    // way an image editor's colour-to-alpha does: pure background becomes
-    // glass at plugin:backdrop:glass, anything over it stays as opaque as it
-    // was, and anti-aliased text keeps its edge. It runs only in the shader's
+    // is read: a pixel in one of the theme's background colours (background,
+    // dark, darker, lighter) becomes glass at plugin:backdrop:glass, and every
+    // other pixel keeps exactly the opacity the app drew it with. An earlier
+    // colour-to-alpha un-mixing made grey text partly see-through (Sol, 2026-10-28). It runs only in the shader's
     // blur variant (film.lua turns render:use_shader_blur_blend on), which
     // Hyprland uses only for windows it blurs: a solid browser, video or photo
     // is never touched. Hyprland reads shaders from a directory before its
@@ -461,7 +473,7 @@ void main() {
     // has no backdrop or the plugin unloads.
     std::string glassShaderSource() {
         const auto glass = g->glass->value();
-        if (g->source.empty() || glass >= 1.F)
+        if (g->source.empty() || glass >= 1.F || g->backgrounds.empty())
             return "";
         const auto found = std::ranges::find(SHADERS, std::string_view{"surface.frag"}, [](const auto& pair) { return pair.first; });
         if (found == SHADERS.end())
@@ -474,21 +486,27 @@ void main() {
             HyprlandAPI::addNotification(g->handle, "[backdrop] this Hyprland's window shader has changed shape; windows stay solid", CHyprColor{1.0, 0.6, 0.2, 1.0}, 10000);
             return "";
         }
-        const auto key = std::format("vec3({:.6f}, {:.6f}, {:.6f})", g->background[0], g->background[1], g->background[2]);
+        std::string keys;
+        for (const auto& c : g->backgrounds)
+            keys += std::format("{}vec3({:.6f}, {:.6f}, {:.6f})", keys.empty() ? "" : ", ", c[0], c[1], c[2]);
         source.insert(at, std::format(R"(// omarchy-cinema glass: see the backdrop plugin.
-const vec3  CINEMA_KEY   = {};
+const vec3  CINEMA_BACKGROUNDS[{}] = vec3[]({});
 const float CINEMA_GLASS = {:.4f};
 vec4 cinemaGlass(vec4 c) {{
     if (c.a < 0.999) return c; // the app drew its own transparency
-    vec3  up    = max((c.rgb - CINEMA_KEY) / max(1.0 - CINEMA_KEY, vec3(1e-4)), 0.0);
-    vec3  down  = max((CINEMA_KEY - c.rgb) / max(CINEMA_KEY, vec3(1e-4)), 0.0);
-    float a     = clamp(max(max(max(up.r, up.g), up.b), max(max(down.r, down.g), down.b)), 0.0, 1.0);
-    vec3  drawn = c.rgb - (1.0 - a) * CINEMA_KEY;
-    return vec4(drawn + (1.0 - a) * CINEMA_GLASS * CINEMA_KEY, a + (1.0 - a) * CINEMA_GLASS);
+    float off = 1.0;
+    for (int i = 0; i < {}; i++) {{
+        vec3 e = abs(c.rgb - CINEMA_BACKGROUNDS[i]);
+        off = min(off, max(max(e.r, e.g), e.b));
+    }}
+    // Within a step or two of a background colour is background; anything
+    // further is something drawn on it and keeps its opacity.
+    float a = mix(CINEMA_GLASS, 1.0, smoothstep(1.5 / 255.0, 6.0 / 255.0, off));
+    return vec4(c.rgb * a, a);
 }}
 
 )",
-                                         key, glass));
+                                         g->backgrounds.size(), keys, glass, g->backgrounds.size()));
         source.insert(source.find(read), "#if USE_BLUR\n    pixColor = cinemaGlass(pixColor);\n#endif\n\n");
         return source;
     }
