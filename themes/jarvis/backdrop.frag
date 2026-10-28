@@ -140,8 +140,10 @@ vec4 backdrop(vec2 px) {
     // Light pools in the seams between windows and runs along them.
     if (gap > 0.004) {
         vec2 q = px * 0.0055;
-        float flow = noise(q * 2.0 + orbit(60.0, 4.0)) * noise(q * 5.0 - orbit(40.0, 3.0));
-        light += cyan * gap * (0.1 + 1.1 * flow);
+        // One soft, wide layer: finer, stronger noise showed its grid as
+        // blocks once the gaps widened to 64 px.
+        float flow = noise(q * 0.9 + orbit(60.0, 3.0));
+        light += cyan * gap * (0.08 + 0.4 * flow * flow);
     }
     light += mix(cyan, AMBER, 0.35) * nearFocus * (1.0 - inside) * 0.12;
 
