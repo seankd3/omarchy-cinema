@@ -14,6 +14,8 @@ mkdir -p ~/.local/lib/omarchy-cinema
 # A new file, not an overwrite: Hyprland has the old one mapped while it runs.
 install -m 755 "$here/plugin/build/$sdk/backdrop.so" ~/.local/lib/omarchy-cinema/backdrop.so.new
 mv ~/.local/lib/omarchy-cinema/backdrop.so.new ~/.local/lib/omarchy-cinema/backdrop.so
+# Every film theme's hyprland.lua runs this.
+install -m 644 "$here/film.lua" ~/.local/lib/omarchy-cinema/film.lua
 
 # A link never replaces a real directory or file: the user's own theme of the
 # same name stays, and the install stops.

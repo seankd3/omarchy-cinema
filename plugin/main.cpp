@@ -134,7 +134,10 @@ void main() {
         // from the moment it is made until Hyprland lets it go.
         std::unordered_map<const void*, float>  fadeoutRounding;
         std::unordered_set<const void*>         seenFadeouts;
-        PHLWINDOWREF                            closing; // the window whose fadeout comes next
+        // The window whose fadeout comes next, held until its radius is read:
+        // a client can destroy it in the same call that closes it, and
+        // rounding() reads only its rules and the config.
+        PHLWINDOW                               closing;
     };
 
     UP<SState> g;
@@ -306,9 +309,8 @@ void main() {
             if (!isWindowFadeout(fadeout))
                 continue;
             alive.insert(fadeout.get());
-            const auto closing = g->closing.lock();
-            if (g->seenFadeouts.insert(fadeout.get()).second && closing)
-                g->fadeoutRounding[fadeout.get()] = closing->rounding();
+            if (g->seenFadeouts.insert(fadeout.get()).second && g->closing)
+                g->fadeoutRounding[fadeout.get()] = g->closing->rounding();
         }
         g->closing.reset();
         std::erase_if(g->seenFadeouts, [&](const void* f) { return !alive.contains(f); });
