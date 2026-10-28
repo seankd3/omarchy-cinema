@@ -18,8 +18,9 @@ Omarchy 4 (Quickshell shell, Hyprland 0.56.2 with Lua config).
 ## Shape
 
 A theme stays a theme directory. A film theme adds **`backdrop.frag`**, a
-fragment shader written against `plugin/contract.glsl`, and loads the
-**backdrop plugin** from its `hyprland.lua`.
+fragment shader written against `plugin/contract.glsl`, which the **backdrop
+plugin** draws; the plugin itself belongs to the session, not the theme (see
+"Loaded once a session").
 
 The plugin (`plugin/main.cpp`) is a Hyprland plugin. At the render stage after
 the wallpaper and before the bottom layers and windows, it draws the theme's

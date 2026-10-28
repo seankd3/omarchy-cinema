@@ -3,9 +3,10 @@
 // that frame, so it never trails them.
 //
 // A theme with a backdrop ships backdrop.frag, a fragment shader written
-// against contract.glsl, and loads this plugin from its hyprland.lua. A theme
-// switch reloads Hyprland's config: the shader and palette are read again from
-// the applied theme then, and a theme that does not load the plugin unloads it.
+// against contract.glsl. The user's Hyprland config loads this plugin once a
+// session and nothing unloads it. A theme switch reloads Hyprland's config:
+// the shader and palette are read again from the applied theme then, and a
+// theme without backdrop.frag leaves the plugin idle (no draw, no timer).
 //
 // Hyprland advances its animations, then emits render.pre, then reads the
 // frame's damage. At render.pre the plugin reads the windows as they will be
@@ -198,8 +199,9 @@ void main() {
                 g->backgrounds.push_back(value);
         }
         g->generation++;
-        if (g->timer && !g->source.empty())
-            wl_event_source_timer_update(g->timer, 1);
+        // The backdrop's clock runs only while the theme has a backdrop; 0
+        // disarms the timer.
+        wl_event_source_timer_update(g->timer, g->source.empty() ? 0 : 1);
         // The glass waits for the rest of the config to load (plugin:backdrop:
         // glass comes later in the theme), so it is applied from the loop.
         if (!g->glassIdle)
@@ -665,11 +667,9 @@ vec4 cinemaGlass(vec4 c) {{
 
     // The backdrop's own motion. Time stands still while there is nothing to
     // see it on: animations off, the session locked, or every monitor asleep
-    // or showing a fullscreen window. A theme without a backdrop stops the
-    // timer altogether, since the plugin stays loaded under every theme;
-    // readTheme starts it again.
+    // or showing a fullscreen window. readTheme starts and stops the timer.
     int onTick(void*) {
-        if (!g || g->source.empty())
+        if (!g)
             return 0;
         const auto now = std::chrono::steady_clock::now();
         if (now - g->lastPowerCheck > std::chrono::seconds(2)) {
@@ -732,6 +732,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(handle, g->glass);
     g->plugged  = plugged();
     g->lastTick = g->lastGlass = g->lastPowerCheck = std::chrono::steady_clock::now();
+    g->timer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onTick, nullptr);
     readTheme();
     claimFadeouts();
 
@@ -747,9 +748,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (g)
             readTheme();
     });
-
-    g->timer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onTick, nullptr);
-    wl_event_source_timer_update(g->timer, 1000 / 30);
 
     return {"backdrop", "Draws the current Omarchy theme's backdrop between the wallpaper and the windows.", "Sean", "0.2"};
 }
