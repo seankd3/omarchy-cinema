@@ -8,34 +8,17 @@ so a theme that drew only `folder` would turn Documents, Downloads and the rest
 into plain folders too: every name Files uses is drawn here.
 
     tools/folders.py <theme-dir>
+
+A theme's folders.json is its style: "outline", the folder's silhouette as an
+SVG path in a 64 by 64 box (tab top left, body below); "stroke" and "glow" for
+its lit edge; "fill" as [colour, opacity at top, opacity at bottom]; "glyph"
+for the symbol's colour; "accent" for the stroke along the tab; "inherits", the
+Yaru icon themes the rest of the icons come from.
 """
 
+import json
 import sys
 from pathlib import Path
-
-# One style per film: the folder's outline, its fill, the glyph's colour, the
-# glow, and an accent for one detail. Shapes: "hud" chamfers the corners,
-# "grid" cuts one corner square to the Grid's lines, "round" softens them.
-STYLES = {
-    "jarvis": {
-        "shape": "hud",
-        "stroke": "#5fd8ff",
-        "fill": ("#39c8ff", 0.28, 0.06),
-        "glyph": "#e6f8ff",
-        "glow": "#39c8ff",
-        "accent": "#ffb347",
-        "inherits": "Yaru-blue-dark,Yaru-dark,Yaru,hicolor",
-    },
-    "tron-legacy": {
-        "shape": "grid",
-        "stroke": "#7ff3ff",
-        "fill": ("#00d9ff", 0.16, 0.02),
-        "glyph": "#f2feff",
-        "glow": "#00d9ff",
-        "accent": "#ff8a1f",
-        "inherits": "Yaru-prussiangreen-dark,Yaru-dark,Yaru,hicolor",
-    },
-}
 
 # The glyph inside each folder, drawn as strokes in a 20 by 20 box at (22, 28).
 GLYPHS = {
@@ -54,15 +37,6 @@ GLYPHS = {
     "user-home": "M1 10L10 2l9 8M4 8v10h12V8M8 18v-6h4v6",
     "user-desktop": "M1 2h18v12H1zM7 18h6M10 14v4",
 }
-
-
-def outline(shape):
-    """The folder's silhouette in a 64 by 64 box: back tab, then body."""
-    if shape == "hud":
-        return "M6 14l4-5h14l4 5h26l4 4v32l-5 5H11l-5-5z"
-    if shape == "grid":
-        return "M6 9h18l5 5h29v34l-6 6H6z"
-    return "M8 12a3 3 0 0 1 3-3h13l4 5h25a3 3 0 0 1 3 3v33a3 3 0 0 1-3 3H11a3 3 0 0 1-3-3z"
 
 
 def svg(style, glyph):
@@ -87,7 +61,7 @@ def svg(style, glyph):
       <feMerge><feMergeNode in="soft"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
-  <path d="{outline(style['shape'])}" fill="url(#fill)" stroke="{style['stroke']}" stroke-width="2" stroke-linejoin="round" filter="url(#glow)"/>
+  <path d="{style['outline']}" fill="url(#fill)" stroke="{style['stroke']}" stroke-width="2" stroke-linejoin="round" filter="url(#glow)"/>
   {scan}
   {accent}
   {mark}
@@ -98,7 +72,7 @@ def svg(style, glyph):
 def main(theme_dir):
     theme_dir = Path(theme_dir)
     slug = theme_dir.name
-    style = STYLES[slug]
+    style = json.loads((theme_dir / "folders.json").read_text())
     name = "Cinema-" + slug.title()
     places = theme_dir / "icons" / "scalable" / "places"
     places.mkdir(parents=True, exist_ok=True)

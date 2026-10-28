@@ -1,0 +1,147 @@
+# /// script
+# dependencies = ["moderngl", "numpy", "pillow"]
+# ///
+"""Renders a film theme's backdrop off screen, so a backdrop can be designed and
+checked without a live session: an empty workspace, and workspace 1's layout
+(a window on the left focused, two stacked on the right, the bar on top) with
+the windows drawn as glass over it.
+
+    uv run tools/preview.py <theme-dir> [seconds ...]
+
+Writes <theme-dir>/../../scratch/preview/<theme>-{empty,windows}-<t>.png at
+the P16's 2880 x 1800 (2304 x 1440 logical at 1.25).
+"""
+
+import re
+import sys
+from pathlib import Path
+
+import moderngl
+import numpy as np
+from PIL import Image
+
+ROOT = Path(__file__).resolve().parent.parent
+LOGICAL = (2304, 1440)
+PIXELS = (2880, 1800)
+BAR = 26.0
+GAP = 64.0
+
+VERTEX = """#version 330 core
+uniform vec2 resolution;
+in vec2 pos;
+out vec2 v_px;
+void main() {
+    gl_Position = vec4(pos.x * 2.0 - 1.0, 1.0 - pos.y * 2.0, 0.0, 1.0);
+    v_px = pos * resolution;
+}
+"""
+
+
+def palette(theme):
+    colors = {}
+    for line in (theme / "colors.toml").read_text().splitlines():
+        m = re.match(r'\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})"', line)
+        if m:
+            colors[m[1]] = tuple(int(m[2][i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return colors
+
+
+def layout():
+    w, h = LOGICAL
+    top = BAR + GAP
+    left_w = round((w - 3 * GAP) * 0.62)
+    right_x = GAP + left_w + GAP
+    right_w = w - right_x - GAP
+    full_h = h - top - GAP
+    half_h = (full_h - GAP) / 2
+    return [
+        (GAP, top, left_w, full_h),
+        (right_x, top, right_w, half_h),
+        (right_x, top + half_h + GAP, right_w, half_h),
+    ]
+
+
+def render(theme, t, windows, focused):
+    ctx = moderngl.create_standalone_context(backend="egl", require=330)
+    contract = (ROOT / "plugin/contract.glsl").read_text().replace("#version 300 es", "#version 330 core")
+    source = contract + "\n#line 1\n" + (theme / "backdrop.frag").read_text()
+    program = ctx.program(vertex_shader=VERTEX, fragment_shader=source)
+
+    colors = palette(theme)
+    for name in ("accent", "background", "foreground"):
+        if name in program:
+            program[name].value = colors.get(name, (1, 1, 1))
+    values = {
+        "time": float(t),
+        "resolution": LOGICAL,
+        "reserved": (BAR, 0.0, 0.0, 0.0),
+        "windowCount": len(windows),
+        "focusedIndex": focused if windows else -1,
+        "focused": windows[focused] if windows else (LOGICAL[0] * 0.3, LOGICAL[1] * 0.3, LOGICAL[0] * 0.4, LOGICAL[1] * 0.4),
+        "windowData": 0,
+    }
+    for name, value in values.items():
+        if name in program:
+            program[name].value = value
+
+    data = np.zeros((max(2 * len(windows), 1), 4), dtype="f4")
+    for i, rect in enumerate(windows):
+        data[2 * i] = rect
+        data[2 * i + 1] = (1.0, 0.0, 0.0, 0.0)
+    texture = ctx.texture((len(data), 1), 4, data.tobytes(), dtype="f4")
+    texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+    texture.use(0)
+
+    quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
+    vao = ctx.vertex_array(program, [(quad, "2f", "pos")])
+    target = ctx.simple_framebuffer(PIXELS)
+    target.use()
+    vao.render(moderngl.TRIANGLE_STRIP)
+    # GL reads rows from the bottom up.
+    image = Image.frombytes("RGB", PIXELS, target.read(components=3)).transpose(Image.FLIP_TOP_BOTTOM)
+    ctx.release()
+    return image, colors
+
+
+def glass(image, windows, colors, focused):
+    """The windows as the film's glass would show them: their background a
+    darkened, blurred view of the backdrop, a lit border on the focused one,
+    and a block of text lines that stay opaque."""
+    from PIL import ImageDraw, ImageFilter
+
+    scale = PIXELS[0] / LOGICAL[0]
+    out = image.copy()
+    blurred = image.filter(ImageFilter.GaussianBlur(6))
+    background = tuple(int(c * 255) for c in colors.get("background", (0, 0, 0)))
+    foreground = tuple(int(c * 255) for c in colors.get("foreground", (1, 1, 1)))
+    accent = tuple(int(c * 255) for c in colors.get("accent", (1, 1, 1)))
+    for i, (x, y, w, h) in enumerate(windows):
+        box = tuple(int(v * scale) for v in (x, y, x + w, y + h))
+        region = blurred.crop(box)
+        tint = Image.new("RGB", region.size, background)
+        out.paste(Image.blend(region, tint, 0.55), box[:2])
+        draw = ImageDraw.Draw(out)
+        draw.rectangle(box, outline=accent if i == focused else tuple(c // 2 for c in accent), width=3)
+        for row in range(6):
+            ty = box[1] + 60 + row * 44
+            draw.rectangle((box[0] + 50, ty, box[0] + 50 + int((box[2] - box[0]) * (0.75 - 0.08 * (row % 3))), ty + 14), fill=foreground)
+    return out
+
+
+def main():
+    theme = Path(sys.argv[1]).resolve()
+    times = [float(t) for t in sys.argv[2:]] or [12.0]
+    out = ROOT / "scratch/preview"
+    out.mkdir(parents=True, exist_ok=True)
+    for t in times:
+        empty, _ = render(theme, t, [], 0)
+        empty.save(out / f"{theme.name}-empty-{t:g}.png")
+        windows = layout()
+        backdrop, colors = render(theme, t, windows, 0)
+        glass(backdrop, windows, colors, 0).save(out / f"{theme.name}-windows-{t:g}.png")
+        print(out / f"{theme.name}-empty-{t:g}.png")
+        print(out / f"{theme.name}-windows-{t:g}.png")
+
+
+if __name__ == "__main__":
+    main()
