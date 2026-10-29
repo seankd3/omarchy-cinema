@@ -257,6 +257,8 @@ void main() {
         // How far the windows' depth goes (specs/depth.md, "Tiers"): 0 is the
         // backdrop alone, with no answers, no frames and no facts moving.
         SP<Config::Values::CIntValue>           depth;
+        // Each monitor's sleep and wake, which can pass without a frame.
+        std::vector<CHyprSignalListener>        sleeps;
         std::string                             glassShader; // the surface shader in use, empty for Hyprland's own
         wl_event_source*                        glassIdle = nullptr;
         bool                                    plugged = true;
@@ -705,6 +707,19 @@ void main() {
             const auto drawn = w->presentation().renderPresentation();
             if (!drawn.alphaVisible)
                 continue;
+            // Its pass, as Hyprland chooses it; a floating window fading out
+            // under a fullscreen one is drawn in none (pinned windows are
+            // drawn in their own pass, whatever is fullscreen).
+            const bool pinned     = (w->m_state & Desktop::View::WINDOW_STATE_PINNED) && w->isFloating();
+            int        pass       = w->isFloating() ? FLOATING : TILED;
+            const bool fullscreen = !pinned && Fullscreen::controller()->hasFullscreen(w->m_workspace);
+            if (fullscreen && Fullscreen::controller()->isFullscreen(w))
+                pass = FULLSCREEN;
+            else if (fullscreen && w->isFloating()) {
+                if (!w->shouldRenderOverFullscreen())
+                    continue;
+                pass = OVER_FULLSCREEN;
+            }
             const auto position = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + drawn.workspaceOffset + drawn.floatingOffset - monitor->m_position;
             const auto size     = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
             if (w == focused) {
@@ -718,16 +733,9 @@ void main() {
             const bool still = g->depth->value() == 0;
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(),
                                     still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, w->metadata().stableID()});
-            if ((w->m_state & Desktop::View::WINDOW_STATE_PINNED) && w->isFloating()) {
+            if (pinned) {
                 stacking.push_back(1e9 + order);
                 continue;
-            }
-            int pass = w->isFloating() ? FLOATING : TILED;
-            if (Fullscreen::controller()->hasFullscreen(w->m_workspace)) {
-                if (Fullscreen::controller()->isFullscreen(w))
-                    pass = FULLSCREEN;
-                else if (w->isFloating() && (w->shouldRenderOverFullscreen() || w->isFadingOutUnderFullscreen()))
-                    pass = OVER_FULLSCREEN;
             }
             stacking.push_back(drawOrder(w->m_workspace, pass, order + (pass == TILED && w == focused ? 1e5 : 0)));
         }
@@ -1534,6 +1542,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         settleAnswers();
     });
     static auto REFRESHED = Event::bus()->m_events.config.props_refreshed.listen([](bool) { settleAnswers(); });
+    // Every way the world stops answering lets pending answers go when it
+    // happens, whether or not a frame is drawn then: a config change, the
+    // session locking, a window going fullscreen, a monitor going to sleep.
+    static auto LOCKED     = g_pSessionLockManager->m_events.lock.listen([] { settleAnswers(); });
+    static auto FULLSCREEN = Event::bus()->m_events.window.fullscreen.listen([](PHLWINDOW) { settleAnswers(); });
+    const auto  watchSleep = [](const PHLMONITOR& monitor) {
+        if (g && monitor)
+            g->sleeps.push_back(monitor->m_events.dpmsChanged.listen([] { settleAnswers(); }));
+    };
+    for (const auto& monitor : State::monitorState()->monitors())
+        watchSleep(monitor);
+    static auto ADDED = Event::bus()->m_events.monitor.added.listen([watchSleep](PHLMONITOR monitor) { watchSleep(monitor); });
 
     return {"backdrop", "Draws the current Omarchy theme's backdrop between the wallpaper and the windows.", "Sean", "0.2"};
 }
