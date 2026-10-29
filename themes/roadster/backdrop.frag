@@ -110,55 +110,6 @@ vec2 wedge(vec2 px, vec2 at, float size) {
     return d * size;
 }
 
-// The window an impulse at `at` happened in, or -1. An impulse is placed at
-// its window's middle, so of the windows holding `at` it is the one whose
-// middle is nearest (not the one on top: another can float over it).
-int windowAt(vec2 at) {
-    int found = -1;
-    float best = FAR;
-    for (int i = 0; i < windowCount; i++) {
-        vec4 r = windowRect(i);
-        vec2 off = at - r.xy - r.zw * 0.5;
-        if (all(lessThan(abs(off), r.zw * 0.5 + 1.0)) && dot(off, off) < best) {
-            found = i;
-            best = dot(off, off);
-        }
-    }
-    return found;
-}
-
-// How much window i shades px, 1 in full shadow: its rect moved `offset` away
-// from the light, `soft` pixels soft, as present as the window is. It is
-// glass, so it shades the world beside it, never what is seen through it.
-float windowShadow(vec2 px, int i, vec2 offset, float soft) {
-    vec4 r = windowRect(i);
-    float rounding = windowRounding(i);
-    float d = rectDistance(px - offset, r, rounding);
-    return (1.0 - smoothstep(-soft, soft, d)) * smoothstep(-2.0, 3.0, rectDistance(px, r, rounding)) * windowAlpha(i);
-}
-
-// The outward direction of a rounded rect's edge nearest px.
-vec2 edgeNormal(vec2 px, vec4 rect, float radius) {
-    vec2 p = px - rect.xy - rect.zw * 0.5;
-    vec2 q = abs(p) - rect.zw * 0.5 + radius;
-    vec2 g = (q.x > 0.0 && q.y > 0.0) ? normalize(q) : (q.x > q.y ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
-    return g * vec2(p.x < 0.0 ? -1.0 : 1.0, p.y < 0.0 ? -1.0 : 1.0);
-}
-
-// The sheen a window's glass catches: a soft diagonal streak, 1 at its
-// middle, whose place on the glass moves as the window does across the
-// screen, the way a reflection slides over a pane that moves.
-float glassStreak(vec2 px, vec4 r) {
-    float across = dot(px - r.xy, normalize(vec2(1.0, -1.25))) / max(r.z, 1.0) + r.x / resolution.x * 0.8;
-    return exp(-pow((fract(across * 0.7 + 0.15) - 0.5) * 9.0, 2.0));
-}
-
-// How an answer swells and fades: 0 as it begins, 1 after `rise` seconds and
-// 0 again at `life`.
-float swell(float age, float rise, float life) {
-    return smoothstep(0.0, rise, age) * (1.0 - smoothstep(rise, life, age));
-}
-
 // The cockpit answering what happened lately, briefly and softly, at px: the
 // light it draws, and how much it lights the floor's dots (`lit`). Typing and
 // voice get no answer.

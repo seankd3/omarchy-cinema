@@ -80,31 +80,6 @@ float wallDistance(vec2 px, vec4 rect, float grow, float cut) {
     return max(length(max(q, 0.0)) + min(max(q.x, q.y), 0.0), (q.x + q.y + cut) * 0.70710678);
 }
 
-// The way out of a rect's edge at px, rounded by `radius`.
-vec2 outward(vec2 px, vec4 rect, float radius) {
-    vec2 c = px - rect.xy - rect.zw * 0.5;
-    vec2 q = abs(c) - rect.zw * 0.5 + radius;
-    vec2 n = q.x > 0.0 && q.y > 0.0 ? normalize(q) : (q.x > q.y ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
-    return n * sign(c + 1e-6);
-}
-
-// The window an impulse happened to: the one holding its point whose middle
-// is nearest it (an impulse is at a window's middle or on its lower edge),
-// or the point itself once the window has gone.
-vec4 impulseRect(vec2 at) {
-    vec4 found = vec4(at, 0.0, 0.0);
-    float best = FAR;
-    for (int i = 0; i < windowCount; i++) {
-        vec4 r = windowRect(i);
-        float d = length(at - r.xy - r.zw * 0.5);
-        if (rectDistance(at, r, 0.0) < 1.0 && d < best) {
-            best = d;
-            found = r;
-        }
-    }
-    return found;
-}
-
 // The light on window i's glass at px: NERV's light lying along the upper
 // glass, brightest toward it, and a soft diagonal streak that slides across
 // the pane as the window moves, as a reflection does. Only the glass shows
@@ -137,7 +112,7 @@ vec4 answers(vec2 px, vec2 cell) {
             // with a flash where it leaves the window and a wash behind its
             // front that carries through the glass. The cells it crosses
             // burn and stay lit behind it, fading.
-            vec4 r = impulseRect(e.xy);
+            vec4 r = windowRectAt(e.xy);
             float f = fieldDistance(px, r);
             float reach = age * 1100.0;
             if (f < -2.0 || f > reach + 120.0) continue;
@@ -152,7 +127,7 @@ vec4 answers(vec2 px, vec2 cell) {
         } else if (kind == OPEN || kind == FOCUS) {
             // The cells along the window's edge glow up and settle.
             if (age > 1.0) continue;
-            float fc = fieldDistance(cell, impulseRect(e.xy));
+            float fc = fieldDistance(cell, windowRectAt(e.xy));
             if (fc < -30.0 || fc > 160.0) continue;
             float fade = smoothstep(0.0, 0.15, age) * exp(-age * 3.0) * (kind == OPEN ? 1.0 : e.w);
             lit += fade * exp(-abs(fc) / 45.0);
@@ -185,7 +160,7 @@ vec4 backdrop(vec2 px) {
         if (d < 0.0) pane = i;
         float beyond = max(d, 0.0);
         float grip = exp(-beyond / 70.0);
-        held += vec3(outward(px, r, windowRounding(i)) * 0.7 * beyond, 1.0) * grip;
+        held += vec3(edgeNormal(px, r, windowRounding(i)) * 0.7 * beyond, 1.0) * grip;
         float lift = windowLift(i);
         float soft = 18.0 + 40.0 * lift;
         float s = rectDistance(px + LIGHT * (24.0 + 44.0 * lift), r, windowRounding(i));
@@ -331,7 +306,7 @@ vec4 frame(vec2 px, int i) {
     float rounding = windowRounding(i);
     float d = rectDistance(px, r, rounding);
     if (d < -2.0 || d > 48.0) return vec4(0.0);
-    vec2 n = outward(px, r, rounding);
+    vec2 n = edgeNormal(px, r, rounding);
     float f = fieldDistance(px, r);
     bool focus = i == focusedIndex;
     float lift = windowLift(i);

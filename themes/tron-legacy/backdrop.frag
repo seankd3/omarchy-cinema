@@ -87,11 +87,8 @@ float wave(vec2 px, vec2 at, float age, float speed, float width) {
 // Where a window event touches the floor: the foot of the window it happened
 // in (windows stand on the Grid), or the point itself.
 vec2 foot(vec2 at) {
-    for (int i = 0; i < windowCount; i++) {
-        vec4 r = windowRect(i);
-        if (rectDistance(at, r, 0.0) < 0.0) return vec2(at.x, r.y + r.w);
-    }
-    return at;
+    int i = windowAt(at);
+    return i < 0 ? at : vec2(at.x, windowRect(i).y + windowRect(i).w);
 }
 
 // How much the grid lights up at px, from everything that happened lately and
@@ -222,8 +219,7 @@ vec4 backdrop(vec2 px) {
     // shows it; the window's text stays over it, opaque.
     if (closest >= 0 && nearest < 0.0) {
         vec4 r = windowRect(closest);
-        float across = dot(px - r.xy, normalize(vec2(1.0, -1.25))) / max(r.z, 1.0) + r.x / resolution.x * 0.8;
-        float streak = exp(-pow((fract(across * 0.7 + 0.15) - 0.5) * 9.0, 2.0));
+        float streak = glassStreak(px, r);
         float top = exp(-(px.y - r.y) / 90.0);
         light += mix(cyan, vec3(1.0), 0.5) * (0.045 * streak + 0.05 * top) * windowAlpha(closest);
     }
@@ -254,9 +250,7 @@ vec4 frame(vec2 px, int i) {
     float rounding = windowRounding(i);
     float d = rectDistance(px, r, rounding);
     if (d < -2.0 || d > 30.0) return vec4(0.0);
-    vec2 e = vec2(1.0, 0.0);
-    vec2 n = normalize(vec2(rectDistance(px + e.xy, r, rounding) - rectDistance(px - e.xy, r, rounding),
-                            rectDistance(px + e.yx, r, rounding) - rectDistance(px - e.yx, r, rounding)) + 1e-6);
+    vec2 n = edgeNormal(px, r, rounding);
     float lift = windowLift(i);
     vec3 tint = i == focusedIndex ? ORANGE : accent;
     float edge = (1.0 - smoothstep(0.0, 6.0, d)) * smoothstep(-2.0, 0.0, d);

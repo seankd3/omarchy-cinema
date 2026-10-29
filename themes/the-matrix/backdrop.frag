@@ -107,30 +107,6 @@ vec3 rain(vec2 px, vec4 depth, float layer, float shift) {
     return column(at, depth.xy, id * 3.1 + layer * 101.0, d.y, d.x, d.z, d.w);
 }
 
-// The way out of a rect's edge at px, rounded by `radius`.
-vec2 outward(vec2 px, vec4 rect, float radius) {
-    vec2 c = px - rect.xy - rect.zw * 0.5;
-    vec2 q = abs(c) - rect.zw * 0.5 + radius;
-    vec2 n = q.x > 0.0 && q.y > 0.0 ? normalize(q) : (q.x > q.y ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
-    return n * sign(c + 1e-6);
-}
-
-// The window an impulse happened to: the one holding its point whose middle
-// is nearest it, or the point itself once the window has gone.
-vec4 impulseRect(vec2 at) {
-    vec4 found = vec4(at, 0.0, 0.0);
-    float best = FAR;
-    for (int i = 0; i < windowCount; i++) {
-        vec4 r = windowRect(i);
-        float d = length(at - r.xy - r.zw * 0.5);
-        if (rectDistance(at, r, 0.0) < 1.0 && d < best) {
-            best = d;
-            found = r;
-        }
-    }
-    return found;
-}
-
 // The near rain's glyph cell holding px, its columns shifted `shift` across:
 // the cell's middle on the screen (xy), so a burst lights glyph by glyph, and
 // how much of a character of the agents' text covers px (z).
@@ -160,7 +136,7 @@ vec4 answers(vec2 px, vec2 cell) {
             // Glyphs burst out from the window's edge in a ring, white-hot at
             // its front, harder the faster it came, with a broad wave of light
             // under it that carries through the glass; brief, then calm.
-            vec4 r = impulseRect(e.xy);
+            vec4 r = windowRectAt(e.xy);
             float d = rectDistance(px, r, 0.0);
             float reach = age * 1000.0;
             if (d < -2.0 || abs(d - reach) > 200.0) continue;
@@ -171,7 +147,7 @@ vec4 answers(vec2 px, vec2 cell) {
         } else if (kind == OPEN || kind == FOCUS) {
             // The rain round the window brightens for a moment.
             if (age > 1.0) continue;
-            float d = rectDistance(px, impulseRect(e.xy), 0.0);
+            float d = rectDistance(px, windowRectAt(e.xy), 0.0);
             if (d < -2.0 || d > 200.0) continue;
             float near = exp(-max(d, 0.0) / 50.0) * smoothstep(0.0, 0.15, age) * exp(-age * 3.0) * (kind == OPEN ? 1.0 : e.w);
             a.xy += vec2(0.08, 0.6) * near;
@@ -355,7 +331,7 @@ vec4 frame(vec2 px, int i) {
     float rounding = windowRounding(i);
     float d = rectDistance(px, r, rounding);
     if (d < -2.0 || d > 48.0) return vec4(0.0);
-    vec2 n = outward(px, r, rounding);
+    vec2 n = edgeNormal(px, r, rounding);
     bool focus = i == focusedIndex;
     float lift = windowLift(i);
 

@@ -197,6 +197,63 @@ float windowGlow(vec2 px, float radius) {
     return glow;
 }
 
+// Helpers several films share (a helper enters the contract once two films
+// answer a fact the same way).
+
+// The window an event at `at` belongs to: of the windows the point falls in
+// (within a pixel), the one whose middle is nearest, since a floating window
+// can cover another's; -1 for none.
+int windowAt(vec2 at) {
+    int found = -1;
+    float best = FAR;
+    for (int i = 0; i < windowCount; i++) {
+        vec4 r = windowRect(i);
+        vec2 off = at - r.xy - r.zw * 0.5;
+        if (all(lessThan(abs(off), r.zw * 0.5 + 1.0)) && dot(off, off) < best) {
+            found = i;
+            best = dot(off, off);
+        }
+    }
+    return found;
+}
+
+// windowAt's rect, or an empty rect at the point when it is in no window.
+vec4 windowRectAt(vec2 at) {
+    int i = windowAt(at);
+    return i < 0 ? vec4(at, 0.0, 0.0) : windowRect(i);
+}
+
+// The outward normal of a rounded rect's edge nearest px.
+vec2 edgeNormal(vec2 px, vec4 rect, float radius) {
+    vec2 p = px - rect.xy - rect.zw * 0.5;
+    vec2 q = abs(p) - rect.zw * 0.5 + radius;
+    vec2 g = (q.x > 0.0 && q.y > 0.0) ? normalize(q) : (q.x > q.y ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
+    return g * vec2(p.x < 0.0 ? -1.0 : 1.0, p.y < 0.0 ? -1.0 : 1.0);
+}
+
+// The shadow window i casts on the world, `offset` away from its light and
+// `soft` wide, only outside the window itself, so the world seen through its
+// own glass stays lit: 1 in full shadow.
+float windowShadow(vec2 px, int i, vec2 offset, float soft) {
+    vec4 r = windowRect(i);
+    float rounding = windowRounding(i);
+    float d = rectDistance(px - offset, r, rounding);
+    return (1.0 - smoothstep(-soft, soft, d)) * smoothstep(-2.0, 3.0, rectDistance(px, r, rounding)) * windowAlpha(i);
+}
+
+// The light falling on window i's glass, for a backdrop to draw under it (the
+// glass shows it, the text stays over it): a soft diagonal streak whose place
+// follows the window across the screen, as a real reflection slides.
+float glassStreak(vec2 px, vec4 r) {
+    float across = dot(px - r.xy, normalize(vec2(1.0, -1.25))) / max(r.z, 1.0) + r.x / resolution.x * 0.8;
+    return exp(-pow((fract(across * 0.7 + 0.15) - 0.5) * 9.0, 2.0));
+}
+
+// A soft rise over `rise` seconds and fade until `life`, for brief answers.
+float swell(float age, float rise, float life) {
+    return smoothstep(0.0, rise, age) * (1.0 - smoothstep(rise, life, age));
+}
+
 // What a film defines. backdrop(px): the colour of the world at px. And,
 // optionally, frame(px, i): window i's edge in that world (specs/depth.md,
 // part 2), a premultiplied colour over a band reaching 48 px outside the
