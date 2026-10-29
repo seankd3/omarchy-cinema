@@ -3,12 +3,13 @@
 // window a circuit line is drawn, and pulses run along it; around the focused
 // window they run orange, as Clu's do.
 //
-// The windows stand on the Grid (specs/depth.md), calmly (Sean, 2026-10-29:
-// "nice and elegant and give depth to the window, but we don't need too much
-// crazy movement"): lit from the horizon behind them, each casts its shadow
-// toward the viewer, further and softer as focus lifts it, and the floor gives
-// under its weight; a moving window leaves a short faint trail of its
-// circuit; landing and closing send one soft ring through the grid, opening
+// The windows stand on the Grid (specs/depth.md), calmly, and shine when they
+// move (Sean, 2026-10-29: "nice and elegant and give depth to the window";
+// "Unless like I'm moving windows round ... then you can really make things
+// shine"): lit from the horizon behind them, each casts its shadow toward the
+// viewer, further and softer as focus lifts it, and the floor gives under its
+// weight; a moving window leaves a bright light-cycle trail of its circuit and
+// landing rings out through the grid; closing sends one soft ring, opening
 // draws one in; focus warms the circuit; the horizon glows a little with your
 // voice and the grid a little under the pointer.
 
@@ -100,10 +101,11 @@ float gridLit(vec2 px) {
     for (int i = 0; i < impulseCount; i++) {
         vec4 e = impulses[i];
         int kind = impulseKinds[i];
-        // Brief and soft (Sean, 2026-10-29: "we don't need too much crazy
-        // movement"): one gentle ring on landing and closing, nothing for
-        // typing or speech.
-        if (kind == LAND) lit += 1.2 * e.w * wave(px, foot(e.xy), e.z, 700.0, 60.0);
+        // Calm, except where windows move (Sean, 2026-10-29: "don't make it
+        // too flashy ... Unless like I'm moving windows round ... then you can
+        // really make things shine"): landing rings out bright, closing is a
+        // gentle ring, typing and speech make none.
+        if (kind == LAND) lit += 3.2 * e.w * wave(px, foot(e.xy), e.z, 900.0, 45.0);
         else if (kind == CLOSE) lit += 1.0 * wave(px, foot(e.xy), e.z, 900.0, 60.0);
         else if (kind == OPEN && e.z < 0.6) {
             // Drawn in: the ring closes on the window's foot as it opens.
@@ -205,11 +207,11 @@ vec4 backdrop(vec2 px) {
         if (speed < 40.0) continue;
         float outside = smoothstep(0.0, 3.0, windowDistance(px, i));
         vec3 tint = i == focusedIndex ? ORANGE : cyan;
-        for (int k = 1; k <= 3; k++) {
+        for (int k = 1; k <= 5; k++) {
             vec4 ghost = windowRect(i);
-            ghost.xy -= v * 0.02 * float(k);
+            ghost.xy -= v * 0.025 * float(k);
             float d = rectDistance(px, ghost, windowRounding(i));
-            light += tint * glowLine(abs(d - 7.0), 1.1) * (0.24 - 0.07 * float(k)) * min(speed / 1500.0, 1.0) * windowAlpha(i) * outside;
+            light += tint * glowLine(abs(d - 7.0), 1.1) * (0.75 - 0.13 * float(k)) * min(speed / 1500.0, 1.0) * windowAlpha(i) * outside;
         }
     }
 
