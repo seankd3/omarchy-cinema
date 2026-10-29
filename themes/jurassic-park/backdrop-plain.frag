@@ -393,10 +393,11 @@ vec4 backdrop(vec2 px) {
 
     // fsn's spotlight: the focused window is the selected item, so a pool of
     // light lies at its foot and the cone rises from it to a lamp just over
-    // its top edge. It stays on a closing window until it has faded; with
-    // nothing focused the contract's focus rect rests in the middle of the
-    // screen, so the light rests on the landscape there and glides to and
-    // from the windows as the focus does.
+    // its top edge. It glides with the focus from window to window, and is
+    // as present as the focus: it fades with a closing window, and with
+    // nothing focused there is none. A foot above the horizon, or beyond the
+    // void's edge, has no landscape under it, so its pool lands on the
+    // nearest landscape below it (groundAt).
     vec2 g0 = groundAt(focused.xy + vec2(0.0, focused.w), ro, forward, right, up);
     vec2 g1 = groundAt(focused.xy + focused.zw, ro, forward, right, up);
     vec2 pool = (g0 + g1) * 0.5;
@@ -438,7 +439,7 @@ vec4 backdrop(vec2 px) {
         col *= mix(1.0, mix(0.72, 1.0, exp(-fd / 360.0)), focusAlpha);
         // The pool of light, on whatever stands inside the cone.
         float r = length(p.xz - pool) - radius * (1.0 - p.y / lampY);
-        float lit = 1.0 - smoothstep(-pixel.x * 1.5, pixel.x * 1.5, r);
+        float lit = (1.0 - smoothstep(-pixel.x * 1.5, pixel.x * 1.5, r)) * focusAlpha;
         col = mix(col, hit.kind == 2 ? min(col * 1.6 + 0.15, vec3(1.0)) : SPOT, lit * (hit.kind == 2 ? 0.8 : 0.9));
         // Far things sink into the void.
         col = mix(col, FAR_GROUND, smoothstep(SIGHT * 0.55, SIGHT, t));
@@ -456,7 +457,7 @@ vec4 backdrop(vec2 px) {
         float rc = radius * (1.0 - yc / lampY);
         if (tc > 0.0 && tc < t && yc > 0.0 && miss < rc) {
             float edge = 1.0 - smoothstep(0.0, 1.6, (rc - miss) / tc * resolution.y);
-            col = mix(col, SPOT, 0.11 + 0.55 * edge);
+            col = mix(col, SPOT, (0.11 + 0.55 * edge) * focusAlpha);
         }
     }
 
