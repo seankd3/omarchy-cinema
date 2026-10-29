@@ -13,14 +13,15 @@
 // below it, deeper and softer as focus lifts it, and the rain's light lies
 // on its glass. The near columns shift a few pixels more than the far ones
 // as the pointer moves and a window is dragged, and the rain is a little
-// brighter under the pointer. The code answers briefly and softly, never
-// while you work (Sean, 2026-10-29: "nice and elegant and give depth to the
-// window, but we don't need too much crazy movement"): a window landing sends
-// one soft wave of light through the rain from its edge, opening or taking
-// focus brightens the rain round it for a moment, closing leaves a glow that
-// fades, a moving window leaves a short faint wake, and the rain brightens a
-// little as you speak. Typing has no answer. Each window's frame is a
-// phosphor edge that catches the rain passing behind its glass.
+// brighter under the pointer. The code is calm while you work and shines
+// when windows move (Sean, 2026-10-29: "just don't make it too flashy ...
+// Unless like I'm moving windows round or whatever, then you can really make
+// things shine"): a moving window drags the rain beside it along and leaves
+// a bright wake, and landing bursts glyphs out from the window's edge, brief,
+// then calm. The rest is soft: opening or taking focus brightens the rain
+// round a window for a moment, closing leaves a glow that fades, and the rain
+// brightens a little as you speak. Typing has no answer. Each window's frame
+// is a phosphor edge that catches the rain passing behind its glass.
 
 const vec3 HEAD = vec3(0.78, 1.0, 0.84);
 // The brightest the rain is behind the glass. colors.toml's muted (#5c9a6c)
@@ -130,10 +131,24 @@ vec4 impulseRect(vec2 at) {
     return found;
 }
 
-// The rain answering what happened, at px, briefly and softly: a glow of its
-// own (x), and how much brighter the rain there is (y).
-vec2 answers(vec2 px) {
-    vec2 a = vec2(0.0);
+// The near rain's glyph cell holding px, its columns shifted `shift` across:
+// the cell's middle on the screen (xy), so a burst lights glyph by glyph, and
+// how much of a character of the agents' text covers px (z).
+vec3 nearGlyph(vec2 px, float shift) {
+    vec2 at = vec2(px.x + shift, px.y) / NEAR_RAIN.xy;
+    vec2 cell = floor(at);
+    vec2 box = NEAR_RAIN.xy * vec2(0.62, 0.7);
+    vec2 q = (fract(at) - 0.5) * NEAR_RAIN.xy + box * 0.5;
+    float inBox = step(0.0, min(q.x, q.y)) * step(max(q.x - box.x, q.y - box.y), 0.0);
+    float ink = feedCount > 0 ? glyph(feedChar(int(hash(cell + 7.7) * float(feedCount))), q / box) * inBox : 0.0;
+    return vec3((cell + 0.5) * NEAR_RAIN.xy - vec2(shift, 0.0), ink);
+}
+
+// The rain answering what happened, at px, whose near glyph cell is centred
+// at `cell`: a glow of its own (x), how much brighter the rain there is (y),
+// and the glyphs a landing bursts, their light (z) and how white-hot (w).
+vec4 answers(vec2 px, vec2 cell) {
+    vec4 a = vec4(0.0);
     // Newest first: the ring is in the order things happened, so once one is
     // older than the longest answer (1.2 s) every one before it is too.
     for (int k = impulseCount - 1; k >= 0; k--) {
@@ -142,24 +157,28 @@ vec2 answers(vec2 px) {
         float age = e.z;
         if (age > 1.2) break;
         if (kind == LAND) {
-            // One soft wave of light leaves the window's edge, a little
-            // brighter the faster it came.
-            float d = rectDistance(px, impulseRect(e.xy), 0.0);
-            float reach = 40.0 + age * 600.0;
+            // Glyphs burst out from the window's edge in a ring, white-hot at
+            // its front, harder the faster it came, with a broad wave of light
+            // under it that carries through the glass; brief, then calm.
+            vec4 r = impulseRect(e.xy);
+            float d = rectDistance(px, r, 0.0);
+            float reach = age * 1000.0;
             if (d < -2.0 || abs(d - reach) > 200.0) continue;
-            float wave = exp(-abs(d - reach) / 45.0) * exp(-age * 3.0) * (1.0 - smoothstep(0.8, 1.2, age)) * (0.5 + 0.5 * e.w);
-            a += vec2(0.12, 0.8) * wave;
+            float fade = exp(-age * 2.8) * (1.0 - smoothstep(0.7, 1.1, age)) * (0.5 + 0.7 * e.w);
+            float dc = rectDistance(cell, r, 0.0);
+            a += vec4(0.35 * exp(-abs(d - reach) / 70.0), 0.8 * exp(-abs(d - reach) / 45.0),
+                      2.4 * exp(-abs(dc - reach) / 30.0), 2.0 * exp(-abs(dc - reach) / 14.0) * step(age, 0.6)) * fade;
         } else if (kind == OPEN || kind == FOCUS) {
             // The rain round the window brightens for a moment.
             if (age > 1.0) continue;
             float d = rectDistance(px, impulseRect(e.xy), 0.0);
             if (d < -2.0 || d > 200.0) continue;
             float near = exp(-max(d, 0.0) / 50.0) * smoothstep(0.0, 0.15, age) * exp(-age * 3.0) * (kind == OPEN ? 1.0 : e.w);
-            a += vec2(0.08, 0.6) * near;
+            a.xy += vec2(0.08, 0.6) * near;
         } else if (kind == CLOSE) {
             // Where the window was, a glow that fades.
             if (age > 0.8) continue;
-            a += vec2(0.06, 0.4) * exp(-length(px - e.xy) / 250.0) * smoothstep(0.0, 0.1, age) * (1.0 - age / 0.8);
+            a.xy += vec2(0.06, 0.4) * exp(-length(px - e.xy) / 250.0) * smoothstep(0.0, 0.1, age) * (1.0 - age / 0.8);
         }
     }
     return a;
@@ -193,31 +212,35 @@ vec4 backdrop(vec2 px) {
     float nearFocus = exp(-max(focusedWindow(px), 0.0) / 160.0);
 
     // The pointer and a dragged window move the viewpoint, so the near
-    // columns shift a few pixels more than the far ones.
+    // columns shift a few pixels more than the far ones. A moving window
+    // drags the columns beside it along, bending them, and leaves a bright
+    // wake where it has just been.
     vec2 drag = focusedIndex >= 0 ? windowVelocity(focusedIndex) : vec2(0.0);
     float view = (pointer.x - resolution.x * 0.5) * 0.007 + drag.x * 0.003;
-
-    // A moving window leaves a short faint wake where it has just been.
-    float wake = 0.0;
+    float pull = 0.0, wake = 0.0;
     for (int i = 0; i < windowCount; i++) {
         vec2 v = windowVelocity(i);
         float speed = length(v);
-        if (speed < 40.0 || windowDistance(px, i) < 0.0) continue;
+        if (speed < 40.0) continue;
         float pace = min(speed / 1500.0, 1.0) * windowAlpha(i);
-        for (int k = 1; k <= 2; k++) {
+        float d = windowDistance(px, i);
+        pull -= v.x * 0.02 * exp(-max(d, 0.0) / 80.0) * pace;
+        if (d < 0.0) continue;
+        for (int k = 1; k <= 4; k++) {
             vec4 ghost = windowRect(i);
-            ghost.xy -= v * 0.025 * float(k);
-            wake = max(wake, exp(-max(rectDistance(px, ghost, windowRounding(i)), 0.0) / 30.0) * (1.0 - 0.3 * float(k)) * pace);
+            ghost.xy -= v * 0.035 * float(k);
+            wake = max(wake, exp(-max(rectDistance(px, ghost, windowRounding(i)), 0.0) / 30.0) * (1.0 - 0.2 * float(k)) * pace);
         }
     }
+    float shift = view + pull;
 
     // Three depths: far columns small, dim and slow; near ones large and fast.
     // No agents, no rain.
     vec3 far = vec3(0.0), mid = vec3(0.0), close = vec3(0.0);
     if (feedPresence > 0.0) {
-        far = rain(px, FAR_RAIN, 2.0, view * 0.2) * feedPresence;
-        mid = rain(px, MID_RAIN, 1.0, view * 0.5) * feedPresence;
-        close = rain(px, NEAR_RAIN, 0.0, view) * feedPresence;
+        far = rain(px, FAR_RAIN, 2.0, shift * 0.2) * feedPresence;
+        mid = rain(px, MID_RAIN, 1.0, shift * 0.5) * feedPresence;
+        close = rain(px, NEAR_RAIN, 0.0, shift) * feedPresence;
     }
     // The far rain is cooler and dimmer, as if seen through more air; the
     // heads are white-hot at every depth.
@@ -231,12 +254,13 @@ vec4 backdrop(vec2 px) {
     // something just happened and as you speak, and sheltered below the
     // windows. Behind the glass it keeps its shape but not its glare (the
     // limit below).
-    vec2 answer = answers(px);
+    vec3 g = nearGlyph(px, shift);
+    vec4 answer = answers(px, g.xy);
     vec2 toPointer = px - pointer.xy;
     float touch = exp(-dot(toPointer, toPointer) / (2.0 * 90.0 * 90.0));
     float shade = 1.0 - 0.75 * shadow;
-    vec3 light = code * mix(1.0, (1.0 + 0.6 * nearFocus) * (1.0 + 0.35 * touch + 0.6 * wake + answer.y + 0.3 * voice) * shade, open);
-    light += green * 0.04 * wake * open;
+    vec3 light = code * mix(1.0, (1.0 + 0.6 * nearFocus) * (1.0 + 0.35 * touch + 2.5 * wake + answer.y + 0.3 * voice) * shade, open);
+    light += green * 0.16 * wake * open;
 
     // The rain parts round the windows: drops flare where they strike a
     // window's top edge, and streams run down its sides.
@@ -264,7 +288,7 @@ vec4 backdrop(vec2 px) {
         if (over > 0.0 && px.x > rect.x && px.x < rect.x + rect.z) {
             // Where a near column's head reaches the top edge, it flares and
             // the edge holds a little of its light as the tail goes by.
-            float at = (px.x + view) / NEAR_RAIN.x;
+            float at = (px.x + shift) / NEAR_RAIN.x;
             vec4 d = drop(floor(at), 0.0, NEAR_RAIN.z, NEAR_RAIN.w);
             if (d.x > 0.0) {
                 vec3 lit = drops(rect.y - 1.0, NEAR_RAIN.y, d.y, d.x, d.z, d.w);
@@ -275,10 +299,12 @@ vec4 backdrop(vec2 px) {
         }
     }
 
-    // The answers' own glow, with or without rain; within the blur's reach of
-    // a window it keeps to the glass's limit.
-    vec3 glow = green * answer.x;
-    light += glow * mix(1.0, min(1.0, UNDER_GLASS / max(glow.g, 1e-4)), max(inside, 1.0 - smoothstep(0.0, BLUR_REACH, nearest)));
+    // The answers' own glow, with or without rain, and a landing's glyphs,
+    // only while there is rain; within the blur's reach of a window they keep
+    // to the glass's limit.
+    vec3 glow = green * answer.x + (green * answer.z * 1.2 + HEAD * min(answer.w, 2.0) * 1.4) * g.z * feedPresence;
+    float glowPeak = max(glow.r, max(glow.g, glow.b));
+    light += glow * mix(1.0, min(1.0, UNDER_GLASS / max(glowPeak, 1e-4)), max(inside, 1.0 - smoothstep(0.0, BLUR_REACH, nearest)));
 
     // The gaps between windows glow faintly green, a little more as you
     // speak, and less in the windows' shelter.
@@ -319,8 +345,8 @@ vec4 backdrop(vec2 px) {
 
 // Each window's edge (specs/depth.md, part 2): a phosphor line, a crisp
 // core in its own bloom, brightest along the top where the rain falls from
-// and as focus lifts it, brightening softly for a moment when the window
-// opens, lands or takes focus. The glass's outer pixels show the rain bent
+// and as focus lifts it, flaring when the window lands and brightening softly
+// for a moment when it opens or takes focus. The glass's outer pixels show the rain bent
 // from behind it, and that light catches on the line, so a drop passing
 // behind the glass lights the edge. Its light stays within a few pixels, so
 // it never lies over the text of a window beneath.
@@ -342,7 +368,8 @@ vec4 frame(vec2 px, int i) {
         vec4 ev = impulses[k];
         if (ev.z > 1.0) break;
         if ((kind != FOCUS && kind != OPEN && kind != LAND) || length(ev.xy - middle) > 2.0 + length(r.zw) * 0.02) continue;
-        flare += 0.6 * smoothstep(0.0, 0.12, ev.z) * exp(-ev.z * 3.5) * (kind == OPEN ? 1.0 : ev.w);
+        flare += kind == LAND ? 2.0 * ev.w * exp(-ev.z * 4.0)
+            : 0.6 * smoothstep(0.0, 0.12, ev.z) * exp(-ev.z * 3.5) * (kind == OPEN ? 1.0 : ev.w);
     }
 
     float toward = 0.55 + 0.45 * clamp(dot(n, -LIGHT), 0.0, 1.0);
