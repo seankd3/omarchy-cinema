@@ -1,0 +1,205 @@
+/* Jurassic Park for GTK apps, Files first: an SGI window on IRIX. Indigo
+   Magic's grey bevelled chrome and bold italic Helvetica round the navy void
+   of fsn's view; what you chose stands in fsn's spotlight, what you point at
+   is outlined in its azure. */
+
+:root {
+  /* Only window backgrounds use colors.toml's background shades, which turn
+     to glass; text, panels and popovers stay a few steps off them, so they
+     keep their opacity (tools/check-glass.py). */
+  --accent-bg-color: #40b8ec;
+  --accent-fg-color: #071026;
+  --accent-color: #7fd4f8;
+  --destructive-bg-color: #c8443c;
+  --destructive-fg-color: #ffffff;
+  --destructive-color: #ff8a80;
+  --success-color: #3ed49a;
+  --warning-color: #f2c050;
+  --error-color: #ff7a70;
+
+  --window-bg-color: #080d22;
+  --window-fg-color: #e6ecf8;
+  --view-bg-color: #080d22;
+  --view-fg-color: #e6ecf8;
+  /* The header is IRIX's grey window chrome, solid. */
+  --headerbar-bg-color: #aeb1bb;
+  --headerbar-fg-color: #0e1016;
+  --headerbar-border-color: #5c5f6a;
+  --headerbar-backdrop-color: #9c9fa9;
+  --headerbar-shade-color: rgba(0, 0, 0, 0.25);
+  --sidebar-bg-color: #050818;
+  --sidebar-fg-color: #dbe2f0;
+  --sidebar-border-color: #5c5f6a;
+  --card-bg-color: rgba(64, 184, 236, 0.05);
+  --card-fg-color: #e6ecf8;
+  --popover-bg-color: #121a38;
+  --popover-fg-color: #e6ecf8;
+  --dialog-bg-color: #121a38;
+  --dialog-fg-color: #e6ecf8;
+  --border-color: rgba(174, 177, 187, 0.35);
+  --border-opacity: 0.8;
+  --window-radius: 0;
+}
+
+/* The top bars are IRIX's window chrome: solid grey in Indigo Magic's
+   bevel, lit along the top and shaded along the bottom. libadwaita leaves a
+   toolbar view's top bar clear unless raised, so it is coloured here. */
+toolbarview > .top-bar {
+  background-color: var(--headerbar-bg-color);
+  color: var(--headerbar-fg-color);
+  box-shadow: inset 0 1px #e4e6ec, inset 0 -1px #5c5f6a;
+}
+
+toolbarview > .top-bar:backdrop {
+  background-color: var(--headerbar-backdrop-color);
+}
+
+headerbar .title,
+headerbar label.title {
+  font-family: "Nimbus Sans", "Adwaita Sans", sans-serif;
+  font-weight: bold;
+  font-style: italic;
+}
+
+headerbar button:not(.flat):not(.suggested-action):not(.destructive-action) {
+  background: #b9bcc6;
+  box-shadow: inset 1px 1px #eceef2, inset -1px -1px #5c5f6a;
+  border-radius: 0;
+}
+
+headerbar button:active,
+headerbar button:checked {
+  background: #9a9da7;
+  box-shadow: inset 1px 1px #5c5f6a, inset -1px -1px #e4e6ec;
+}
+
+/* The path is fsn's location field: sunk into the chrome, in Helvetica's
+   bold italic. */
+.nautilus-pathbar {
+  background: #c6c9d2;
+  box-shadow: inset 1px 1px #5c5f6a, inset -1px -1px #eceef2;
+  border-radius: 0;
+}
+
+.nautilus-pathbar button,
+.nautilus-path-button {
+  font-family: "Nimbus Sans", "Adwaita Sans", sans-serif;
+  font-style: italic;
+  color: #262a34;
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.nautilus-path-button.current-dir {
+  font-weight: bold;
+  color: #0e1016;
+}
+
+/* The sidebar: the place you are in stands in the spotlight. */
+placessidebar row,
+.navigation-sidebar row {
+  border-radius: 0;
+  margin: 1px 6px;
+}
+
+placessidebar row:hover,
+.navigation-sidebar row:hover {
+  background: rgba(64, 184, 236, 0.10);
+}
+
+placessidebar row:selected,
+.navigation-sidebar row:selected {
+  background: #fffbe8;
+  color: #0a1230;
+}
+
+placessidebar row image,
+.navigation-sidebar row image {
+  color: #7fd4f8;
+}
+
+placessidebar row:selected image,
+.navigation-sidebar row:selected image,
+placessidebar row:selected label,
+.navigation-sidebar row:selected label {
+  color: #0a1230;
+}
+
+/* Files in the grid: outlined in azure where you point, in the spotlight's
+   pool when chosen. */
+.nautilus-grid-view gridview > child {
+  border-radius: 0;
+  transition: background 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.nautilus-grid-view gridview > child:hover {
+  box-shadow: inset 0 0 0 1px rgba(64, 184, 236, 0.6);
+}
+
+.nautilus-grid-view gridview > child:selected {
+  background: rgba(255, 251, 232, 0.92);
+  box-shadow: 0 0 18px rgba(255, 251, 232, 0.25);
+}
+
+.nautilus-grid-view gridview > child:selected label {
+  color: #0a1230;
+}
+
+.nautilus-list-view columnview > listview > row:selected {
+  background: rgba(255, 251, 232, 0.16);
+  box-shadow: inset 3px 0 #fffbe8;
+}
+
+.nautilus-list-view columnview > listview > row:hover {
+  background: rgba(64, 184, 236, 0.08);
+}
+
+.nautilus-image.file-thumbnail {
+  border: 1px solid rgba(64, 184, 236, 0.55);
+}
+
+rubberband {
+  background: rgba(64, 184, 236, 0.12);
+  border: 1px solid #7fd4f8;
+}
+
+/* The status line is fsn's own, on the grey chrome. */
+.floating-bar {
+  background: #aeb1bb;
+  box-shadow: inset 1px 1px #e4e6ec, inset -1px -1px #5c5f6a;
+  border-radius: 0;
+  color: #0e1016;
+  font-family: "Nimbus Sans", "Adwaita Sans", sans-serif;
+}
+
+button {
+  border-radius: 0;
+}
+
+button.suggested-action {
+  background: #40b8ec;
+  color: #071026;
+  font-weight: bold;
+}
+
+entry,
+searchbar entry {
+  background: rgba(64, 184, 236, 0.05);
+  border: 1px solid rgba(174, 177, 187, 0.5);
+  border-radius: 0;
+}
+
+entry:focus-within {
+  border-color: #7fd4f8;
+}
+
+popover > contents {
+  border: 1px solid #5c5f6a;
+  box-shadow: inset 0 1px rgba(228, 230, 236, 0.25);
+  border-radius: 0;
+}
+
+selection {
+  background: rgba(64, 184, 236, 0.4);
+}
