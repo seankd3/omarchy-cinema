@@ -106,7 +106,7 @@ the Discussion's job).
 - GPT-6.1 Sol review of each theme's shader, CSS and popup, and of the
   plugin and tooling.
 - From empty, on the supported versions (Omarchy 4 as of 2026-10, Hyprland
-  0.56, GTK 4.24, named in the README): a fresh user runs the install, logs in
+  0.57, GTK 4.24, named in the README): a fresh user runs the install, logs in
   again (the install adds the plugin's one load line to
   `~/.config/hypr/hyprland.lua`, the only loader; native code never loads or
   unloads in a running Hyprland), applies a cinema theme, and gets the

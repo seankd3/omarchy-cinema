@@ -13,7 +13,7 @@ it doesn't move and super responsive when things are moving"; Files and its
 icons themed too.
 
 Machine: ASUS P16, aarch64, NVIDIA N1X, 2880x1800 at 120 Hz, scale 1.25,
-Omarchy 4 (Quickshell shell, Hyprland 0.56.2 with Lua config).
+Omarchy 4 (Quickshell shell, Hyprland 0.57.0 with Lua config).
 
 ## Shape
 

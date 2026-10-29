@@ -25,12 +25,13 @@
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/desktop/state/Fadeout.hpp>
 #include <hyprland/src/desktop/state/FadingOutState.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/SessionLockManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
@@ -38,6 +39,8 @@
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/render/SceneResources.hpp>
+#include <hyprland/src/render/WindowRenderPresentation.hpp>
 #include <hyprland/src/render/pass/PassElement.hpp>
 #include <hyprland/src/render/shaders/Shaders.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
@@ -429,27 +432,15 @@ void main() {
         return 1.F - std::pow(1.F - t, 3.F);
     }
 
-    // A window's fade as Hyprland draws it (renderWindow's fadeAlpha, Hyprland
-    // 0.56.2 src/render/Renderer.cpp:588), so the shape fades with the window
-    // through closing, fullscreen, layout changes and workspace moves.
-    float renderedAlpha(const PHLWINDOW& w) {
-        using namespace Desktop::View;
-        const auto workspace     = w->m_workspace;
-        const bool workspaceFade = w->m_monitorMovedFrom != -1 && (!workspace || !workspace->isVisible());
-        return w->alphaValue(WINDOW_ALPHA_FADE) * w->alphaValue(WINDOW_ALPHA_FULLSCREEN) * w->alphaValue(WINDOW_ALPHA_LAYOUT) *
-            (w->m_pinned || workspaceFade || !workspace ? 1.F : workspace->m_alpha->value()) * (workspaceFade ? w->alphaValue(WINDOW_ALPHA_MOVE_TO_WORKSPACE) : 1.F) *
-            w->alphaValue(WINDOW_ALPHA_MOVE_FROM_WORKSPACE);
-    }
-
     bool isWindowFadeout(const SP<Desktop::IFadeout>& fadeout) {
         const auto plane = fadeout->plane();
         return plane == Desktop::FADEOUT_PLANE_WINDOW_TILED || plane == Desktop::FADEOUT_PLANE_WINDOW_FLOATING || plane == Desktop::FADEOUT_PLANE_WINDOW_OVER_FULLSCREEN;
     }
 
     // Hyprland emits window.close, then makes that window's fadeout in the
-    // same call (Hyprland 0.56.2 src/desktop/view/Window.cpp:2575, 2701), so
-    // the window fadeouts that appear after a close event belong to the window
-    // it named. The radius is read here, once the fadeout exists, because in
+    // same call (Hyprland 0.57.0 src/desktop/view/window/Window.cpp:1623,
+    // 1744), so the window fadeouts that appear after a close event belong to
+    // the window it named. The radius is read here, once the fadeout exists, because in
     // between Hyprland may take the window out of fullscreen and apply its
     // rules again, as the fadeout's own copy sees. Run at each close event and
     // before reading a scene; forgets fadeouts Hyprland has let go.
@@ -460,11 +451,11 @@ void main() {
                 continue;
             alive.insert(fadeout.get());
             if (g->seenFadeouts.insert(fadeout.get()).second && g->closing) {
-                g->fadeoutRounding[fadeout.get()] = g->closing->rounding();
+                g->fadeoutRounding[fadeout.get()] = g->closing->presentation().rounding();
                 for (auto& [id, state] : g->monitors)
                     if (state.focusedWindow.lock() == g->closing) {
                         state.focusFadeout   = fadeout;
-                        state.focusFadeoutOf = g->closing->m_stableID;
+                        state.focusFadeoutOf = g->closing->metadata().stableID();
                     }
             }
         }
@@ -481,27 +472,32 @@ void main() {
         PHLWINDOW  focusedHere;
 
         for (const auto& w : Desktop::windowState()->windows()) {
-            if (!w->m_isMapped || w->isHidden() || !w->m_workspace || !g_pHyprRenderer->shouldRenderWindow(w, monitor))
+            if (!w->mapped() || w->isHidden() || !w->m_workspace || !g_pHyprRenderer->shouldRenderWindow(w, monitor))
                 continue;
-            const auto position = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + (w->m_pinned ? Vector2D{} : w->m_workspace->m_renderOffset->value()) +
-                w->m_floatingOffset - monitor->m_position;
-            const auto size = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+            // Where and how faded renderWindow draws it, from the presentation
+            // it draws with, so the shape moves and fades with the window
+            // through workspace slides, closing, fullscreen and layout changes.
+            const auto drawn = w->presentation().renderPresentation();
+            if (!drawn.alphaVisible)
+                continue;
+            const auto position = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + drawn.workspaceOffset + drawn.floatingOffset - monitor->m_position;
+            const auto size     = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
             if (w == focused) {
                 scene.focusedIndex = scene.shapes.size();
                 focusedHere        = w;
             }
-            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, renderedAlpha(w), w->rounding()});
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding()});
         }
 
         // Closed windows fading out, on the workspaces Hyprland draws them on:
         // the active one and every special workspace still visible, even one
-        // being dismissed (Hyprland 0.56.2 src/render/Renderer.cpp:1205, 3233).
+        // being dismissed (Hyprland 0.57.0 src/render/Renderer.cpp:1300, 3598).
         claimFadeouts();
         static auto ROUNDING = CConfigValue<Config::INTEGER>("decoration:rounding");
         for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
             const auto workspace = fadeout->workspace().lock();
             if (fadeout->monitor() != monitor || !isWindowFadeout(fadeout) ||
-                (workspace && workspace != monitor->m_activeWorkspace && !(workspace->m_isSpecialWorkspace && workspace->m_alpha->value() > 0.F)))
+                (workspace && workspace != monitor->m_activeWorkspace && !(workspace->type() == Workspace::eWorkspaceType::SPECIAL && workspace->m_alpha->value() > 0.F)))
                 continue;
             const auto position = fadeout->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) - monitor->m_position;
             const auto size     = fadeout->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
@@ -515,7 +511,7 @@ void main() {
 
         if (focusedHere || scene.focusedIndex < 0)
             state.focusFadeout.reset(); // a new focus, or the fadeout is over
-        const uint64_t source = focusedHere ? focusedHere->m_stableID : scene.focusedIndex >= 0 ? state.focusFadeoutOf : 0;
+        const uint64_t source = focusedHere ? focusedHere->metadata().stableID() : scene.focusedIndex >= 0 ? state.focusFadeoutOf : 0;
         state.focusedWindow   = focusedHere;
 
         const Rect middle = {float(monitor->m_size.x * 0.3), float(monitor->m_size.y * 0.3), float(monitor->m_size.x * 0.4), float(monitor->m_size.y * 0.4)};
@@ -780,7 +776,7 @@ vec4 cinemaGlass(vec4 c) {{
       public:
         CBackdropPass(PHLMONITOR monitor, SScene scene) : m_monitor(monitor), m_scene(std::move(scene)) {}
 
-        std::vector<UP<IPassElement>> draw() override {
+        std::vector<UP<IPassElement>> draw(Render::CRenderContext& ctx) override {
             const auto monitor = m_monitor.lock();
             if (!monitor)
                 return {};
@@ -834,7 +830,7 @@ vec4 cinemaGlass(vec4 c) {{
             }
 
             const CBox box  = {0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
-            const auto proj = g_pHyprRenderer->projectBoxToTarget(box);
+            const auto proj = g_pHyprRenderer->projectBoxToTarget(ctx, box);
             glUseProgram(p.id);
             glUniformMatrix3fv(p.proj, 1, GL_TRUE, proj.getMatrix().data());
             glUniform2f(p.resolution, monitor->m_size.x, monitor->m_size.y);
@@ -855,12 +851,11 @@ vec4 cinemaGlass(vec4 c) {{
             glUniform1f(p.feedPresence, feedPresence);
 
             glBindVertexArray(p.vao);
-            auto& data = g_pHyprRenderer->m_renderData;
-            data.damage.forEachRect([&data](const auto& rect) {
-                g_pHyprOpenGL->scissor(&rect, data.transformDamage);
+            ctx.m_data.damage.forEachRect([&ctx](const auto& rect) {
+                g_pHyprOpenGL->scissor(ctx, &rect, ctx.m_data.transformDamage);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             });
-            g_pHyprOpenGL->scissor(nullptr);
+            g_pHyprOpenGL->disableScissor();
 
             glBindVertexArray(vao);
             glUseProgram(program);
@@ -872,10 +867,10 @@ vec4 cinemaGlass(vec4 c) {{
             return {};
         }
 
-        bool needsLiveBlur() override {
+        bool needsLiveBlur(Render::CRenderContext&) override {
             return false;
         }
-        bool needsPrecomputeBlur() override {
+        bool needsPrecomputeBlur(Render::CRenderContext&) override {
             return false;
         }
         const char* passName() override {
@@ -886,12 +881,12 @@ vec4 cinemaGlass(vec4 c) {{
         }
         // The backdrop covers the whole monitor, so Hyprland can skip drawing
         // the wallpaper under it.
-        std::optional<CBox> boundingBox() override {
+        std::optional<CBox> boundingBox(Render::CRenderContext&) override {
             const auto monitor = m_monitor.lock();
             return monitor ? std::optional<CBox>(CBox{0, 0, monitor->m_size.x, monitor->m_size.y}) : std::nullopt;
         }
-        CRegion opaqueRegion() override {
-            const auto box = boundingBox();
+        CRegion opaqueRegion(Render::CRenderContext& ctx) override {
+            const auto box = boundingBox(ctx);
             return box ? CRegion(*box) : CRegion{};
         }
 
@@ -900,9 +895,9 @@ vec4 cinemaGlass(vec4 c) {{
         SScene        m_scene;
     };
 
-    // Hyprland's own render.pre listener decides whether to blur the glass
-    // again, and runs before this one: so once the scene has changed, that
-    // decision is made again, by Hyprland's own rule.
+    // Marking the glass dirty here is enough for this frame to blur it again:
+    // whether glass needs a blur is decided from the frame before, which drew
+    // the glass (Hyprland 0.57.0 src/render/pass/Pass.cpp:238, Renderer.cpp:973).
     void onPre(PHLMONITOR monitor) {
         if (!g || g->source.empty())
             return;
@@ -911,18 +906,20 @@ vec4 cinemaGlass(vec4 c) {{
         if (state.pending == state.drawn)
             return;
         redraw(monitor);
-        g_pHyprOpenGL->preRender(monitor);
     }
 
-    void onStage(eRenderStage stage) {
-        if (!g || stage != RENDER_POST_WALLPAPER || g->source.empty())
+    // The backdrop is drawn in the monitor's own frames. A workspace captured
+    // or snapshotted on its own draws in an isolated scene, without it, as
+    // its windows there are not where the monitor's scene has them.
+    void onStage(const Event::SRenderStageEvent& event) {
+        if (!g || event.stage != RENDER_POST_WALLPAPER || g->source.empty() || !event.context || !event.monitor)
             return;
-        const auto monitor = g_pHyprRenderer->m_renderData.pMonitor.lock();
-        if (!monitor || !program())
+        auto& ctx = event.context->get();
+        if ((ctx.sceneResources() && ctx.sceneResources()->isolated()) || !program())
             return;
-        auto& state = g->monitors[monitor->m_id];
+        auto& state = g->monitors[event.monitor->m_id];
         state.drawn = state.pending;
-        g_pHyprRenderer->m_renderPass.add(makeUnique<CBackdropPass>(monitor, state.pending));
+        Render::IHyprRenderer::addPassElement(ctx, makeUnique<CBackdropPass>(event.monitor, state.pending));
     }
 
     // Plugged in: any mains or USB-C supply online.
@@ -1009,7 +1006,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     claimFadeouts();
 
     static auto PRE      = Event::bus()->m_events.render.pre.listen([](PHLMONITOR monitor) { onPre(monitor); });
-    static auto STAGE    = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) { onStage(stage); });
+    static auto STAGE    = Event::bus()->m_events.render.stage.listen([](const Event::SRenderStageEvent& event) { onStage(event); });
     static auto CLOSE    = Event::bus()->m_events.window.close.listen([](PHLWINDOW window) {
         if (!g)
             return;
@@ -1032,7 +1029,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
         wl_event_source_remove(g->glassIdle);
     if (!g->glassShader.empty())
         g_pHyprRenderer->reloadShaders("");
-    g_pHyprRenderer->m_renderPass.removeAllOfType("CBackdropPass");
+    g_pHyprRenderer->context().m_pass.removeAllOfType("CBackdropPass");
     g_pHyprOpenGL->makeEGLCurrent();
     deleteProgram();
     for (const auto& monitor : State::monitorState()->monitors())

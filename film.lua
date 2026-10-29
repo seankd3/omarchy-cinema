@@ -86,7 +86,6 @@ hl.config({
     shadow = { enabled = true, range = 22, render_power = 3, color = glow("40"), color_inactive = glow("10") },
   },
   render = { use_shader_blur_blend = true },
-  plugin = { backdrop = { glass = film.glass or 0.85 } },
 })
 
 -- A light frost: text on the glass is opaque, so nothing behind it competes,
@@ -101,6 +100,12 @@ hl.config({
 -- 2026-10-28, Oblivion); a dark film keeps Omarchy's dimming.
 local frost = { size = film.frost or 3, passes = 2, brightness = colors.mode == "light" and 1 or nil }
 hl.on("config.reloaded", function()
+  -- The glass amount is the backdrop plugin's own setting, set here with the
+  -- frost: the plugin registers it when it loads, and a build left behind by
+  -- a Hyprland update never loads, so an absent key is skipped, not an error.
+  if hl.get_config("plugin.backdrop.glass") ~= nil then
+    hl.config({ plugin = { backdrop = { glass = film.glass or 0.85 } } })
+  end
   hl.config({ decoration = { blur = frost } })
   o.window("org\\.gnome\\.Nautilus", { opacity = "0.999 0.999" })
 end)
