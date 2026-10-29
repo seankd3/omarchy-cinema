@@ -36,11 +36,29 @@ float perimeter(vec2 px, vec4 rect) {
 // The floor under the point, in floor units: x across, z away from the viewer.
 // The viewer glides forward a cell every two seconds; eight cells per sixteen
 // seconds, so the hourly wrap moves the floor by whole cells.
+//
+// The viewer stands a little toward the pointer, so the floor shifts with it,
+// near rows more than far ones: perspective is the parallax.
 vec2 floorAt(vec2 px, float horizon) {
     float dy = max(px.y - horizon, 0.5);
     float depth = 140.0 * resolution.y / dy;
-    float x = (px.x - resolution.x * 0.5) * depth / resolution.y;
+    float x = (px.x - resolution.x * 0.5) * depth / resolution.y + (pointer.x / resolution.x - 0.5) * 36.0;
     return vec2(x, depth + cycle(16.0) * 8.0 * CELL);
+}
+
+// The floor gives under the windows standing on it: points near a window's
+// foot are pulled toward it, so the grid lines bend round its weight, less as
+// focus lifts it off the floor.
+vec2 sag(vec2 px) {
+    vec2 pull = vec2(0.0);
+    for (int i = 0; i < windowCount; i++) {
+        vec4 r = windowRect(i);
+        vec2 foot = vec2(clamp(px.x, r.x, r.x + r.z), r.y + r.w);
+        vec2 to = foot - px;
+        float weight = (1.0 - 0.7 * windowLift(i)) * windowAlpha(i);
+        pull += to * 0.18 * weight * exp(-length(to * vec2(1.0, 2.4)) / 70.0);
+    }
+    return px + pull;
 }
 
 // A light cycle in lane `lane` (cells from the middle), riding away from the
@@ -127,7 +145,7 @@ vec4 backdrop(vec2 px) {
     float near = clamp(windowGlow(px, 90.0), 0.0, 1.0);
 
     if (px.y > horizon) {
-        vec2 world = floorAt(px, horizon);
+        vec2 world = floorAt(sag(px), horizon);
         vec2 cell = world / CELL;
         vec2 aa = max(fwidth(cell), vec2(1e-4));
         vec2 lines = abs(fract(cell + 0.5) - 0.5) / aa;
@@ -187,6 +205,19 @@ vec4 backdrop(vec2 px) {
         }
     }
 
+    // The glass catches the Grid's light: behind each window the world draws
+    // the sheen that falls on it, a soft diagonal streak whose place follows
+    // the window across the screen, as a real reflection slides when the pane
+    // moves, and the horizon's glow along its upper glass. Only the glass
+    // shows it; the window's text stays over it, opaque.
+    if (closest >= 0 && nearest < 0.0) {
+        vec4 r = windowRect(closest);
+        float across = dot(px - r.xy, normalize(vec2(1.0, -1.25))) / max(r.z, 1.0) + r.x / resolution.x * 0.8;
+        float streak = exp(-pow((fract(across * 0.7 + 0.15) - 0.5) * 9.0, 2.0));
+        float top = exp(-(px.y - r.y) / 90.0);
+        light += mix(cyan, vec3(1.0), 0.5) * (0.045 * streak + 0.05 * top) * windowAlpha(closest);
+    }
+
     // Light pools in the seams between windows.
     light += cyan * near * (1.0 - inside) * 0.12;
 
@@ -221,7 +252,10 @@ vec4 frame(vec2 px, int i) {
     float edge = (1.0 - smoothstep(0.0, 6.0, d)) * smoothstep(-2.0, 0.0, d);
     vec3 bent = backdrop(px - n * 16.0 * edge).rgb * 1.15;
     float toward = 0.6 + 0.4 * clamp(-n.y, 0.0, 1.0);
-    float rim = glowLine(abs(d - 0.5), 1.0) * toward * (0.8 + 0.8 * lift);
+    // Light passing behind the window, a cycle or a wave, catches its rim.
+    vec3 behind = backdrop(px - n * 10.0).rgb;
+    float passing = smoothstep(0.15, 0.6, dot(behind, vec3(0.3, 0.5, 0.2)));
+    float rim = glowLine(abs(d - 0.5), 1.0) * toward * (0.8 + 0.8 * lift + 1.6 * passing);
     float a = clamp(max(edge * 0.9, rim), 0.0, 1.0);
     vec3 col = bent * edge * 0.9 + tint * rim;
     return vec4(col, a) * windowAlpha(i);
