@@ -10,8 +10,20 @@ here=$(cd "$(dirname "$0")" && pwd)
 
 # The headers' version file names the Hyprland they describe (version and
 # commit), so its hash names the build; timestamps would not tell an update.
-sdk=$(sha256sum "$(pkg-config --variable=prefix hyprland)/hyprland/src/version.h" | cut -c1-16)
-make -s -C "$here/plugin" BUILD="$here/plugin/build/$sdk"
+version=$(pkg-config --variable=prefix hyprland)/hyprland/src/version.h
+sdk=$(sha256sum "$version" | cut -c1-16)
+if ! make -s -C "$here/plugin" BUILD="$here/plugin/build/$sdk"; then
+  # After omarchy update this runs unattended, where a failed hook is one line
+  # in a scrolling terminal. A build names the Hyprland commit it is for, so
+  # when the installed one is not for this Hyprland, the next login loses the
+  # backdrop: say so on the desktop (Sean, 2026-10-29).
+  commit=$(sed -n 's/^#define GIT_COMMIT_HASH *"\(.*\)"/\1/p' "$version")
+  if ! grep -qaF "$commit" ~/.local/lib/omarchy-cinema/backdrop.so 2>/dev/null; then
+    omarchy-notification-send -u critical "Cinema backdrop needs a port" \
+      "It does not build for Hyprland $(pkg-config --modversion hyprland). From your next login, film themes run without the live backdrop and glass."
+  fi
+  exit 1
+fi
 mkdir -p ~/.local/lib/omarchy-cinema
 # A new file, not an overwrite: Hyprland has the old one mapped while it runs.
 install -m 755 "$here/plugin/build/$sdk/backdrop.so" ~/.local/lib/omarchy-cinema/backdrop.so.new
