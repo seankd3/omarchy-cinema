@@ -30,7 +30,6 @@ import re
 import struct
 import subprocess
 import tempfile
-import time
 import zipfile
 import zlib
 from pathlib import Path
@@ -173,23 +172,21 @@ def main():
     # each reading the theme applied when it starts, so the last one wins.
     with open(OUT / ".lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        # The key is the extension's identity: Chrome updates the theme it
-        # installed only from a package signed by the same key.
-        key = OUT / "key.pem"
-        if not key.exists():
+        # The key names the extension, and Chrome takes a package of it only
+        # when its version is newer than the one it has, so each package
+        # counts on from the last one issued under that key. The count lives
+        # beside the key, and a key without its count is replaced: a new key
+        # is a new extension, which Chrome installs whatever its version.
+        key, count = OUT / "key.pem", OUT / "count"
+        if not (key.exists() and count.exists()):
             os.umask(0o077)
             subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048",
                             "-out", str(key)], capture_output=True, check=True)
+            write(count, b"0")
         found = colors()
         listing = None
         if found is not None:
-            # Chrome installs the package only when its version is newer than
-            # the one it has, so each package counts on from the last one
-            # issued, kept beside the key that names the extension, whatever
-            # the clock does. The clock's seconds are the floor for a key that
-            # lost its count.
-            count = OUT / "count"
-            n = max(int(count.read_text()) + 1 if count.exists() else 0, int(time.time()))
+            n = int(count.read_text()) + 1
             write(count, str(n).encode())
             version = f"1.{n >> 16}.{n & 0xFFFF}"
             ext_id, package = crx(zipped(theme(*found, version)), str(key))
