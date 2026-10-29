@@ -513,7 +513,7 @@ vec4 backdrop(vec2 px) {
     // background (colors.toml's), so it cannot lower the text's contrast.
     if (closest >= 0 && nearest < 0.0) {
         vec4 r = windowRect(closest);
-        vec2 toSun = normalize(sun0 - r.xy - r.zw * 0.5);
+        vec2 toSun = normalize(sun0 - r.xy - r.zw * 0.5 + vec2(0.0, -1e-3));
         float facing = exp(-(dot(r.zw * 0.5, abs(toSun)) - dot(px - r.xy - r.zw * 0.5, toSun)) / 90.0);
         float a = windowAlpha(closest) * inside;
         col = mix(col, vec3(1.0), 0.8 * glassStreak(px, r) * a);
@@ -555,7 +555,7 @@ vec4 frame(vec2 px, int i) {
     vec3 outside = backdrop(px + n * 12.0).rgb;
     float warm = smoothstep(0.04, 0.22, outside.r - outside.b);
     tint = mix(tint, GOLD, warm * 0.85);
-    float facing = max(dot(n, normalize(sunAt() - r.xy - r.zw * 0.5)), 0.0);
+    float facing = max(dot(n, normalize(sunAt() - r.xy - r.zw * 0.5 + vec2(0.0, -1e-3))), 0.0);
     float line = (1.0 - smoothstep(0.4, 1.4, abs(d - 0.5))) * (focus ? 0.95 : 0.7) * (1.0 + 0.8 * warm);
     float edge = (1.0 - smoothstep(0.0, 4.0, d)) * smoothstep(-2.0, 0.0, d);
     vec3 bent = mix(outside, vec3(1.0), 0.3);
