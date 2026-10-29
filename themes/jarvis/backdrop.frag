@@ -16,6 +16,17 @@
 // of light from the window; closing powers the hologram down to a line and a
 // flare; typing taps small soft rings along the window's foot, gentle enough
 // that steady typing never flickers.
+//
+// The windows and the workshop are one scene. Holo lines hold each window:
+// they run along its edges in the seams and converge on its corners, light
+// flowing in along them. The viewer leans toward the pointer and the hologram,
+// nearest, shifts most, the lattice behind it less; a dragged window pulls
+// the hologram after it. Behind each window the world draws the sheen on its
+// glass, a streak that slides as the window moves and the reactor's glow
+// along its lower glass, seen only through the glass. Each window's edge is a
+// holographic pane's (frame()): the workshop bends through its outer pixels,
+// its rim is cyan running to amber on the focused window as the border was,
+// brightest toward the reactor, and light passing behind it runs into the rim.
 
 const vec3 AMBER = vec3(1.0, 0.70, 0.28);
 const vec3 HOT = vec3(0.86, 0.97, 1.0); // the reactor's white-hot core
@@ -117,10 +128,10 @@ int windowAt(vec2 at) {
     float best = FAR;
     for (int i = 0; i < windowCount; i++) {
         vec4 r = windowRect(i);
-        float off = length(r.xy + r.zw * 0.5 - at);
-        if (rectDistance(at, r, 0.0) < 1.0 && off < best) {
+        vec2 off = at - r.xy - r.zw * 0.5;
+        if (all(lessThan(abs(off), r.zw * 0.5 + 1.0)) && dot(off, off) < best) {
             found = i;
-            best = off;
+            best = dot(off, off);
         }
     }
     return found;
@@ -133,17 +144,22 @@ float windowShadow(vec2 px, int i, vec2 offset, float soft) {
     return (1.0 - smoothstep(-soft, soft, d)) * windowAlpha(i);
 }
 
-// One pass over the windows: the distance to the nearest (`edge`), the
-// light pooled round them (`near`, 1 at an edge and adding up in the seams)
-// and their shadows from the reactor (returned, 1 in full shadow).
-float windows(vec2 px, out float edge, out float near) {
+// One pass over the windows: the distance to the nearest (`edge`) and which
+// it is (`closest`), the light pooled round them (`near`, 1 at an edge and
+// adding up in the seams) and their shadows from the reactor (returned, 1 in
+// full shadow).
+float windows(vec2 px, out float edge, out int closest, out float near) {
     vec2 light = reactor();
     float s = 0.0;
     edge = FAR;
+    closest = -1;
     near = 0.0;
     for (int i = 0; i < windowCount; i++) {
         float d = windowDistance(px, i);
-        edge = min(edge, d);
+        if (d < edge) {
+            edge = d;
+            closest = i;
+        }
         near += exp(-max(d, 0.0) / 110.0);
         vec4 r = windowRect(i);
         float lift = windowLift(i);
@@ -152,6 +168,37 @@ float windows(vec2 px, out float edge, out float near) {
     }
     near = min(near, 1.0);
     return s;
+}
+
+// The outward direction of a rounded rect's edge nearest px.
+vec2 edgeNormal(vec2 px, vec4 rect, float radius) {
+    vec2 p = px - rect.xy - rect.zw * 0.5;
+    vec2 q = abs(p) - rect.zw * 0.5 + radius;
+    vec2 g = (q.x > 0.0 && q.y > 0.0) ? normalize(q) : (q.x > q.y ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
+    return g * vec2(p.x < 0.0 ? -1.0 : 1.0, p.y < 0.0 ? -1.0 : 1.0);
+}
+
+// The sheen a window's glass catches: a soft diagonal streak, 1 at its
+// middle, whose place on the glass moves as the window does across the
+// screen, the way a reflection slides over a pane that moves.
+float glassStreak(vec2 px, vec4 r) {
+    float across = dot(px - r.xy, normalize(vec2(1.0, -1.25))) / max(r.z, 1.0) + r.x / resolution.x * 0.8;
+    return exp(-pow((fract(across * 0.7 + 0.15) - 0.5) * 9.0, 2.0));
+}
+
+// Holo lines holding window i: they run along its edges 10 px out and
+// converge on its corners, brighter toward them, light flowing in along them
+// to a small node at each corner.
+vec3 holdLines(vec2 px, int i, vec3 cyan) {
+    vec4 r = windowRect(i);
+    vec2 p = abs(px - r.xy - r.zw * 0.5) - r.zw * 0.5;
+    float toCorner = max(-min(p.x, p.y), 0.0);
+    float o = abs(rectDistance(px, r, windowRounding(i)) - 10.0);
+    float f = fract(toCorner / 26.0 + cycle(3.0));
+    float dash = smoothstep(0.0, 0.1, f) * (1.0 - smoothstep(0.5, 0.6, f));
+    float node = glowLine(abs(length(p - 10.0) - 4.0), 1.0);
+    vec3 tint = i == focusedIndex ? mix(cyan, AMBER, 0.35) : cyan;
+    return tint * (glowLine(o, 0.9) * (0.12 + 0.45 * dash) * exp(-toCorner / 150.0) + node * 0.6) * windowAlpha(i);
 }
 
 // A moving window's wake: dashed afterimages of it where it just was, over a
@@ -301,9 +348,10 @@ vec3 answers(vec2 px, vec3 cyan, out float lattice, out float surge, out vec2 sh
 
 vec4 backdrop(vec2 px) {
     float edge, near;
+    int closest;
     // What the reactor reaches: the surfaces and the dust, not the holograms.
     // Its light falls off away from it, so the seams nearest it glow most.
-    float shade = 1.0 - 0.85 * windows(px, edge, near);
+    float shade = 1.0 - 0.85 * windows(px, edge, closest, near);
     float lamp = 0.55 + 0.9 * exp(-length(px - reactor()) / (resolution.y * 0.8));
     float inside = 1.0 - smoothstep(-1.0, 1.0, edge);
     float focusEdge = focusedWindow(px);
@@ -315,14 +363,18 @@ vec4 backdrop(vec2 px) {
     vec2 shake;
     vec3 answered = answers(px, cyan, lattice, surge, shake);
     answered += afterimage(px, cyan, lattice);
-    // The world as a landing throws it: the hologram, the lattice and the
-    // dust, never the windows.
-    vec2 world = px + shake;
+    // The world as a landing throws it, the viewer leaning toward the pointer
+    // sees it and a dragged window pulls it: the hologram, nearest, moves
+    // most; the lattice and the dust behind it less. Never the windows.
+    vec2 lean = pointer.xy / resolution - 0.5;
+    vec2 pulled = focusedIndex < 0 ? vec2(0.0) : windowVelocity(focusedIndex);
+    vec2 world = px + shake + lean * 12.0 + pulled * 0.004;
+    vec2 holoAt = px + shake + lean * 44.0 + pulled * 0.014;
 
     // Everything is centred on the focused window and sized to it.
     vec2 c = focused.xy + focused.zw * 0.5;
     float reach = length(focused.zw) * 0.5;
-    vec2 p = world - c;
+    vec2 p = holoAt - c;
     float r = length(p);
     float a = atan(p.y, p.x);
     float Rg = reach * 0.45;
@@ -381,6 +433,17 @@ vec4 backdrop(vec2 px) {
     light += mix(cyan, vec3(1.0), 0.5) * motes(world) * (0.2 + 0.5 * near) * shade;
 
     light += answered;
+    if (closest >= 0 && edge > 0.0 && edge < 30.0) light += holdLines(px, closest, cyan);
+
+    // The glass catches the workshop's light: behind each window the world
+    // draws the sheen on it, the streak and the reactor's glow along its
+    // lower glass. Only the glass shows it; the window's text stays over it,
+    // opaque.
+    if (closest >= 0 && edge < 0.0) {
+        vec4 r = windowRect(closest);
+        float low = exp(-(r.y + r.w - px.y) / 90.0);
+        light += mix(cyan, HOT, 0.5) * (0.22 * glassStreak(px, r) + 0.3 * low) * windowAlpha(closest);
+    }
 
     // The bar's lower edge: a thin holographic line, a tick every 40 pixels
     // hanging from it, and an amber marker sweeping across.
@@ -396,4 +459,37 @@ vec4 backdrop(vec2 px) {
 
     // Bright light saturates toward white, as it does on film.
     return vec4(base + (1.0 - exp(-light * 1.4)), 1.0);
+}
+
+// Each window's edge (specs/depth.md, part 2): a holographic pane. Its outer
+// five pixels bend the workshop behind them, the way the side of a thick pane
+// does; its rim is a crisp line of projected light, cyan running to amber
+// across the focused window as its border did, a dim blue on the others,
+// brightest on the side facing the reactor and as focus lifts it. Light
+// passing behind the window, a ring, a wave or the rays, runs into the rim,
+// and the window glows a little in the reactor's light, as Hyprland's shadow
+// made it.
+vec4 frame(vec2 px, int i) {
+    vec4 r = windowRect(i);
+    float rounding = windowRounding(i);
+    float d = rectDistance(px, r, rounding);
+    if (d < -2.0 || d > 24.0) return vec4(0.0);
+    bool focus = i == focusedIndex;
+    float diag = clamp(dot(px - r.xy, vec2(0.7071)) / max((r.z + r.w) * 0.7071, 1.0), 0.0, 1.0);
+    vec3 tint = focus ? mix(vec3(0.37, 0.85, 1.0), AMBER, diag) : vec3(0.15, 0.36, 0.52);
+    vec3 col = tint * exp(-max(d, 0.0) / 9.0) * step(0.0, d) * (focus ? 0.22 : 0.05);
+    float a = 0.0;
+    if (d < 12.0) {
+        vec2 n = edgeNormal(px, r, rounding);
+        float toward = 0.55 + 0.45 * max(dot(n, normalize(reactor() - r.xy - r.zw * 0.5)), 0.0);
+        // One look at the world 12 px in behind the glass: what the edge
+        // bends into view, and what light is passing there.
+        vec3 behind = backdrop(px - n * 12.0).rgb;
+        float passing = smoothstep(0.12, 0.5, dot(behind, vec3(0.3, 0.5, 0.2)));
+        float rim = glowLine(abs(d - 0.5), 1.0) * toward * (focus ? 0.95 : 0.6) * (1.0 + 0.6 * windowLift(i));
+        float edge = (1.0 - smoothstep(0.0, 5.0, d)) * smoothstep(-2.0, 0.0, d);
+        col += behind * 1.1 * edge * 0.9 + tint * rim + mix(tint, behind, 0.5) * rim * passing * 1.8;
+        a = clamp(max(edge * 0.9, rim), 0.0, 1.0);
+    }
+    return vec4(col, a) * windowAlpha(i);
 }
