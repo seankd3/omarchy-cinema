@@ -5,8 +5,24 @@
 // in faint red corner brackets; a tighter, brighter lock frame holds the
 // focused one, slides to the next window when focus moves, and fades as the
 // focus does.
+//
+// The windows stand on the floor in the horizon's light (specs/depth.md):
+// each shadows the dots and streaks toward the viewer, further and softer as
+// focus lifts it. A moving window throws speed lines back from its trailing
+// edge, and a flight path marker rides ahead of it. The floor lights up
+// round the pointer. Opening slams target brackets in from far out onto the
+// window, focus locks on with a white flash and a ping across the floor,
+// landing bounces the horizon and sends a shock through the dots, closing is
+// a kill: a ring, a burst of ticks and a flash. Typing leaves small hit
+// markers at the window's foot, quiet enough that steady typing never
+// flickers.
 
 const vec3 WHITE = vec3(1.0, 0.94, 0.94);
+// The brightest the scene is behind the glass, a channel each. With the glass
+// at 0.55 over #070404 and Omarchy's 0.75 blur brightness, colors.toml's muted
+// (#a08a8a) keeps 4.8:1 over anything up to this: red lines keep their colour,
+// a white flash turns red behind the text.
+const vec3 UNDER_GLASS = vec3(0.6, 0.3, 0.3);
 const float CAMERA = 15.0; // the eye's height over the floor, in grid cells
 
 // A line `d` pixels away: a crisp core `w` pixels wide in a soft glow.
@@ -82,22 +98,214 @@ vec2 wedge(vec2 px, vec2 at, float size) {
     return d * size;
 }
 
+// The window an impulse at `at` happened in, or -1. An impulse is placed at
+// its window's middle, so of the windows holding `at` it is the one whose
+// middle is nearest (not the one on top: another can float over it).
+int windowAt(vec2 at) {
+    int found = -1;
+    float best = FAR;
+    for (int i = 0; i < windowCount; i++) {
+        vec4 r = windowRect(i);
+        vec2 off = at - r.xy - r.zw * 0.5;
+        if (all(lessThan(abs(off), r.zw * 0.5 + 1.0)) && dot(off, off) < best) {
+            found = i;
+            best = dot(off, off);
+        }
+    }
+    return found;
+}
+
+// How much window i shades px, 1 in full shadow: its rect moved `offset` away
+// from the light, `soft` pixels soft, as present as the window is.
+float windowShadow(vec2 px, int i, vec2 offset, float soft) {
+    float d = rectDistance(px - offset, windowRect(i), windowRounding(i));
+    return (1.0 - smoothstep(-soft, soft, d)) * windowAlpha(i);
+}
+
+// What happened lately that the whole cockpit feels: how far a landing
+// bounces the horizon (x, pixels), how hard the lock frame flashes (y) and
+// the horizon flares (z). The same at every point.
+vec3 moments() {
+    vec3 m = vec3(0.0);
+    // Newest first: the ring is newest last, so past the first one older
+    // than the longest answer (a landing's, 1.6 s) every one is.
+    for (int k = impulseCount - 1; k >= 0; k--) {
+        float age = impulses[k].z, s = impulses[k].w;
+        int kind = impulseKinds[k];
+        if (age > 1.6) break;
+        if (kind == LAND) {
+            m.x += sin(age * 38.0) * exp(-age * 5.0) * 24.0 * s;
+            m.z += 1.5 * exp(-age * 6.0) * s;
+        } else if (kind == FOCUS || kind == OPEN) {
+            // The lock closes 0.25 s after focus, 0.45 s after opening.
+            float at = kind == FOCUS ? 0.25 : 0.45;
+            float flash = step(at, age) * exp(-(age - at) * 6.0);
+            m.y += 2.5 * flash * (kind == FOCUS ? s : 1.0);
+            m.z += flash;
+        }
+    }
+    return m;
+}
+
+// The cockpit answering what happened lately, at px: the light it draws,
+// and how much it lights the floor's dots (`lit`).
+vec3 answers(vec2 px, vec3 red, float ground, out float lit) {
+    vec3 light = vec3(0.0);
+    lit = 0.0;
+    for (int k = impulseCount - 1; k >= 0; k--) {
+        vec4 e = impulses[k];
+        int kind = impulseKinds[k];
+        float age = e.z;
+        if (age > 1.6) break;
+        if (kind == TYPE) {
+            vec2 q = px - e.xy;
+            if (age > 0.45 || dot(q, q) > 4900.0) continue;
+            // A hit marker: four short ticks on the diagonals, opening out
+            // and fading, in a little red glow. Typing is steady, so it does
+            // not flash.
+            vec2 f = abs(q);
+            float along = (f.x + f.y) * 0.7071;
+            float off = abs(f.x - f.y) * 0.7071;
+            float r0 = 10.0 + age * 50.0;
+            float fade = 1.0 - age / 0.45;
+            float tick = (1.0 - smoothstep(0.6, 1.6, off)) * smoothstep(r0 - 1.0, r0, along) * (1.0 - smoothstep(r0 + 9.0, r0 + 10.0, along));
+            light += mix(red, WHITE, 0.55) * tick * fade * 1.6 * e.w;
+            light += red * exp(-length(q) / 22.0) * fade * 0.35 * e.w;
+            continue;
+        }
+        if (kind == CLOSE) {
+            vec2 q = px - e.xy;
+            float r = length(q);
+            if (age > 1.0 || r > age * 1400.0 + 200.0) continue;
+            // A kill: a red ring blasting out, four ticks flung out on the
+            // diagonals, a white flash where the window was.
+            float R = age * 1400.0;
+            float fade = exp(-age * 3.0);
+            light += red * (glowLine(abs(r - R), 2.0) * 1.4 + 0.4 * exp(-abs(r - R) / 40.0)) * fade;
+            vec2 f = abs(q);
+            float along = (f.x + f.y) * 0.7071;
+            float off = abs(f.x - f.y) * 0.7071;
+            float r0 = 20.0 + age * 700.0;
+            light += WHITE * (1.0 - smoothstep(0.8, 2.0, off)) * step(r0, along) * step(along, r0 + 40.0) * fade * 1.6;
+            light += WHITE * exp(-r / 26.0) * exp(-age * 7.0) * 3.0;
+            lit += 3.0 * exp(-abs(r - R) / 50.0) * fade;
+            continue;
+        }
+        if (age > (kind == LAND ? 1.6 : kind == OPEN ? 1.0 : kind == FOCUS ? 1.0 : 0.0)) continue;
+        int i = windowAt(e.xy);
+        vec4 rect = i < 0 ? vec4(e.xy, 0.0, 0.0) : windowRect(i);
+        if (kind == LAND) {
+            // Touchdown: a shock runs out through the floor from the
+            // window's foot, flaring the dots as it passes.
+            // The seams round it flash with the impact.
+            float d = rectDistance(px, rect, 0.0);
+            light += mix(red, WHITE, 0.3) * exp(-max(d, 0.0) / 45.0) * step(0.0, d) * exp(-age * 5.0) * 1.6 * e.w;
+            vec2 foot = vec2(clamp(px.x, rect.x, rect.x + rect.z), rect.y + rect.w);
+            float r = length((px - foot) * vec2(1.0, 2.4));
+            float front = abs(r - age * 900.0);
+            if (front > 400.0 || px.y < ground) continue;
+            float fade = exp(-age * 2.2) * e.w;
+            lit += 6.0 * exp(-front / 40.0) * fade;
+            light += red * (glowLine(front, 2.0) * 1.0 + 0.45 * exp(-front / 60.0)) * fade;
+            continue;
+        }
+        float d = rectDistance(px, rect, 0.0);
+        if (d < -2.0 || d > 700.0) continue;
+        // Target brackets slamming in onto the window, from far out for a
+        // new one, closer for a focus; then a ping rolls out across the
+        // floor as the lock closes.
+        float at = kind == FOCUS ? 0.25 : 0.45;
+        if (age < at) {
+            float t = age / at;
+            float gap = mix(kind == FOCUS ? 110.0 : 300.0, 12.0, t * t);
+            float slam = 0.5 + t;
+            if (abs(d - gap) < 60.0) light += mix(red, WHITE, 0.5) * glowLine(brackets(px, rect, gap, mix(90.0, 48.0, t)), 1.6) * slam * 1.4;
+            light += red * exp(-max(d - gap, 0.0) / 30.0) * step(d, gap + 4.0) * slam * 0.12;
+        } else {
+            float since = age - at;
+            float front = abs(d - since * 900.0);
+            float fade = exp(-since * 3.0) * (kind == FOCUS ? e.w : 1.0);
+            if (front < 240.0) {
+                light += red * (glowLine(front, 1.6) + 0.35 * exp(-front / 40.0)) * fade;
+                lit += 4.0 * exp(-front / 50.0) * fade;
+            }
+            light += WHITE * exp(-max(d, 0.0) / 20.0) * exp(-since * 8.0) * 1.2;
+        }
+    }
+    return light;
+}
+
+// A moving window's speed lines: streaks of light back from its trailing
+// edge across its width, and the flight path marker riding ahead of it.
+vec3 speedLines(vec2 px, vec3 red) {
+    vec3 light = vec3(0.0);
+    for (int i = 0; i < windowCount; i++) {
+        vec2 v = windowVelocity(i);
+        float speed = length(v);
+        // Only a moving window pays for its lines (a loop count, not a
+        // branch, so the work is skipped, not merely masked).
+        for (int on = 0; on < (speed < 40.0 ? 0 : 1); on++) {
+            float k = min(speed / 1200.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
+            vec4 r = windowRect(i);
+            vec2 n = v / max(speed, 1e-3);
+            vec2 side = vec2(-n.y, n.x);
+            vec2 q = px - r.xy - r.zw * 0.5;
+            float ext = 0.5 * (abs(n.x) * r.z + abs(n.y) * r.w);
+            float wide = 0.5 * (abs(side.x) * r.z + abs(side.y) * r.w);
+            float u = dot(q, n), w = dot(q, side);
+            float back = -u - ext;
+            if (back > 0.0 && abs(w) < wide) {
+                float lane = floor(w / 18.0);
+                float seed = hash(vec2(lane, float(i) + 3.1));
+                float start = seed * 40.0;
+                float len = speed * (0.06 + 0.14 * hash(vec2(lane, 9.7)));
+                float across = abs(fract(w / 18.0) - 0.5) * 18.0;
+                float streak = step(0.35, seed) * step(start, back) * (1.0 - smoothstep(start, start + len, back))
+                    * (1.0 - smoothstep(0.5, 1.4, across));
+                light += mix(red, WHITE, 0.55 + 0.4 * seed) * streak * 1.2 * k;
+                light += red * exp(-back / (speed * 0.12)) * 0.22 * k;
+            }
+            // The flight path marker: a ring with wings and a fin, ahead of the
+            // leading edge, as present as the speed.
+            vec2 m = px - (r.xy + r.zw * 0.5 + n * (ext + 50.0 + speed * 0.02));
+            float ring = abs(length(m) - 9.0);
+            float wings = abs(m.y) + max(abs(abs(m.x) - 17.0) - 8.0, 0.0);
+            float fin = abs(m.x) + max(abs(m.y + 13.0) - 4.0, 0.0);
+            float marker = glowLine(min(ring, min(wings, fin)), 1.4);
+            light += mix(red, WHITE, 0.7) * marker * smoothstep(150.0, 600.0, speed) * 1.3 * windowAlpha(i);
+        }
+    }
+    return light;
+}
+
 vec4 backdrop(vec2 px) {
     vec3 red = accent;
     float horizon = resolution.y * 0.42;
     vec3 light = vec3(0.0);
+    vec3 moment = moments();
+    // The floor and the horizon, as a landing bounces them.
+    float ground = horizon + moment.x;
 
     // One pass over the windows: the nearest edge, how near any is, how much
-    // window there is, and faint corner brackets on every window but the
-    // focused one, which the lock frame holds.
-    float nearest = FAR, near = 0.0, present = 0.0;
+    // window there is, their shadows on the floor (cast toward the viewer
+    // from the horizon, further and softer with lift), and faint corner
+    // brackets on every window but the focused one, which the lock frame
+    // holds.
+    float nearest = FAR, near = 0.0, present = 0.0, shadow = 0.0;
     for (int i = 0; i < windowCount; i++) {
         float a = windowAlpha(i), d = windowDistance(px, i);
         nearest = min(nearest, d);
         near += exp(-max(d, 0.0) / 120.0);
         present += a;
+        float lift = windowLift(i);
+        shadow = max(shadow, windowShadow(px, i, vec2(0.0, 26.0 + 44.0 * lift), 18.0 + 34.0 * lift));
         if (i != focusedIndex) light += red * glowLine(brackets(px, windowRect(i), 22.0, 34.0), 1.0) * 0.4 * a;
     }
+    float shade = 1.0 - 0.85 * shadow;
+    float lit;
+    vec3 answered = answers(px, red, ground, lit) + speedLines(px, red);
+    // The floor lights up round the pointer.
+    lit += 1.6 * exp(-length((px - pointer.xy) * vec2(1.0, 1.6)) / 200.0);
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
     // Behind a window's glass, and the bar's, only a trace of the light shows.
     float veil = mix(1.0, 0.16, max(inside, step(px.y, reserved.x)));
@@ -108,7 +316,7 @@ vec4 backdrop(vec2 px) {
     // coming toward the viewer a cell a second (16 cells every 16 seconds,
     // so the hourly wrap moves it by whole cells). Dots too close together to
     // draw cleanly fade out toward the horizon.
-    float below = px.y - horizon;
+    float below = px.y - ground;
     if (below > 0.0) {
         float drive = cycle(16.0) * 16.0;
         float depth = CAMERA * resolution.y / below;
@@ -117,7 +325,7 @@ vec4 backdrop(vec2 px) {
         // round wherever the floor slants away.
         vec2 c = floor(cell + 0.5);
         float dotBelow = CAMERA * resolution.y / (c.y - drive);
-        vec2 dotAt = vec2(resolution.x * 0.5 + c.x * dotBelow / CAMERA, horizon + dotBelow);
+        vec2 dotAt = vec2(resolution.x * 0.5 + c.x * dotBelow / CAMERA, ground + dotBelow);
         float radius = clamp(0.06 * below / CAMERA, 0.6, 2.6);
         float dot_ = 1.0 - smoothstep(radius - 0.6, radius + 0.6, length(px - dotAt));
         // Where rows crowd closer than a few pixels the dots give way to
@@ -125,7 +333,10 @@ vec4 backdrop(vec2 px) {
         float rows = below * below / (CAMERA * resolution.y);
         float clean = smoothstep(1.7, 4.0, rows);
         float fade = exp(-depth / 140.0);
-        light += red * (dot_ * clean + 0.05 * (1.0 - clean)) * fade * (0.5 + 0.6 * near) * veil;
+        // What lit the floor flares its dots toward white.
+        vec3 tint = mix(red, WHITE, min(lit * 0.25, 0.7));
+        light += tint * (dot_ * clean + 0.05 * (1.0 - clean)) * fade * (0.5 + 0.6 * near + lit) * veil * shade;
+        light += red * 0.04 * lit * fade * veil * shade;
 
         // Streaks of speed: in a few lanes between the dots, a white dash
         // races in from the distance every three seconds.
@@ -136,15 +347,16 @@ vec4 backdrop(vec2 px) {
             float behind = depth - head;
             float across = abs(fract(cell.x) - 0.5) * below / CAMERA;
             float dash = step(0.0, behind) * exp(-behind / 8.0) * (1.0 - smoothstep(0.4, 1.2, across));
-            light += mix(red, WHITE, 0.6) * dash * fade * 0.6 * veil;
+            light += mix(red, WHITE, 0.6) * dash * fade * 0.6 * veil * shade;
         }
     }
 
     // The horizon: a thin white line in a red haze, and a faint glow rising
     // into the black sky.
     float toHorizon = abs(below);
-    light += WHITE * glowLine(toHorizon, 0.9) * 0.55 * veil;
-    light += red * (0.18 * exp(-toHorizon / 40.0) + 0.05 * exp(-toHorizon / 300.0)) * veil;
+    float flare = 1.0 + moment.z;
+    light += WHITE * glowLine(toHorizon, 0.9) * 0.55 * veil * flare;
+    light += red * (0.18 * exp(-toHorizon / 40.0) + 0.05 * exp(-toHorizon / 300.0)) * veil * flare;
 
     // The wedge turns once a minute on the floor behind the focused window.
     // It glides with the eased focus rect, sized and placed so the box it
@@ -174,8 +386,12 @@ vec4 backdrop(vec2 px) {
     // as present as the focus, so it fades with a closing window.
     if (focusAlpha > 0.0) {
         float d = brackets(px, focused, 12.0, 48.0);
-        light += mix(red, WHITE, 0.3) * glowLine(d, 1.2) * 0.8 * focusAlpha;
+        light += mix(red, WHITE, 0.3 + 0.2 * min(moment.y, 1.0)) * glowLine(d, 1.2 + moment.y) * (0.8 + moment.y) * focusAlpha;
     }
+
+    // The answers read through the glass more than the scene does: more than
+    // half their light shows behind it.
+    light += answered * mix(1.0, 0.6, inside);
 
     // The bar's lower edge: a red line with a white marker sweeping along it,
     // starting and ending off screen so its wrap never shows.
@@ -187,6 +403,8 @@ vec4 backdrop(vec2 px) {
         light += red * 0.05 * step(px.y, reserved.x);
     }
 
-    // Bright light saturates toward white, as it does on film.
-    return vec4(background + (1.0 - exp(-light * 1.3)), 1.0);
+    // Bright light saturates toward white, as it does on film; behind the
+    // glass no channel goes past UNDER_GLASS, so secondary text keeps 4.5:1.
+    vec3 col = background + (1.0 - exp(-light * 1.3));
+    return vec4(mix(col, min(col, UNDER_GLASS), inside), 1.0);
 }
