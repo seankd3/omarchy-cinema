@@ -3,30 +3,27 @@
 // window's edges; light pools in the seams between windows and wakes the hex
 // lattice near them; dust drifts through the beam.
 //
-// The windows stand in the workshop's light (specs/depth.md). The arc reactor
-// glows up from the table below the screen, so each window shades the
-// lattice, the dust and the light pooled in the seams on its far side, further
-// and softer as focus lifts it; the holograms (globe, rings) are light and
-// cast no shadow. A moving window leaves a wake of dashed afterimages over
-// scanned light, and the rings swing with the focused one like a carousel
-// pushed round. The globe turns toward the pointer and the lattice lights up
-// under it. Opening assembles a dashed ring from far out onto the window's
-// edge, where it locks white-hot; landing jolts the whole hologram and sends
-// a shock out through the lattice; focus surges the reactor and throws rays
-// of light from the window; closing powers the hologram down to a line and a
-// flare; typing taps small soft rings along the window's foot, gentle enough
-// that steady typing never flickers.
-//
-// The windows and the workshop are one scene. Holo lines hold each window:
-// they run along its edges in the seams and converge on its corners, light
-// flowing in along them. The viewer leans toward the pointer and the hologram,
-// nearest, shifts most, the lattice behind it less; a dragged window pulls
-// the hologram after it. Behind each window the world draws the sheen on its
-// glass, a streak that slides as the window moves and the reactor's glow
-// along its lower glass, seen only through the glass. Each window's edge is a
+// The windows stand in the workshop's light (specs/depth.md), calmly (Sean,
+// 2026-10-29: "nice and elegant and give depth to the window, but we don't
+// need too much crazy movement going on"). The arc reactor glows up from the
+// table below the screen, so each window shades the lattice, the dust and
+// the light pooled in the seams on its far side, further and softer as focus
+// lifts it; the holograms (globe, rings) are light and cast no shadow. Holo
+// lines hold each window, running along its edges in the seams and
+// converging on its corners. The viewer leans toward the pointer and the
+// hologram, nearest, shifts a few px, the lattice behind it less; a dragged
+// window pulls the hologram a little after it and leaves two faint
+// afterimages. Behind each window the world draws the sheen on its glass, a
+// streak that slides as the window moves and the reactor's glow along its
+// lower glass, seen only through the glass. Each window's edge is a
 // holographic pane's (frame()): the workshop bends through its outer pixels,
 // its rim is cyan running to amber on the focused window as the border was,
 // brightest toward the reactor, and light passing behind it runs into the rim.
+//
+// What happens is answered briefly and softly: opening settles a dashed ring
+// onto the window's edge, closing lets one spread and fade where it was,
+// landing sends one soft ring through the lattice, focus warms the window's
+// edge. Typing gets no answer, so nothing moves while you work.
 
 const vec3 AMBER = vec3(1.0, 0.70, 0.28);
 const vec3 HOT = vec3(0.86, 0.97, 1.0); // the reactor's white-hot core
@@ -86,8 +83,8 @@ float globe(vec2 p, float R, vec2 look, out float rim) {
     if (q2 > 1.0) return 0.0;
     float z = sqrt(1.0 - q2);
     rim = pow(1.0 - z, 3.0);
-    float spin = cycle(60.0) * TAU + look.x * 0.7;
-    float tilt = 0.4 - look.y * 0.3;
+    float spin = cycle(60.0) * TAU + look.x * 0.25;
+    float tilt = 0.4 - look.y * 0.1;
     float ct = cos(tilt), st = sin(tilt);
     float step_ = TAU / 24.0;
     float lines = 0.0;
@@ -187,160 +184,93 @@ float glassStreak(vec2 px, vec4 r) {
 }
 
 // Holo lines holding window i: they run along its edges 10 px out and
-// converge on its corners, brighter toward them, light flowing in along them
-// to a small node at each corner.
+// converge on its corners, brighter toward them, to a small node at each
+// corner. They stand still.
 vec3 holdLines(vec2 px, int i, vec3 cyan) {
     vec4 r = windowRect(i);
     vec2 p = abs(px - r.xy - r.zw * 0.5) - r.zw * 0.5;
     float toCorner = max(-min(p.x, p.y), 0.0);
     float o = abs(rectDistance(px, r, windowRounding(i)) - 10.0);
-    float f = fract(toCorner / 26.0 + cycle(3.0));
+    float f = fract(toCorner / 26.0);
     float dash = smoothstep(0.0, 0.1, f) * (1.0 - smoothstep(0.5, 0.6, f));
     float node = glowLine(abs(length(p - 10.0) - 4.0), 1.0);
     vec3 tint = i == focusedIndex ? mix(cyan, AMBER, 0.35) : cyan;
-    return tint * (glowLine(o, 0.9) * (0.12 + 0.45 * dash) * exp(-toCorner / 150.0) + node * 0.6) * windowAlpha(i);
+    return tint * (glowLine(o, 0.9) * (0.1 + 0.3 * dash) * exp(-toCorner / 150.0) + node * 0.45) * windowAlpha(i);
 }
 
-// A moving window's wake: dashed afterimages of it where it just was, over a
-// wash of scanned light, outside the window itself; the lattice it sweeps
-// across lights up (`lattice`).
-vec3 afterimage(vec2 px, vec3 cyan, inout float lattice) {
+// A moving window's wake: two faint dashed afterimages just behind it,
+// outside the window itself.
+vec3 afterimage(vec2 px, vec3 cyan) {
     vec3 light = vec3(0.0);
     for (int i = 0; i < windowCount; i++) {
         vec2 v = windowVelocity(i);
         float speed = length(v);
-        if (speed < 40.0) continue;
-        float k = min(speed / 1200.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
-        if (k <= 0.0) continue;
-        vec3 tint = i == focusedIndex ? mix(cyan, HOT, 0.35) : cyan;
-        float wash = 0.0;
-        for (int g = 1; g <= 4; g++) {
+        // Only a moving window pays for its wake.
+        for (int g = 1; g <= (speed < 40.0 ? 0 : 2); g++) {
+            float k = min(speed / 1500.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
             vec4 ghost = windowRect(i);
-            ghost.xy -= v * 0.04 * float(g);
+            ghost.xy -= v * 0.02 * float(g);
             float d = rectDistance(px, ghost, windowRounding(i));
-            float fade = 1.0 - 0.22 * float(g);
-            // Dashes run along each edge of the outline.
             vec2 q = px - ghost.xy - ghost.zw * 0.5;
             float along = abs(q.x) * ghost.w > abs(q.y) * ghost.z ? q.y : q.x;
             float dash = step(0.4, fract(along / 20.0));
-            light += tint * glowLine(abs(d), 1.5) * dash * fade * 1.3 * k;
-            wash = max(wash, (1.0 - smoothstep(-30.0, 30.0, d)) * fade);
+            light += cyan * glowLine(abs(d), 1.2) * dash * (1.0 - 0.4 * float(g)) * 0.45 * k;
         }
-        float scan = 0.55 + 0.45 * sin(px.y * TAU / 5.0);
-        light += tint * wash * scan * 0.5 * k;
-        lattice += 3.0 * wash * k;
     }
     return light;
 }
 
-// The workshop answering what happened lately: the light it adds, how much
-// more the lattice shows (`lattice`), how hard the reactor surges through
-// the globe and rings (`surge`), and how far a landing throws the world at
-// px (`shake`, pixels).
-vec3 answers(vec2 px, vec3 cyan, out float lattice, out float surge, out vec2 shake) {
+// How an answer swells and fades: 0 as it begins, 1 after `rise` seconds and
+// 0 again at `life`.
+float swell(float age, float rise, float life) {
+    return smoothstep(0.0, rise, age) * (1.0 - smoothstep(rise, life, age));
+}
+
+// The workshop answering what happened lately, briefly and softly: the light
+// it adds, and how much more the lattice shows (`lattice`). Typing and voice
+// get no answer.
+vec3 answers(vec2 px, vec3 cyan, out float lattice) {
     vec3 light = vec3(0.0);
     lattice = 0.0;
-    surge = 0.0;
-    shake = vec2(0.0);
     // Newest first: the ring is newest last, so past the first one older
-    // than the longest answer (a landing's, 1.6 s) every one is.
+    // than the longest answer (1 s) every one is.
     for (int k = impulseCount - 1; k >= 0; k--) {
         vec4 e = impulses[k];
         int kind = impulseKinds[k];
         float age = e.z;
-        if (age > 1.6) break;
-        if (kind == TYPE) {
-            float r = length(px - e.xy);
-            if (age > 0.8 || r > 260.0) continue;
-            // A tap: a small soft ring spreading from the key's place on the
-            // window's foot, and the lattice lit round it. Typing is steady,
-            // so a tap is gentle: no flash to flicker.
-            float fade = 1.0 - age / 0.8;
-            float front = abs(r - age * 150.0);
-            light += cyan * (glowLine(front, 1.4) * 1.2 + 0.45 * exp(-front / 18.0)) * fade * e.w;
-            light += AMBER * exp(-r / 14.0) * exp(-age * 4.0) * 0.8 * e.w;
-            lattice += 3.0 * exp(-r / 60.0) * fade * e.w;
-            continue;
-        }
+        if (age > 1.0) break;
+        if (kind == TYPE || kind == VOICE) continue;
         if (kind == CLOSE) {
-            float r = length(px - e.xy);
-            if (age > 1.4 || (r > age * 1100.0 + 300.0 && abs(px.y - e.y) > 150.0)) continue;
-            // Powering down: the hologram folds to a white-hot line that
-            // shrinks to a point and flares out, and a dashed ring breaks
-            // away outward through the lattice.
-            float fold = max(1.0 - age / 0.35, 0.0);
-            float half_ = 460.0 * fold;
-            float line = length(vec2(max(abs(px.x - e.x) - half_, 0.0), px.y - e.y));
-            light += HOT * (glowLine(line, 2.0) * 1.6 + 0.5 * exp(-line / 30.0)) * fold;
-            light += HOT * (exp(-r / 16.0) * 2.5 + exp(-r / 120.0) * 0.6) * exp(-max(age - 0.3, 0.0) * 6.0);
+            // A faint dashed ring spreads from where the window was and fades.
             vec2 q = px - e.xy;
-            float front = abs(r - age * 1100.0);
-            float fade = exp(-age * 2.2);
-            light += cyan * glowLine(front, 1.6) * dashes(atan(q.y, q.x), r, 40.0, 0.6 * (1.0 - age / 1.4), age) * fade * 1.4;
-            light += cyan * 0.5 * exp(-front / 50.0) * fade;
-            lattice += 4.0 * exp(-front / 40.0) * fade;
+            float r = length(q);
+            float front = abs(r - 40.0 - age * 240.0);
+            if (front > 120.0) continue;
+            float glow = swell(age, 0.1, 0.9);
+            light += cyan * (glowLine(front, 1.2) * dashes(atan(q.y, q.x), r, 40.0, 0.5, 0.0) * 0.5 + 0.1 * exp(-front / 24.0)) * glow;
             continue;
         }
-        if (age > (kind == LAND ? 1.6 : kind == OPEN ? 0.8 : kind == FOCUS ? 1.4 : 0.0)) continue;
         int i = windowAt(e.xy);
         vec4 rect = i < 0 ? vec4(e.xy, 0.0, 0.0) : windowRect(i);
         float d = rectDistance(px, rect, i < 0 ? 0.0 : windowRounding(i));
-        vec2 q = px - rect.xy - rect.zw * 0.5;
-        if (kind == LAND) {
-            float s = e.w;
-            // The world jolts: a damped shake through the whole hologram,
-            // and the shock front bends it outward as it passes.
-            vec2 n = px - clamp(px, rect.xy, rect.xy + rect.zw);
-            n /= max(length(n), 1e-3);
-            float front = d - age * 480.0;
-            shake.y += sin(age * 46.0) * exp(-age * 6.0) * 18.0 * s;
-            shake += n * 22.0 * s * exp(-front * front / 2500.0) * exp(-age * 2.0);
-            if (d < 0.0 || front > 250.0) continue;
-            // Light: a white-hot front in a broad cyan band, an echo behind
-            // it, the lattice blazing as it passes, and the seam flashing at
-            // the impact.
-            float fade = exp(-age * 2.0) * s;
-            float af = abs(front);
-            light += (HOT * glowLine(af, 2.0) * 1.5 + cyan * 0.6 * exp(-af / 50.0)) * fade;
-            float echo = abs(d - age * 260.0);
-            light += cyan * (glowLine(echo, 1.2) * 0.7 + 0.25 * exp(-echo / 30.0)) * fade;
-            lattice += 6.0 * exp(-af / 36.0) * fade;
-            light += mix(HOT, cyan, 0.4) * exp(-d / 60.0) * exp(-age * 5.0) * 2.0 * s;
-            continue;
-        }
-        if (d < 0.0 || d > (kind == OPEN ? 520.0 : 1000.0)) continue;
+        if (d < 0.0 || d > 320.0) continue;
         if (kind == OPEN) {
-            // Assembling: a dashed ring closes in on the window's edge from
-            // far out, the reactor surging behind it, and flashes white-hot
-            // as it locks there.
-            float t = age / 0.8;
-            float r = (1.0 - t) * (1.0 - t) * 420.0;
-            float spin = dashes(atan(q.y, q.x), length(q), 72.0, 0.5, t * 1.5);
-            float on = abs(d - r);
-            light += cyan * (glowLine(on, 1.8) * spin * 1.4 + 0.45 * exp(-on / 40.0)) * (0.4 + t);
-            float lock = exp(-pow((t - 0.88) / 0.12, 2.0));
-            light += (HOT * exp(-d / 14.0) * 2.5 + AMBER * exp(-d / 70.0) * 0.6) * lock;
-            lattice += 4.0 * exp(-on / 40.0) * (0.4 + t);
-            surge += lock;
+            // A dashed ring settles onto the window's edge from 60 px out.
+            if (age > 0.7) continue;
+            float t = age / 0.7;
+            float on = abs(d - (1.0 - t) * (1.0 - t) * 60.0);
+            vec2 q = px - rect.xy - rect.zw * 0.5;
+            float dash = dashes(atan(q.y, q.x), length(q), 72.0, 0.5, 0.0);
+            light += cyan * (glowLine(on, 1.2) * dash * 0.6 + 0.12 * exp(-on / 20.0)) * swell(age, 0.15, 0.7);
+        } else if (kind == LAND) {
+            // One soft ring runs out through the lattice from the edge.
+            float front = abs(d - age * 260.0);
+            float glow = swell(age, 0.05, 1.0) * e.w;
+            lattice += 1.5 * exp(-front / 24.0) * glow;
+            light += cyan * (glowLine(front, 1.0) * 0.4 + 0.08 * exp(-front / 30.0)) * glow;
         } else if (kind == FOCUS) {
-            // The reactor surges and throws light: the globe and rings flare,
-            // rays burst out from the window, its edge flashes and an amber
-            // ring rolls out across the lattice.
-            float fade = exp(-age * 3.5) * e.w;
-            surge += 2.5 * fade;
-            vec3 flare = exp(-d / 16.0) * 2.0 + exp(-d / 140.0) * 0.6 + vec3(0.0);
-            if (age < 0.8) {
-                // Rays: uneven spokes round the window (whole numbers of
-                // waves round the circle, so no seam).
-                float ang = atan(q.y, q.x);
-                float rays = pow(0.5 + 0.5 * sin(ang * 11.0 + 2.0 * sin(ang * 5.0)), 6.0) * 3.0 + 0.3;
-                flare += rays * exp(-d / 420.0) * 0.5;
-            }
-            light += mix(HOT, AMBER, 0.25) * flare * fade;
-            float front = abs(d - age * 520.0);
-            float roll = exp(-age * 2.5) * e.w;
-            light += AMBER * (glowLine(front, 1.6) * 1.4 + 0.45 * exp(-front / 40.0)) * roll;
-            lattice += 4.0 * exp(-front / 40.0) * roll;
+            // The window's edge warms softly in the reactor's light.
+            light += mix(cyan, AMBER, 0.35) * exp(-d / 30.0) * 0.35 * swell(age, 0.2, 0.9) * e.w;
         }
     }
     return light;
@@ -359,17 +289,15 @@ vec4 backdrop(vec2 px) {
     float gap = near * (1.0 - inside);
 
     vec3 cyan = accent;
-    float lattice, surge;
-    vec2 shake;
-    vec3 answered = answers(px, cyan, lattice, surge, shake);
-    answered += afterimage(px, cyan, lattice);
-    // The world as a landing throws it, the viewer leaning toward the pointer
-    // sees it and a dragged window pulls it: the hologram, nearest, moves
-    // most; the lattice and the dust behind it less. Never the windows.
+    float lattice;
+    vec3 answered = answers(px, cyan, lattice) + afterimage(px, cyan);
+    // The world as the viewer leaning toward the pointer sees it and a
+    // dragged window pulls it, a few px: the hologram, nearest, moves most;
+    // the lattice and the dust behind it less. Never the windows.
     vec2 lean = pointer.xy / resolution - 0.5;
     vec2 pulled = focusedIndex < 0 ? vec2(0.0) : windowVelocity(focusedIndex);
-    vec2 world = px + shake + lean * 12.0 + pulled * 0.004;
-    vec2 holoAt = px + shake + lean * 44.0 + pulled * 0.014;
+    vec2 world = px + lean * 3.0 + pulled * 0.001;
+    vec2 holoAt = px + lean * 8.0 + pulled * 0.003;
 
     // Everything is centred on the focused window and sized to it.
     vec2 c = focused.xy + focused.zw * 0.5;
@@ -378,9 +306,9 @@ vec4 backdrop(vec2 px) {
     float r = length(p);
     float a = atan(p.y, p.x);
     float Rg = reach * 0.45;
-    // The rings swing with the focused window as it moves, and settle back
-    // when it stops.
-    float swing = focusedIndex < 0 ? 0.0 : clamp(windowVelocity(focusedIndex).x * 0.00022, -0.6, 0.6);
+    // The rings swing a little with the focused window as it moves, and
+    // settle back when it stops.
+    float swing = focusedIndex < 0 ? 0.0 : clamp(windowVelocity(focusedIndex).x * 0.00006, -0.15, 0.15);
     vec2 look = clamp((pointer.xy - c) / max(reach, 1.0), -1.0, 1.0);
     float hand = exp(-length(px - pointer.xy) / 170.0);
 
@@ -388,14 +316,13 @@ vec4 backdrop(vec2 px) {
     vec3 base = background * (0.55 + 0.6 * exp(-r / (reach * 1.8)) * mix(1.0, shade, 0.6));
     vec3 light = vec3(0.0);
 
-    light += cyan * hexDots(world, 26.0) * (0.03 + 0.3 * near + 0.9 * hand + lattice) * shade;
-    light += cyan * 0.05 * hand;
+    light += cyan * hexDots(world, 26.0) * (0.03 + 0.3 * near + 0.25 * hand + lattice) * shade;
+    light += cyan * 0.015 * hand;
 
     float rim;
     float g = globe(p, Rg, look, rim);
-    float holo = 1.0 + surge;
-    light += cyan * (g * 0.5 + rim * 0.35) * holo;
-    light += cyan * 0.1 * exp(-max(r - Rg, 0.0) / (Rg * 0.12)) * step(Rg, r) * holo;
+    light += cyan * (g * 0.5 + rim * 0.35);
+    light += cyan * 0.1 * exp(-max(r - Rg, 0.0) / (Rg * 0.12)) * step(Rg, r);
 
     // The gyroscope: three rings tumbling about the globe, slowly and at
     // different rates. The far half of each ring is dim, and dimmer still
@@ -409,16 +336,16 @@ vec4 backdrop(vec2 px) {
         float angle, depth;
         float d = gyro(p, R, tilt, yaw, angle, depth);
         float shade_ = depth >= 0.0 ? 1.0 : (r < Rg ? 0.12 : 0.4);
-        light += cyan * glowLine(d, 1.3) * shade_ * 0.75 * holo;
-        light += cyan * glowLine(d, 4.0) * dashes(angle, R, 12.0, 0.18, cycle(20.0)) * shade_ * 0.35 * holo;
+        light += cyan * glowLine(d, 1.3) * shade_ * 0.75;
+        light += cyan * glowLine(d, 4.0) * dashes(angle, R, 12.0, 0.18, cycle(20.0)) * shade_ * 0.35;
     }
 
     // Flat rings in the screen's plane, out past the window's edges.
     float turned = a - swing;
-    light += cyan * glowLine(abs(r - reach * 1.04), 1.0) * dashes(turned, r, 120.0, 0.45, -cycle(120.0)) * 0.5 * holo;
-    light += cyan * glowLine(abs(r - reach * 1.12), 6.0) * dashes(a + swing * 2.0, r, 6.0, 0.06, cycle(24.0)) * 0.5 * holo;
-    light += AMBER * glowLine(abs(r - reach * 1.12), 2.0) * dashes(turned, r, 1.0, 0.05, -cycle(24.0)) * 0.9 * holo;
-    light += cyan * glowLine(abs(r - reach * 1.24), 0.8) * 0.3 * holo;
+    light += cyan * glowLine(abs(r - reach * 1.04), 1.0) * dashes(turned, r, 120.0, 0.45, -cycle(120.0)) * 0.5;
+    light += cyan * glowLine(abs(r - reach * 1.12), 6.0) * dashes(a + swing * 2.0, r, 6.0, 0.06, cycle(24.0)) * 0.5;
+    light += AMBER * glowLine(abs(r - reach * 1.12), 2.0) * dashes(turned, r, 1.0, 0.05, -cycle(24.0)) * 0.9;
+    light += cyan * glowLine(abs(r - reach * 1.24), 0.8) * 0.3;
 
     // Light pools in the seams between windows and runs along them.
     if (gap > 0.004) {
