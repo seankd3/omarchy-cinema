@@ -41,24 +41,41 @@ Each is one fact with one source; nothing is stored that can be computed.
   `z` (its place in Hyprland's stacking order, 0 on top). Shadows, rims,
   wakes and tilt all read these.
 - **Pointer.** `pointer`: position and velocity in logical px, read at
-  `render.pre` from Hyprland's pointer. It does not ask for frames: the
-  backdrop's own tick (display rate plugged in, 30 on battery) carries pointer
-  effects, so moving the mouse costs what idle costs today.
+  `render.pre` from Hyprland's pointer.
 - **Impulses.** One ring of the last 32 things that happened, each a point,
-  a start time on the backdrop clock, a strength and a kind: `OPEN`, `CLOSE`,
-  `LAND` (a window's position animation ended, or a drag of it ended),
-  `FOCUS`, `KEY` (a key was pressed in the focused window: at a point along
-  its lower edge; never which key), `VOICE` (Voxtype's voice activity turned
-  on). Every film reads the same ring and answers each kind its own way
-  (Tron's grid ripples, Evangelion's AT field flares, the Matrix's rain
-  splashes). An impulse arms the backdrop timer until it has run out (3 s);
-  with none alive the plugin idles exactly as today. This one ring replaces a
-  uniform per event.
-- **Voice.** `voice`: Voxtype's speech loudness, 0 to 1. The feed service
-  already carries outside input to the plugin over its socket; it gains this
-  field (version `CFD2`) from `voxtype-audio-bridge`'s `rms` frames (run
-  while Voxtype records, read from its daemon's `audio.sock`), and the
-  feed's voice-activity edges become `VOICE` impulses.
+  an age in seconds, a strength and a kind: `OPEN`, `CLOSE`, `LAND`,
+  `FOCUS`, `KEY`, `VOICE`. Every film reads the same ring and answers each
+  kind its own way (Tron's grid ripples, Evangelion's AT field flares, the
+  Matrix's rain splashes). This one ring replaces a uniform per event.
+  - *Time.* The plugin stamps each impulse on the monotonic clock and uploads
+    its age, so the shader never subtracts on the hourly-wrapping `time`. An
+    impulse lives 3 s of real time and is then gone. What happens while the
+    backdrop's time stands still (animations off, locked, every monitor asleep
+    or fullscreen) is not collected and never replays.
+  - *Sources.* `OPEN`, `CLOSE`, `FOCUS` from Hyprland's window events. `LAND`
+    when a window stops moving: its drawn position was changing last frame
+    and is not this frame (the same per-frame position the velocity comes
+    from, so a tiling animation, a drag and a keyboard move all land the same
+    way, with no event of their own to miss). `KEY`: a key press Hyprland
+    delivered to a client window, never one a compositor binding, an input
+    method or a lock surface consumed (the point of delivery is to be found
+    in InputManager before building; if no such point exists, KEY is
+    dropped, not approximated); placed along the focused window's lower edge;
+    the key's identity is discarded on receipt. `VOICE`: the voice-activity
+    edges below.
+  - *Privacy.* Nothing about keys or voice is stored or logged. The screen
+    does show when typing and speech happen; while the screen is being shared
+    or recorded (Hyprland's screenshare state), `KEY` and `VOICE` impulses
+    and `voice` stop.
+- **Voice.** `voice`: Voxtype's speech loudness, 0 to 1. The feed service is
+  the one door for outside input to the plugin; voice is its own small
+  message on the same socket, independent of the agents' text snapshot and
+  of the lettering gate that idles the text: while Voxtype records, the
+  service runs `voxtype-audio-bridge` (Voxtype's own protocol: `rms`, `vad`,
+  connection status) and sends the latest `rms` at most 60 times a second,
+  each `vad` edge at once (never coalesced away), and `voice = 0` with a
+  closing edge when recording stops or the bridge disconnects. Amplitude and
+  activity only; the bridge carries no audio or transcript.
 - **Switch.** `switchProgress` (0 to 1 while a workspace switch plays, -1
   otherwise) and `switchDirection`, so the world moves with the camera
   during a 3D switch (part 5).
@@ -66,78 +83,147 @@ Each is one fact with one source; nothing is stored that can be computed.
   colour) as constants in its own `backdrop.frag`, used by `backdrop()` for
   shadows and by `frame()` for rims, so the two always agree.
 
-Helpers in the contract, so films compose instead of copying: `windowShadow`
-(the soft shadow window i casts on the scene, away from the light, longer and
-softer with lift), `impulseWave` (a ring expanding from an impulse at a
-speed, fading with age), `parallax` (a point's offset for a scene depth, from
-the pointer and the switch camera).
+A helper enters the contract only once two films answer a fact the same
+way, so films compose instead of copying without a shared function bending to
+films with different rules. Likely first ones: `windowShadow` (the soft
+shadow window i casts on the scene, away from the light, longer and softer
+with lift) and `impulseWave` (a ring expanding from an impulse, fading with
+age).
 
-### 2. Frame: each window's edge belongs to the film
+### 2. Frame and thickness: each window's edge belongs to the film
 
-A plugin window decoration (`HyprlandAPI::addWindowDecoration`) on every
-window draws the film's `frame(px, i)` in a band around the window and a few
-pixels inside its edge: a rim lit from the film's light, a bevel, the
-film's own edge (IRIX grey bevels for Jurassic Park). Hyprland draws
-decorations inside the window's own pass, so the edge tilts, wobbles and
-fades with the window. Films that define `frame()` turn off Hyprland's border
-and shadow in `film.lua`; films that do not keep them.
+A plugin window decoration (`HyprlandAPI::addWindowDecoration`, on the OVER
+layer, which Hyprland draws inside the window's own pass) on every window
+draws the film's `frame(px, i)` in a band outside the window's edge and at
+most 2 px inside it: a rim lit from the film's light, a bevel, the film's
+own edge (IRIX grey bevels for Jurassic Park). Because it is drawn in the
+window's pass it tilts, wobbles and fades with the window; fullscreen windows
+have no decorations and so no frame, as today.
 
-### 3. Thickness
+The glass's **thickness** is the frame band too: `frame()` is compiled in
+the same program as `backdrop()`, so it draws the world bent through the
+glass's edge by calling `backdrop()` at a coordinate pushed along the edge
+normal, plus a specular line from the light. No window-shader change, so no
+need for the window's edge or surface identity inside Hyprland's surface
+shader, and popups and subsurfaces cannot pick it up.
 
-The glass bends what is behind it at its edges: inside a band along the
-window's edge, the glass step in the window shader (already ours, see SPEC.md
-"Glass") samples the blurred backdrop offset along the edge normal, by a
-refraction profile, and adds a specular line from the film's light. Content
-is untouched; only background pixels that are already glass are bent.
+Films that define `frame()` turn off Hyprland's border and shadow in
+`film.lua`; films that do not keep them. Whether a decoration can run the
+film's program in the pass's GL state is verified before building.
+
+### 3. Glass that survives motion
+
+Today's glass is applied in the window shader's blur variant (SPEC.md
+"Glass"). A window drawn through any transformer (Hyprland's wobble or
+motion blur, or our tilt) is first drawn into its own buffer without that
+variant, so it would turn solid while it moves. The fix keeps one rule in
+one place: the glass function (background colours to glass) is one GLSL
+source, used by the window shader patch as today and by a **glass
+transformer** that runs first in a moving glass window's transformer chain
+and applies it to the window's buffer, so every later stage, and Hyprland's
+blur behind the transformed window (it blurs through the buffer's alpha
+matte), sees glass. It is attached in `render.pre` whenever a glass window
+has another active transformer, and is inactive otherwise.
 
 ### 4. Motion with mass
 
 - **Wobble and motion blur** are Hyprland 0.57's own (`decoration:wobble:*`,
   `decoration:motion_blur:*`): `film.lua` sets them per film (Evangelion may
   wobble, Roadster stays rigid). No code of ours.
-- **Tilt**: a plugin window transformer (`Render::IWindowTransformer`,
-  attached per window through its transformer list) turns a moving window
-  about its centre by its velocity, in perspective, at most about 12
-  degrees, and springs it flat when it stops. At rest it is inactive, so the
-  window is drawn directly, as today: no extra buffer, text exactly flat.
+- **Tilt**: a plugin window transformer (`Render::IWindowTransformer`)
+  turns a moving window about its centre by its velocity, in perspective, at
+  most about 12 degrees, and springs it flat when it stops. A window with a
+  popup open is held flat (popups are drawn outside the transformed pass and
+  could not follow it).
+- **Transformer lifetime** follows Hyprland's list as it is: our
+  transformers are attached when needed, owned by the window's list, found
+  by type each frame and never held by pointer; when inactive, Hyprland's own
+  cleanup (`removeInactive`) deletes them, so at rest the window is drawn
+  directly, as today: no extra buffer, text exactly flat. At plugin exit
+  every one of ours reports inactive and the plugin runs `removeInactive` on
+  each window, so no window keeps an object from the unloaded plugin.
+- **Input** is Hyprland's, as with its own wobble and workspace animations:
+  a tilted window is clicked where it lies flat; the tilt is small, centred
+  and only while moving.
 - **Opening and closing** keep Hyprland's own animation styles, with the
   `OPEN` and `CLOSE` impulses as the world's answer.
 
 ### 5. Workspaces as 3D panels
 
-Omarchy turns Hyprland's workspace animation off, so a switch is instant.
-When the active workspace changes, the plugin renders the workspace left and
-the one arriving into two buffers (Hyprland 0.57 renders any workspace on its
-own for screen capture: `renderWorkspace(ctx, workspace, now,
-WORKSPACE_WINDOWS)`), then for the switch's length (about 450 ms) draws over
-the windows, below the bar: the backdrop as the camera moves, the two panels
-moving along the film's path, ending with the new panel exactly where its
-windows are, at which point it stops drawing and the real windows show. Each
-film names its path in `film.lua` (`switch = "fly" | "carousel" | "drop" |
-"dissolve" | "platform"`): Tron flies down the grid to the next sector, Jarvis
-turns a holo carousel, Oblivion drops through cloud, the Matrix dissolves into
-rain, Jurassic Park flies to the next fsn platform. A switch during a swipe
-gesture, with animations off or while the session is locked plays no 3D.
+A new transition built on Hyprland's scene renderer (it renders any
+workspace on its own for screen capture), not on Hyprland's workspace
+animation, which Omarchy turns off so a switch is instant.
 
-### 6. Tiers, to try all three
+- **What is drawn.** For the switch's length (about 450 ms) the plugin draws
+  one opaque layer at `RENDER_POST_WINDOWS`: above the wallpaper, the bottom
+  layers and the windows, below the top and overlay layers, where Omarchy's
+  bar, dock and notifications are (`hyprctl layers`: levels 2 and 3). In it:
+  the backdrop as the camera moves (`switchProgress`, `switchDirection`),
+  then two panels along the film's path, the workspace left and the one
+  arriving, each a buffer of that workspace's windows alone
+  (`WORKSPACE_WINDOWS`) composited over the moving backdrop, so their glass
+  shows the film's world behind it. At the end the arriving panel is exactly
+  where its windows are and the layer stops; the live windows show.
+- **The buffers** are taken once, when the switch starts: the workspace left
+  as it was last drawn, the one arriving as it is; they are not refreshed
+  during the 450 ms. How a plugin renders a workspace scene into its own
+  buffer (screen capture's isolated scene resources and render session) is
+  verified before building.
+- **A switch during a switch** starts from what is on screen: the panel
+  arriving becomes the panel leaving, from its current place, and the new
+  destination arrives; nothing jumps.
+- **Input** goes where Hyprland sends it, to the arriving workspace from the
+  start, as during its own workspace animations.
+- **When no 3D plays** (the switch is instant, as today): a special
+  workspace is open on that monitor, a pinned window is on it, either
+  workspace has a fullscreen window, a workspace gesture is in progress or
+  ending on it, animations are off, or the session is locked. Each monitor
+  switches on its own; a workspace moved to another monitor is not a switch.
+- **Paths.** Each film names its path in `film.lua` (`switch = "fly" |
+  "carousel" | "drop" | "dissolve" | "platform"`): Tron flies down the grid
+  to the next sector, Jarvis turns a holo carousel, Oblivion drops through
+  cloud, the Matrix dissolves into rain, Jurassic Park flies to the next fsn
+  platform.
 
-`plugin:backdrop:depth`: `0` today's look; `1` glass (parts 1 to 3 and the
-world's answers); `2` physical (adds part 4 and part 5); `3` space (adds a
-standing perspective: windows sit at depths by `z` and lean with the pointer
-through the same transformer, so text is never quite flat). Default `2`. A
-key binding cycles it, so Sean can compare them on his own desktop.
+### 6. Damage and cost
+
+Two kinds of change, two rules, for every fact above:
+- **The windows changed** (geometry, fade, lift, a switch frame): damage the
+  monitor and the glass in this frame, as today.
+- **Only the world's answer changed** (pointer, an impulse alive, voice):
+  damage the monitor in this frame, and leave the glass on its 0.2 s
+  refresh. A pointer move schedules a frame for its monitor, so the light
+  follows the cursor in the same frame.
+At rest (no window moving, no impulse alive, pointer and voice still) the
+plugin does exactly what it does today. Per-pixel cost (shadows, the impulse
+loop) is a budget, measured, not assumed: each film's backdrop at most 1.5 ms
+a frame at 2880 x 1800 on the N1X, and idle power at rest within 10% of
+today's build.
+
+### 7. Tiers, to try all three
+
+`plugin:backdrop:depth`: `0` today's look; `1` glass (parts 1 and 2, the
+world's answers and the frame); `2` physical (adds parts 3 to 5: glass
+through motion, tilt, wobble, 3D switches); `3` space (adds a standing
+perspective: windows sit at depths by `z` and lean with the pointer through
+the same transformer, so text is never quite flat). Default `2`. A key
+binding cycles it, so Sean can compare them on his own desktop.
+
+The space tier is a visual experiment Sean asked for: input stays on
+Hyprland's flat geometry, so its lean is bounded to keep every drawn edge
+within 16 px of where the window lies flat, and a window with a popup open
+stands flat. It keeps a transformer active at rest, so its idle cost is
+measured on its own and is not held to the budget above.
 
 ## What it deletes
 
 - `film.lua`'s border gradient and shadow glow, for every film that defines
   `frame()` (the edge is the film's).
-- Each film's own focus-follow code for its focus decoration (the eased
-  `focused` rect stays for decorations around the window; height, rim and
-  shadow move onto `lift`, per window, which also deletes the single-window
-  limit of `focusAlpha`-driven effects).
-- No other mechanism is replaced; parts 4 and 5 compose Hyprland's
-  transformer list, wobble, motion blur and workspace rendering instead of
-  building them.
+- The plan's own earlier window-shader refraction: thickness is the frame
+  calling `backdrop()`.
+- Motion composes Hyprland's transformer list, wobble and motion blur; the 3D
+  switch is new, built on Hyprland's scene renderer. The eased `focused` rect
+  and its interpolation stay as they are; `lift` is a new, per-window fact.
 
 ## Non-goals
 
@@ -148,29 +234,26 @@ what was said (only that a key was pressed, and how loud); changing apps.
 ## Order (each its own PR, under the review gate)
 
 1. Contract v2 facts and helpers, and every film answering them: shadows,
-   lift, wakes, impulse answers, pointer light, voice.
-2. Frame decoration.
-3. Thickness.
-4. Tilt, and each film's wobble and motion blur.
-5. Workspaces as 3D panels.
+   lift, wakes, impulse answers, pointer light; the damage rules.
+2. Voice through the feed.
+3. Frame and thickness.
+4. Workspaces as 3D panels.
+5. Glass that survives motion, tilt, and each film's wobble and motion blur.
 6. The space tier and the binding.
 
 Jurassic Park (another lane) adopts each part as it lands.
 
 ## To verify before building (against Hyprland v0.57.0, scratch/ref/hyprland-057)
 
-- `input.keyboard.key` carries no key identity the plugin keeps, and fires
-  for the focused window's keys; what fires for a drag ending and a position
-  animation ending.
-- Decorations from `addWindowDecoration` are drawn inside the transformed
-  window pass, and can run a plugin shader with the film's program.
-- A plugin can attach an `IWindowTransformer` to a window and remove it
-  safely at unload (the plugin is never unloaded live, but Hyprland unloads
-  at exit).
-- `renderWorkspace(..., WORKSPACE_WINDOWS)` into plugin buffers from a render
-  stage, for a workspace not shown, and what glass looks like there.
-- Whether the window shader's blur variant knows the main surface's size and
-  edge (for part 3), and that popups and subsurfaces can be told apart.
+- Where InputManager delivers a key to a client after bindings, input
+  methods and lock surfaces (for `KEY`; dropped if none).
+- An OVER decoration can run the film's program in the pass's GL state.
+- The transformed path blurs behind a window through its buffer's alpha, so
+  a glass transformer first in the chain carries glass through wobble,
+  motion blur and tilt.
+- How a plugin renders a workspace scene into its own buffer from a render
+  stage (screen capture's isolated scene resources), and what its glass looks
+  like composited over the moving backdrop.
 
 ## Acceptance
 
