@@ -48,6 +48,7 @@
 #include <hyprland/src/render/pass/PassElement.hpp>
 #include <hyprland/src/render/shaders/Shaders.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
+#include <hyprland/src/state/workspace/State.hpp>
 
 #include <GLES3/gl32.h>
 #include <cairo/cairo.h>
@@ -671,12 +672,27 @@ void main() {
         const auto focused = Desktop::focusState()->window();
         PHLWINDOW  focusedHere;
         // Each shape's place in the order Hyprland draws it, lowest first
-        // (Hyprland 0.57.0 src/render/Renderer.cpp:476-575, 1294-1330): per
-        // workspace, the normal one before special ones, its tiled windows
-        // (the focused one last), then its tiled windows fading out, then its
-        // floating windows, then those fading out; pinned windows over all.
+        // (Hyprland 0.57.0 src/render/Renderer.cpp:354-575, 1294-1330): the
+        // normal workspace, then each special one in workspace-list order,
+        // then pinned windows. Within a workspace: its tiled windows (the
+        // focused one last), its tiled fadeouts, its floating windows, its
+        // floating fadeouts; and with a fullscreen window, after those the
+        // fullscreen window, the windows allowed over it, and the fadeouts
+        // over it.
+        enum ePass : int { TILED, TILED_FADEOUTS, FLOATING, FLOATING_FADEOUTS, FULLSCREEN, OVER_FULLSCREEN, OVER_FULLSCREEN_FADEOUTS };
         std::vector<double> stacking;
-        const auto          drawOrder = [](int workspace, int pass, double order) { return workspace * 1e7 + pass * 1e6 + order; };
+        const auto          drawOrder = [](const PHLWORKSPACE& workspace, int pass, double order) {
+            int place = 0;
+            if (workspace && workspace->type() == Workspace::eWorkspaceType::SPECIAL) {
+                place = 1;
+                for (const auto& other : State::Workspace::state()->workspaces()) {
+                    if (other.lock() == workspace)
+                        break;
+                    place++;
+                }
+            }
+            return place * 1e7 + pass * 1e6 + order;
+        };
         double              order = 0;
 
         for (const auto& w : Desktop::windowState()->windows()) {
@@ -702,8 +718,18 @@ void main() {
             const bool still = g->depth->value() == 0;
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(),
                                     still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, w->metadata().stableID()});
-            const bool pinned = (w->m_state & Desktop::View::WINDOW_STATE_PINNED) && w->isFloating();
-            stacking.push_back(drawOrder(pinned ? 2 : w->onSpecialWorkspace() ? 1 : 0, w->isFloating() ? 2 : 0, order + (w == focused && !w->isFloating() ? 1e5 : 0)));
+            if ((w->m_state & Desktop::View::WINDOW_STATE_PINNED) && w->isFloating()) {
+                stacking.push_back(1e9 + order);
+                continue;
+            }
+            int pass = w->isFloating() ? FLOATING : TILED;
+            if (Fullscreen::controller()->hasFullscreen(w->m_workspace)) {
+                if (Fullscreen::controller()->isFullscreen(w))
+                    pass = FULLSCREEN;
+                else if (w->isFloating() && (w->shouldRenderOverFullscreen() || w->isFadingOutUnderFullscreen()))
+                    pass = OVER_FULLSCREEN;
+            }
+            stacking.push_back(drawOrder(w->m_workspace, pass, order + (pass == TILED && w == focused ? 1e5 : 0)));
         }
 
         // Closed windows fading out, on the workspaces Hyprland draws them on:
@@ -724,8 +750,12 @@ void main() {
             // Only a fadeout already running when the plugin loaded has none.
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(),
                                     rounding != g->fadeoutRounding.end() ? rounding->second : float(*ROUNDING)});
-            stacking.push_back(drawOrder(workspace && workspace->type() == Workspace::eWorkspaceType::SPECIAL ? 1 : 0,
-                                         fadeout->plane() == Desktop::FADEOUT_PLANE_WINDOW_TILED ? 1 : 3, fadeout->zIndex()));
+            const auto plane = fadeout->plane();
+            stacking.push_back(drawOrder(workspace,
+                                         plane == Desktop::FADEOUT_PLANE_WINDOW_TILED            ? TILED_FADEOUTS :
+                                             plane == Desktop::FADEOUT_PLANE_WINDOW_FLOATING ? FLOATING_FADEOUTS :
+                                                                                               OVER_FULLSCREEN_FADEOUTS,
+                                         fadeout->zIndex()));
         }
         // Depth, 0 on top.
         std::vector<size_t> rank(stacking.size());
@@ -778,7 +808,7 @@ void main() {
         // starts still if it comes back.
         std::erase_if(g->motion, [&](const auto& entry) { return now - entry.second.seen > std::chrono::seconds(10); });
         if (!answering()) {
-            forgetImpulses();
+            settleAnswers();
             return {{float(monitor->m_size.x / 2.0), float(monitor->m_size.y / 2.0), 0.F, 0.F}, g->impulseGeneration, 0.F};
         }
         const auto at = Pointer::mgr()->untransformedPosition() - monitor->m_position;
