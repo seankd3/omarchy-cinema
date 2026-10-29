@@ -16,6 +16,17 @@
 // a kill: a ring, a burst of ticks and a flash. Typing leaves small hit
 // markers at the window's foot, quiet enough that steady typing never
 // flickers.
+//
+// The windows and the floor are one scene. The floor's lanes bow out round
+// each window's foot, so the dots and the speed streaks route round it, and
+// the floor's own lines run from each foot's corners toward the viewer. The
+// viewer leans toward the pointer and a dragged window pulls the floor after
+// it, near rows more than far ones. Behind each window the world draws the
+// sheen on its glass, a streak that slides as the window moves and the
+// horizon's glow along its upper glass. Each window's edge is the cockpit's
+// (frame()): a fine, quiet red line as the border was, lit from the horizon,
+// the floor bending through its outer pixels, and light passing behind it,
+// a lock flash or a shock, running into it.
 
 const vec3 WHITE = vec3(1.0, 0.94, 0.94);
 // The brightest the scene is behind the glass, a channel each. With the glass
@@ -120,6 +131,22 @@ int windowAt(vec2 at) {
 float windowShadow(vec2 px, int i, vec2 offset, float soft) {
     float d = rectDistance(px - offset, windowRect(i), windowRounding(i));
     return (1.0 - smoothstep(-soft, soft, d)) * windowAlpha(i);
+}
+
+// The outward direction of a rounded rect's edge nearest px.
+vec2 edgeNormal(vec2 px, vec4 rect, float radius) {
+    vec2 p = px - rect.xy - rect.zw * 0.5;
+    vec2 q = abs(p) - rect.zw * 0.5 + radius;
+    vec2 g = (q.x > 0.0 && q.y > 0.0) ? normalize(q) : (q.x > q.y ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
+    return g * vec2(p.x < 0.0 ? -1.0 : 1.0, p.y < 0.0 ? -1.0 : 1.0);
+}
+
+// The sheen a window's glass catches: a soft diagonal streak, 1 at its
+// middle, whose place on the glass moves as the window does across the
+// screen, the way a reflection slides over a pane that moves.
+float glassStreak(vec2 px, vec4 r) {
+    float across = dot(px - r.xy, normalize(vec2(1.0, -1.25))) / max(r.z, 1.0) + r.x / resolution.x * 0.8;
+    return exp(-pow((fract(across * 0.7 + 0.15) - 0.5) * 9.0, 2.0));
 }
 
 // What happened lately that the whole cockpit feels: how far a landing
@@ -291,15 +318,35 @@ vec4 backdrop(vec2 px) {
     // from the horizon, further and softer with lift), and faint corner
     // brackets on every window but the focused one, which the lock frame
     // holds.
-    float nearest = FAR, near = 0.0, present = 0.0, shadow = 0.0;
+    // The floor's lanes bow out round each window's foot (`bend`, pixels
+    // across), and its lines run from the foot's corners toward the viewer.
+    float nearest = FAR, near = 0.0, present = 0.0, shadow = 0.0, bend = 0.0;
+    int closest = -1;
+    vec2 vanish = vec2(resolution.x * 0.5, ground);
     for (int i = 0; i < windowCount; i++) {
         float a = windowAlpha(i), d = windowDistance(px, i);
-        nearest = min(nearest, d);
+        if (d < nearest) {
+            nearest = d;
+            closest = i;
+        }
         near += exp(-max(d, 0.0) / 120.0);
         present += a;
+        vec4 r = windowRect(i);
         float lift = windowLift(i);
         shadow = max(shadow, windowShadow(px, i, vec2(0.0, 26.0 + 44.0 * lift), 18.0 + 34.0 * lift));
-        if (i != focusedIndex) light += red * glowLine(brackets(px, windowRect(i), 22.0, 34.0), 1.0) * 0.4 * a;
+        if (i != focusedIndex) light += red * glowLine(brackets(px, r, 22.0, 34.0), 1.0) * 0.4 * a;
+        float foot = r.y + r.w;
+        float side = px.x < r.x + r.z * 0.5 ? -1.0 : 1.0;
+        bend += side * 34.0 * exp(-max(d, 0.0) / 60.0) * smoothstep(r.y, foot, px.y) * (1.0 - 0.6 * lift) * a;
+        // Only a window standing on the floor (its foot below the horizon)
+        // has floor lines, and they run on from the corner, never back.
+        for (int k = 0; k < (px.y > foot && foot > ground ? 2 : 0); k++) {
+            vec2 corner = vec2(r.x + r.z * float(k), foot);
+            vec2 dir = normalize(corner - vanish + vec2(0.0, 1e-3));
+            float off = abs(dot(px - corner, vec2(-dir.y, dir.x)));
+            float run = dot(px - corner, dir);
+            light += red * (glowLine(off, 1.0) * 0.5 + 0.04 * exp(-off / 20.0)) * exp(-max(run, 0.0) / 260.0) * step(0.0, run) * a;
+        }
     }
     float shade = 1.0 - 0.85 * shadow;
     float lit;
@@ -320,14 +367,20 @@ vec4 backdrop(vec2 px) {
     if (below > 0.0) {
         float drive = cycle(16.0) * 16.0;
         float depth = CAMERA * resolution.y / below;
-        vec2 cell = vec2((px.x - resolution.x * 0.5) * CAMERA / below, depth + drive);
+        // The viewer leans toward the pointer and a dragged window pulls the
+        // floor after it (in cells, so near rows shift more); the lanes bow
+        // round the windows' feet.
+        float lean = (pointer.x / resolution.x - 0.5) * 1.2
+            + (focusedIndex < 0 ? 0.0 : windowVelocity(focusedIndex).x * 0.0007);
+        vec2 fp = vec2(px.x - bend, px.y);
+        vec2 cell = vec2((fp.x - resolution.x * 0.5) * CAMERA / below + lean, depth + drive);
         // The nearest dot projected back onto the screen, so every dot is
         // round wherever the floor slants away.
         vec2 c = floor(cell + 0.5);
         float dotBelow = CAMERA * resolution.y / (c.y - drive);
-        vec2 dotAt = vec2(resolution.x * 0.5 + c.x * dotBelow / CAMERA, ground + dotBelow);
+        vec2 dotAt = vec2(resolution.x * 0.5 + (c.x - lean) * dotBelow / CAMERA, ground + dotBelow);
         float radius = clamp(0.06 * below / CAMERA, 0.6, 2.6);
-        float dot_ = 1.0 - smoothstep(radius - 0.6, radius + 0.6, length(px - dotAt));
+        float dot_ = 1.0 - smoothstep(radius - 0.6, radius + 0.6, length(fp - dotAt));
         // Where rows crowd closer than a few pixels the dots give way to
         // their average, a faint red sheen running into the horizon.
         float rows = below * below / (CAMERA * resolution.y);
@@ -393,6 +446,15 @@ vec4 backdrop(vec2 px) {
     // half their light shows behind it.
     light += answered * mix(1.0, 0.6, inside);
 
+    // The glass catches the cockpit's light: behind each window the world
+    // draws the sheen on it, the streak and the horizon's glow along its
+    // upper glass. Only the glass shows it; the window's text stays over it.
+    if (closest >= 0 && nearest < 0.0) {
+        vec4 r = windowRect(closest);
+        float top = exp(-(px.y - r.y) / 90.0);
+        light += mix(red, WHITE, 0.5) * (0.07 * glassStreak(px, r) + 0.09 * top) * windowAlpha(closest);
+    }
+
     // The bar's lower edge: a red line with a white marker sweeping along it,
     // starting and ending off screen so its wrap never shows.
     if (reserved.x > 0.0) {
@@ -407,4 +469,35 @@ vec4 backdrop(vec2 px) {
     // glass no channel goes past UNDER_GLASS, so secondary text keeps 4.5:1.
     vec3 col = background + (1.0 - exp(-light * 1.3));
     return vec4(mix(col, min(col, UNDER_GLASS), inside), 1.0);
+}
+
+// Each window's edge (specs/depth.md, part 2): a cockpit display's bezel. A
+// fine, quiet red line traces it, as the border was, brighter on the side
+// facing the horizon it is lit from and as focus lifts it; the floor bends
+// through its outer pixels; light passing behind the window, a lock flash,
+// a shock or a kill, runs into the line; and the window glows a little red,
+// as Hyprland's shadow made it.
+vec4 frame(vec2 px, int i) {
+    vec4 r = windowRect(i);
+    float rounding = windowRounding(i);
+    float d = rectDistance(px, r, rounding);
+    if (d < -2.0 || d > 20.0) return vec4(0.0);
+    bool focus = i == focusedIndex;
+    vec3 tint = focus ? vec3(1.0, 0.18, 0.18) : vec3(0.42, 0.12, 0.12);
+    vec3 col = accent * exp(-max(d, 0.0) / 8.0) * step(0.0, d) * (focus ? 0.2 : 0.05);
+    float a = 0.0;
+    if (d < 10.0) {
+        vec2 n = edgeNormal(px, r, rounding);
+        float horizon = resolution.y * 0.42;
+        float toward = 0.55 + 0.45 * max(dot(n, vec2(0.0, r.y + r.w * 0.5 > horizon ? -1.0 : 1.0)), 0.0);
+        // One look at the world 12 px in behind the glass: what the edge
+        // bends into view, and what light is passing there.
+        vec3 behind = backdrop(px - n * 12.0).rgb;
+        float passing = smoothstep(0.05, 0.25, dot(behind, vec3(0.3, 0.5, 0.2)));
+        float line = glowLine(abs(d - 0.5), 0.9) * toward * (focus ? 0.55 : 0.5) * (1.0 + 0.6 * windowLift(i));
+        float edge = (1.0 - smoothstep(0.0, 4.0, d)) * smoothstep(-2.0, 0.0, d);
+        col += behind * 1.2 * edge * 0.85 + tint * line + mix(tint, WHITE, 0.5) * line * passing * 2.0;
+        a = clamp(max(edge * 0.85, line * (1.0 + passing)), 0.0, 1.0);
+    }
+    return vec4(col, a) * windowAlpha(i);
 }
