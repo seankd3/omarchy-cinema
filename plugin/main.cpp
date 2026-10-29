@@ -44,6 +44,7 @@
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/WindowRenderPresentation.hpp>
+#include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 #include <hyprland/src/render/pass/PassElement.hpp>
 #include <hyprland/src/render/shaders/Shaders.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
@@ -117,16 +118,26 @@ namespace {
 #include "contract.inc"
         ;
 
+    // `area` is what is drawn, in logical px from the screen's top left
+    // (origin, size): the whole screen for the backdrop, a window's band for
+    // its frame. `proj` places it in the target, render modifiers included.
     const char* VERTEX = R"(#version 300 es
 uniform mat3 proj;
-uniform vec2 resolution;
+uniform vec4 area;
 in vec2 pos;
 out vec2 v_px;
 void main() {
     gl_Position = vec4(proj * vec3(pos, 1.0), 1.0);
-    v_px = pos * resolution;
+    v_px = area.xy + pos * area.zw;
 }
 )";
+
+    // The two things a film's shader can draw: the world, and (if it defines
+    // frame()) each window's edge in it, faded with the window.
+    const char* BACKDROP_MAIN = "\nvoid main() {\n    fragColor = backdrop(v_px);\n}\n";
+    const char* FRAME_MAIN    = "\nuniform int frameWindow;\nuniform float frameAlpha;\nvoid main() {\n    fragColor = frame(v_px, frameWindow) * frameAlpha;\n}\n";
+    // How far outside a window its frame may draw, in logical px.
+    constexpr double FRAME_BAND = 48.0;
 
     using Rect = std::array<float, 4>;
 
@@ -140,6 +151,7 @@ void main() {
         std::array<float, 2> velocity{};
         float                lift  = 0;
         float                depth = 0;
+        uint64_t             id    = 0; // the window's stable id; 0 for a closed one fading out
         bool                 operator==(const SShape&) const = default;
     };
 
@@ -199,13 +211,22 @@ void main() {
         bool                                  seen = false;
     };
 
+    // One of the film's programs, the backdrop's or the frame's, and where its
+    // uniforms are.
     struct SProgram {
-        GLuint   id = 0, vao = 0, vbo = 0, data = 0, feed = 0, glyphs = 0;
-        GLint    proj, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
-        GLint    feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
-        GLint    pointer, impulses, impulseKinds, impulseCount, voice;
-        uint64_t feedUploaded = 0; // the feed change in the texture
+        GLuint id = 0;
+        GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
+        GLint  feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
+        GLint  pointer, impulses, impulseKinds, impulseCount, voice, frameWindow, frameAlpha;
+    };
+
+    // What the film's programs draw with: the unit square and the textures,
+    // filled once a frame by the backdrop and read by every frame after it.
+    struct SGpu {
+        GLuint   vao = 0, vbo = 0, data = 0, feed = 0, glyphs = 0;
+        uint64_t feedUploaded   = 0; // the feed change in the texture
         bool     glyphsUploaded = false;
+        SProgram backdrop, frame;
     };
 
     struct SState {
@@ -216,7 +237,8 @@ void main() {
         std::vector<std::array<float, 3>>       backgrounds;
         uint64_t                                generation = 1;
         uint64_t                                compiled   = 0;
-        SProgram                                program;
+        bool                                    framed     = false; // the film's shader defines frame()
+        SGpu                                    gpu;
         // Frames a second of the backdrop's own motion, plugged in and on
         // battery; 0 is the display's own rate. Sean: "keep it native? or
         // atleast 30". Idle on the P16 the display's 120 cost about 9 W and 30
@@ -350,6 +372,8 @@ void main() {
         const auto dir    = themeDir();
         const auto shader = readFile(dir + "/backdrop.frag");
         g->source         = shader.empty() ? "" : std::string(CONTRACT) + "\n#line 1\n" + shader;
+        static const std::regex FRAME(R"(\bvec4\s+frame\s*\()");
+        g->framed         = std::regex_search(shader, FRAME);
 
         static const std::regex PALETTE(R"re(^\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})")re");
         std::istringstream      colors(readFile(dir + "/colors.toml"));
@@ -405,42 +429,33 @@ void main() {
     }
 
     void deleteProgram() {
-        auto& p = g->program;
-        if (p.id)
-            glDeleteProgram(p.id);
-        if (p.vbo)
-            glDeleteBuffers(1, &p.vbo);
-        if (p.vao)
-            glDeleteVertexArrays(1, &p.vao);
-        for (const auto texture : {p.data, p.feed, p.glyphs})
+        auto& gpu = g->gpu;
+        for (const auto program : {gpu.backdrop.id, gpu.frame.id})
+            if (program)
+                glDeleteProgram(program);
+        if (gpu.vbo)
+            glDeleteBuffers(1, &gpu.vbo);
+        if (gpu.vao)
+            glDeleteVertexArrays(1, &gpu.vao);
+        for (const auto texture : {gpu.data, gpu.feed, gpu.glyphs})
             if (texture)
                 glDeleteTextures(1, &texture);
-        p = {};
+        gpu = {};
     }
 
-    // Builds the theme's program once per theme read; called with the render
-    // context current. A shader that does not compile is reported once and the
-    // backdrop stays off until the theme is read again.
-    bool program() {
-        if (g->compiled == g->generation)
-            return g->program.id != 0;
-        g->compiled = g->generation;
-        deleteProgram();
-        if (g->source.empty())
-            return false;
-
+    // Compiles and links one of the film's programs, the film's source with
+    // `main` after it. A failure is reported once and leaves `p` empty.
+    bool link(SProgram& p, const std::string& main, const char* what) {
         std::string  log;
         const GLuint vert = compileStage(GL_VERTEX_SHADER, VERTEX, log);
-        const GLuint frag = vert ? compileStage(GL_FRAGMENT_SHADER, g->source, log) : 0;
+        const GLuint frag = vert ? compileStage(GL_FRAGMENT_SHADER, g->source + main, log) : 0;
         if (!vert || !frag) {
             if (vert)
                 glDeleteShader(vert);
-            HyprlandAPI::addNotification(g->handle, "[backdrop] the theme's backdrop.frag does not compile: " + log, CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+            HyprlandAPI::addNotification(g->handle, std::format("[backdrop] the theme's {} does not compile: {}", what, log), CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
             return false;
         }
-
-        auto& p = g->program;
-        p.id    = glCreateProgram();
+        p.id = glCreateProgram();
         glAttachShader(p.id, vert);
         glAttachShader(p.id, frag);
         glBindAttribLocation(p.id, 0, "pos");
@@ -450,52 +465,73 @@ void main() {
         GLint ok = 0;
         glGetProgramiv(p.id, GL_LINK_STATUS, &ok);
         if (!ok) {
-            HyprlandAPI::addNotification(g->handle, "[backdrop] the theme's backdrop.frag does not link", CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
-            deleteProgram();
+            HyprlandAPI::addNotification(g->handle, std::format("[backdrop] the theme's {} does not link", what), CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+            glDeleteProgram(p.id);
+            p = {};
             return false;
         }
+        const auto at  = [&](const char* name) { return glGetUniformLocation(p.id, name); };
+        p.proj          = at("proj");
+        p.area          = at("area");
+        p.resolution    = at("resolution");
+        p.time          = at("time");
+        p.accent        = at("accent");
+        p.background    = at("background");
+        p.foreground    = at("foreground");
+        p.focused       = at("focused");
+        p.reserved      = at("reserved");
+        p.windowData    = at("windowData");
+        p.windowCount   = at("windowCount");
+        p.focusedIndex  = at("focusedIndex");
+        p.focusAlpha    = at("focusAlpha");
+        p.feedUniform   = at("feed");
+        p.feedCount     = at("feedCount");
+        p.feedPos       = at("feedPos");
+        p.glyphsUniform = at("glyphs");
+        p.feedPresence  = at("feedPresence");
+        p.pointer       = at("pointer");
+        p.impulses      = at("impulses");
+        p.impulseKinds  = at("impulseKinds");
+        p.impulseCount  = at("impulseCount");
+        p.voice         = at("voice");
+        p.frameWindow   = at("frameWindow");
+        p.frameAlpha    = at("frameAlpha");
+        return true;
+    }
 
-        p.proj         = glGetUniformLocation(p.id, "proj");
-        p.resolution   = glGetUniformLocation(p.id, "resolution");
-        p.time         = glGetUniformLocation(p.id, "time");
-        p.accent       = glGetUniformLocation(p.id, "accent");
-        p.background   = glGetUniformLocation(p.id, "background");
-        p.foreground   = glGetUniformLocation(p.id, "foreground");
-        p.focused      = glGetUniformLocation(p.id, "focused");
-        p.reserved     = glGetUniformLocation(p.id, "reserved");
-        p.windowData   = glGetUniformLocation(p.id, "windowData");
-        p.windowCount  = glGetUniformLocation(p.id, "windowCount");
-        p.focusedIndex = glGetUniformLocation(p.id, "focusedIndex");
-        p.focusAlpha   = glGetUniformLocation(p.id, "focusAlpha");
-        p.feedUniform  = glGetUniformLocation(p.id, "feed");
-        p.feedCount    = glGetUniformLocation(p.id, "feedCount");
-        p.feedPos      = glGetUniformLocation(p.id, "feedPos");
-        p.glyphsUniform = glGetUniformLocation(p.id, "glyphs");
-        p.feedPresence  = glGetUniformLocation(p.id, "feedPresence");
-        p.pointer       = glGetUniformLocation(p.id, "pointer");
-        p.impulses      = glGetUniformLocation(p.id, "impulses");
-        p.impulseKinds  = glGetUniformLocation(p.id, "impulseKinds");
-        p.impulseCount  = glGetUniformLocation(p.id, "impulseCount");
-        p.voice         = glGetUniformLocation(p.id, "voice");
+    // Builds the film's programs once per theme read; called with the render
+    // context current. A backdrop that does not compile leaves the plugin
+    // idle until the theme is read again; a frame that does not compile
+    // leaves the windows without one.
+    bool program() {
+        if (g->compiled == g->generation)
+            return g->gpu.backdrop.id != 0;
+        g->compiled = g->generation;
+        deleteProgram();
+        if (g->source.empty() || !link(g->gpu.backdrop, BACKDROP_MAIN, "backdrop.frag"))
+            return false;
+        if (g->framed)
+            link(g->gpu.frame, FRAME_MAIN, "frame()");
 
+        auto& gpu = g->gpu;
         GLint vao = 0, buffer = 0;
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
         glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &buffer);
         // The unit square, as Hyprland's own quads are drawn.
         const std::array<float, 8> quad = {1, 0, 0, 0, 1, 1, 0, 1};
-        glGenVertexArrays(1, &p.vao);
-        glBindVertexArray(p.vao);
-        glGenBuffers(1, &p.vbo);
-        glBindBuffer(GL_ARRAY_BUFFER, p.vbo);
+        glGenVertexArrays(1, &gpu.vao);
+        glBindVertexArray(gpu.vao);
+        glGenBuffers(1, &gpu.vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, gpu.vbo);
         glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad.data(), GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
         glBindVertexArray(vao);
         glBindBuffer(GL_ARRAY_BUFFER, buffer);
 
-        glGenTextures(1, &p.data);
-        glGenTextures(1, &p.feed);
-        glGenTextures(1, &p.glyphs);
+        glGenTextures(1, &gpu.data);
+        glGenTextures(1, &gpu.feed);
+        glGenTextures(1, &gpu.glyphs);
         return true;
     }
 
@@ -616,7 +652,7 @@ void main() {
                 addImpulse(position + monitor->m_position + size / 2.0, std::clamp(float(std::hypot(motion.velocity[0], motion.velocity[1]) / 3000.0), 0.25F, 1.F),
                            IMPULSE_LAND);
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(), motion.velocity,
-                                    motion.lift});
+                                    motion.lift, 0.F, w->metadata().stableID()});
         }
         // Depth in the stack, 0 on top: Hyprland draws its windows bottom first.
         for (size_t i = 0; i < scene.shapes.size(); i++)
@@ -958,6 +994,105 @@ vec4 cinemaGlass(vec4 c) {{
             g->glassShader = wanted;
     }
 
+    // How present the agents' text is now: easing toward whether there is any,
+    // read against the clock, so it takes FEED_EASE at any frame rate.
+    float feedPresence(std::chrono::steady_clock::time_point now) {
+        const bool live     = g->feedFd >= 0 && now - g->feedReceived <= FEED_STALE;
+        const bool text     = !g->glyphPixels.empty() && live && !g->feedEmpty && g->feedCount > 0;
+        const auto presence = [&] {
+            const float moved = std::chrono::duration<float>(now - g->presenceChanged).count() / FEED_EASE;
+            return std::clamp(g->presenceFrom + (g->presenceTarget ? moved : -moved), 0.F, 1.F);
+        };
+        if (text != g->presenceTarget) {
+            g->presenceFrom    = presence();
+            g->presenceChanged = now;
+            g->presenceTarget  = text;
+        }
+        return presence();
+    }
+
+    // Everything the contract gives a film, for program `p`, drawing `area`
+    // (logical px) placed by `proj` on `monitor`. The textures are on units
+    // 5, 6 and 7: the lettering, the feed and the windows.
+    void setUniforms(const SProgram& p, const PHLMONITOR& monitor, const SScene& scene, const SAnswer& answer, const Mat3x3& proj, const CBox& area,
+                     std::chrono::steady_clock::time_point now) {
+        const bool  lettered = !g->glyphPixels.empty();
+        const float presence = feedPresence(now);
+        glUseProgram(p.id);
+        glUniformMatrix3fv(p.proj, 1, GL_TRUE, proj.getMatrix().data());
+        glUniform4f(p.area, area.x, area.y, area.w, area.h);
+        glUniform2f(p.resolution, monitor->m_size.x, monitor->m_size.y);
+        glUniform1f(p.time, g->time);
+        glUniform3fv(p.accent, 1, g->accent.data());
+        glUniform3fv(p.background, 1, g->background.data());
+        glUniform3fv(p.foreground, 1, g->foreground.data());
+        glUniform4fv(p.focused, 1, scene.focus.data());
+        glUniform4fv(p.reserved, 1, scene.reserved.data());
+        glUniform1i(p.windowData, 7);
+        glUniform1i(p.windowCount, scene.shapes.size());
+        glUniform1i(p.focusedIndex, scene.focusedIndex);
+        glUniform1f(p.focusAlpha, scene.focusAlpha);
+        glUniform1i(p.glyphsUniform, 5);
+        glUniform1i(p.feedUniform, 6);
+        glUniform1i(p.feedCount, lettered && presence > 0 && g->gpu.feedUploaded ? int(g->feedCount) : 0);
+        glUniform1i(p.feedPos, int(g->feedPos));
+        glUniform1f(p.feedPresence, presence);
+        glUniform4fv(p.pointer, 1, answer.pointer.data());
+        glUniform1f(p.voice, answer.voice);
+        // The impulses with their ages now, on this monitor's coordinates:
+        // ages from the monotonic clock, so the hourly wrap of `time` never
+        // reaches them.
+        std::array<float, 4 * IMPULSES> impulses{};
+        std::array<int, IMPULSES>       kinds{};
+        int                             count = 0;
+        for (const auto& impulse : g->impulses) {
+            const auto at           = impulse.at - monitor->m_position;
+            impulses[4 * count + 0] = float(at.x);
+            impulses[4 * count + 1] = float(at.y);
+            impulses[4 * count + 2] = std::chrono::duration<float>(now - impulse.start).count();
+            impulses[4 * count + 3] = impulse.strength;
+            kinds[count++]          = impulse.kind;
+        }
+        glUniform4fv(p.impulses, IMPULSES, impulses.data());
+        glUniform1iv(p.impulseKinds, IMPULSES, kinds.data());
+        glUniform1i(p.impulseCount, count);
+    }
+
+    // Draws the square with program state already set, once per damaged rect,
+    // with everything Hyprland relies on put back as it was found: it skips
+    // binding a program it believes is still bound, and binds its own vertex
+    // arrays and textures by unit.
+    void drawSquare(Render::CRenderContext& ctx, const std::function<void()>& set) {
+        GLint program = 0, vao = 0, activeTexture = 0;
+        glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
+        std::array<GLint, 3> textures{};
+        for (int unit = 0; unit < 3; unit++) {
+            glActiveTexture(GL_TEXTURE5 + unit);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D, &textures[unit]);
+        }
+        auto& gpu = g->gpu;
+        for (int unit = 0; unit < 3; unit++) {
+            glActiveTexture(GL_TEXTURE5 + unit);
+            glBindTexture(GL_TEXTURE_2D, std::array{gpu.glyphs, gpu.feed, gpu.data}[unit]);
+        }
+        set();
+        glBindVertexArray(gpu.vao);
+        ctx.m_data.damage.forEachRect([&ctx](const auto& rect) {
+            g_pHyprOpenGL->scissor(ctx, &rect, ctx.m_data.transformDamage);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        });
+        g_pHyprOpenGL->disableScissor();
+        glBindVertexArray(vao);
+        glUseProgram(program);
+        for (int unit = 0; unit < 3; unit++) {
+            glActiveTexture(GL_TEXTURE5 + unit);
+            glBindTexture(GL_TEXTURE_2D, textures[unit]);
+        }
+        glActiveTexture(activeTexture);
+    }
+
     class CBackdropPass : public IPassElement {
       public:
         CBackdropPass(PHLMONITOR monitor, SScene scene, SAnswer answer) : m_monitor(monitor), m_scene(std::move(scene)), m_answer(answer) {}
@@ -966,110 +1101,29 @@ vec4 cinemaGlass(vec4 c) {{
             const auto monitor = m_monitor.lock();
             if (!monitor)
                 return {};
-
-            // Hyprland skips binding a program it believes is still bound, and
-            // binds its own vertex arrays and textures by unit; so everything
-            // touched here is put back as it was found.
-            GLint program = 0, vao = 0, activeTexture = 0;
-            glGetIntegerv(GL_CURRENT_PROGRAM, &program);
-            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
-            glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
-            // Units 5, 6 and 7: the lettering, the feed and the windows.
-            std::array<GLint, 3> textures{};
-            for (int unit = 0; unit < 3; unit++) {
-                glActiveTexture(GL_TEXTURE5 + unit);
-                glGetIntegerv(GL_TEXTURE_BINDING_2D, &textures[unit]);
-            }
-
-            auto& p = g->program;
-            glBindTexture(GL_TEXTURE_2D, p.data);
+            // The textures for this frame, filled here, where the render
+            // context is current; every frame drawn after reads them.
+            auto& gpu = g->gpu;
+            glActiveTexture(GL_TEXTURE7);
+            glBindTexture(GL_TEXTURE_2D, gpu.data);
             uploadShapes(m_scene.shapes);
-
-            // Text only for a theme with lettering, and only while the feed is
-            // alive; a changed snapshot or lettering is uploaded here, where
-            // the render context is current.
-            const auto now      = std::chrono::steady_clock::now();
-            const bool lettered = !g->glyphPixels.empty();
-            const bool live     = g->feedFd >= 0 && now - g->feedReceived <= FEED_STALE;
-            const bool text     = lettered && live && !g->feedEmpty && g->feedCount > 0;
-            const auto presence = [&] {
-                const float moved = std::chrono::duration<float>(now - g->presenceChanged).count() / FEED_EASE;
-                return std::clamp(g->presenceFrom + (g->presenceTarget ? moved : -moved), 0.F, 1.F);
-            };
-            if (text != g->presenceTarget) {
-                g->presenceFrom    = presence();
-                g->presenceChanged = now;
-                g->presenceTarget  = text;
+            if (!g->glyphPixels.empty()) {
+                glActiveTexture(GL_TEXTURE5);
+                glBindTexture(GL_TEXTURE_2D, gpu.glyphs);
+                if (!gpu.glyphsUploaded) {
+                    upload(GL_R8, g->glyphWidth, g->glyphHeight, GL_RED, GL_UNSIGNED_BYTE, g->glyphPixels.data(), GL_LINEAR);
+                    gpu.glyphsUploaded = true;
+                }
+                glActiveTexture(GL_TEXTURE6);
+                glBindTexture(GL_TEXTURE_2D, gpu.feed);
+                if (gpu.feedUploaded != g->feedChanges) {
+                    upload(GL_R8, 128, FEED_RING / 128, GL_RED, GL_UNSIGNED_BYTE, g->feedRing.data(), GL_NEAREST);
+                    gpu.feedUploaded = g->feedChanges;
+                }
             }
-            const float feedPresence = presence();
-            glActiveTexture(GL_TEXTURE5);
-            glBindTexture(GL_TEXTURE_2D, p.glyphs);
-            if (lettered && !p.glyphsUploaded) {
-                upload(GL_R8, g->glyphWidth, g->glyphHeight, GL_RED, GL_UNSIGNED_BYTE, g->glyphPixels.data(), GL_LINEAR);
-                p.glyphsUploaded = true;
-            }
-            glActiveTexture(GL_TEXTURE6);
-            glBindTexture(GL_TEXTURE_2D, p.feed);
-            if (lettered && p.feedUploaded != g->feedChanges) {
-                upload(GL_R8, 128, FEED_RING / 128, GL_RED, GL_UNSIGNED_BYTE, g->feedRing.data(), GL_NEAREST);
-                p.feedUploaded = g->feedChanges;
-            }
-
-            const CBox box  = {0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
-            const auto proj = g_pHyprRenderer->projectBoxToTarget(ctx, box);
-            glUseProgram(p.id);
-            glUniformMatrix3fv(p.proj, 1, GL_TRUE, proj.getMatrix().data());
-            glUniform2f(p.resolution, monitor->m_size.x, monitor->m_size.y);
-            glUniform1f(p.time, g->time);
-            glUniform3fv(p.accent, 1, g->accent.data());
-            glUniform3fv(p.background, 1, g->background.data());
-            glUniform3fv(p.foreground, 1, g->foreground.data());
-            glUniform4fv(p.focused, 1, m_scene.focus.data());
-            glUniform4fv(p.reserved, 1, m_scene.reserved.data());
-            glUniform1i(p.windowData, 7);
-            glUniform1i(p.windowCount, m_scene.shapes.size());
-            glUniform1i(p.focusedIndex, m_scene.focusedIndex);
-            glUniform1f(p.focusAlpha, m_scene.focusAlpha);
-            glUniform1i(p.glyphsUniform, 5);
-            glUniform1i(p.feedUniform, 6);
-            glUniform1i(p.feedCount, lettered && feedPresence > 0 && p.feedUploaded ? int(g->feedCount) : 0);
-            glUniform1i(p.feedPos, int(g->feedPos));
-            glUniform1f(p.feedPresence, feedPresence);
-            glUniform4fv(p.pointer, 1, m_answer.pointer.data());
-            glUniform1f(p.voice, m_answer.voice);
-            // The impulses with their ages now, on this monitor's coordinates:
-            // ages from the monotonic clock, so the hourly wrap of `time`
-            // never reaches them.
-            std::array<float, 4 * IMPULSES> impulses{};
-            std::array<int, IMPULSES>       kinds{};
-            int                             count = 0;
-            for (const auto& impulse : g->impulses) {
-                const auto at   = impulse.at - monitor->m_position;
-                const auto age  = std::chrono::duration<float>(now - impulse.start).count();
-                impulses[4 * count + 0] = float(at.x);
-                impulses[4 * count + 1] = float(at.y);
-                impulses[4 * count + 2] = age;
-                impulses[4 * count + 3] = impulse.strength;
-                kinds[count++]          = impulse.kind;
-            }
-            glUniform4fv(p.impulses, IMPULSES, impulses.data());
-            glUniform1iv(p.impulseKinds, IMPULSES, kinds.data());
-            glUniform1i(p.impulseCount, count);
-
-            glBindVertexArray(p.vao);
-            ctx.m_data.damage.forEachRect([&ctx](const auto& rect) {
-                g_pHyprOpenGL->scissor(ctx, &rect, ctx.m_data.transformDamage);
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-            });
-            g_pHyprOpenGL->disableScissor();
-
-            glBindVertexArray(vao);
-            glUseProgram(program);
-            for (int unit = 0; unit < 3; unit++) {
-                glActiveTexture(GL_TEXTURE5 + unit);
-                glBindTexture(GL_TEXTURE_2D, textures[unit]);
-            }
-            glActiveTexture(activeTexture);
+            const auto now  = std::chrono::steady_clock::now();
+            const auto proj = g_pHyprRenderer->projectBoxToTarget(ctx, CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y});
+            drawSquare(ctx, [&] { setUniforms(gpu.backdrop, monitor, m_scene, m_answer, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}, now); });
             return {};
         }
 
@@ -1101,6 +1155,115 @@ vec4 cinemaGlass(vec4 c) {{
         SScene        m_scene;
         SAnswer       m_answer;
     };
+
+    // A window's edge in the film's world (specs/depth.md, part 2): the
+    // film's frame(px, i) over a band round the window, drawn in the window's
+    // own pass, so it moves, tilts and fades with it. It reads the scene and
+    // textures the backdrop drew this frame.
+    class CFramePass : public IPassElement {
+      public:
+        CFramePass(PHLMONITOR monitor, uint64_t window, float alpha) : m_monitor(monitor), m_window(window), m_alpha(alpha) {}
+
+        std::vector<UP<IPassElement>> draw(Render::CRenderContext& ctx) override {
+            const auto monitor = m_monitor.lock();
+            if (!monitor || !g || !g->gpu.frame.id)
+                return {};
+            auto&      state  = g->monitors[monitor->m_id];
+            const auto shapes = state.drawn.shapes;
+            const auto found  = std::ranges::find(shapes, m_window, &SShape::id);
+            if (found == shapes.end())
+                return {};
+            const int  index = found - shapes.begin();
+            const CBox area  = band(*found);
+            CBox       box   = area.copy().scale(monitor->m_scale);
+            ctx.m_data.renderModif.applyToBox(box);
+            const auto proj = g_pHyprRenderer->projectBoxToTarget(ctx, box);
+            const auto now  = std::chrono::steady_clock::now();
+            g_pHyprRenderer->blend(true);
+            drawSquare(ctx, [&] {
+                setUniforms(g->gpu.frame, monitor, state.drawn, state.answered, proj, area, now);
+                glUniform1i(g->gpu.frame.frameWindow, index);
+                glUniform1f(g->gpu.frame.frameAlpha, m_alpha);
+            });
+            return {};
+        }
+
+        bool needsLiveBlur(Render::CRenderContext&) override {
+            return false;
+        }
+        bool needsPrecomputeBlur(Render::CRenderContext&) override {
+            return false;
+        }
+        const char* passName() override {
+            return "CFramePass";
+        }
+        ePassElementType type() override {
+            return EK_CUSTOM;
+        }
+        std::optional<CBox> boundingBox(Render::CRenderContext&) override {
+            const auto monitor = m_monitor.lock();
+            if (!monitor || !g)
+                return std::nullopt;
+            const auto& shapes = g->monitors[monitor->m_id].drawn.shapes;
+            const auto  found  = std::ranges::find(shapes, m_window, &SShape::id);
+            return found == shapes.end() ? std::nullopt : std::optional<CBox>(band(*found));
+        }
+
+      private:
+        static CBox band(const SShape& shape) {
+            return CBox{shape.rect[0], shape.rect[1], shape.rect[2], shape.rect[3]}.expand(FRAME_BAND);
+        }
+
+        PHLMONITORREF m_monitor;
+        uint64_t      m_window;
+        float         m_alpha;
+    };
+
+    // The frame's place on every window: above it, below its popups, taking
+    // no room and no input.
+    class CFrameDecoration : public IHyprWindowDecoration {
+      public:
+        CFrameDecoration(PHLWINDOW window) : IHyprWindowDecoration(window) {}
+
+        SDecorationPositioningInfo getPositioningInfo() override {
+            SDecorationPositioningInfo info;
+            info.policy         = DECORATION_POSITION_ABSOLUTE;
+            info.desiredExtents = {{FRAME_BAND, FRAME_BAND}, {FRAME_BAND, FRAME_BAND}};
+            info.edges          = DECORATION_EDGE_BOTTOM | DECORATION_EDGE_LEFT | DECORATION_EDGE_RIGHT | DECORATION_EDGE_TOP;
+            return info;
+        }
+        void onPositioningReply(const SDecorationPositioningReply&) override {}
+        // Not in a workspace drawn on its own (a capture or snapshot): its
+        // scene is not the monitor's.
+        void draw(Render::CRenderContext& ctx, PHLMONITOR monitor, float const& a, const Render::SWindowRenderPresentation&) override {
+            const auto window = owningWindow();
+            if (!g || !g->framed || !window || ctx.readOnlyEffects())
+                return;
+            Render::IHyprRenderer::addPassElement(ctx, makeUnique<CFramePass>(monitor, window->metadata().stableID(), a));
+        }
+        eDecorationType getDecorationType() override {
+            return DECORATION_CUSTOM;
+        }
+        void updateWindow(PHLWINDOW) override {}
+        void damageEntire() override {
+            if (const auto window = owningWindow())
+                g_pHyprRenderer->damageBox(window->getFullWindowBoundingBox().expand(FRAME_BAND));
+        }
+        eDecorationLayer getDecorationLayer() override {
+            return DECORATION_LAYER_OVER;
+        }
+        uint64_t getDecorationFlags() override {
+            return DECORATION_NON_SOLID;
+        }
+        std::string getDisplayName() override {
+            return "cinema frame";
+        }
+    };
+
+    void addFrame(const PHLWINDOW& window) {
+        if (g && window)
+            HyprlandAPI::addWindowDecoration(g->handle, window, makeShared<CFrameDecoration>(window));
+    }
 
     void onPre(PHLMONITOR monitor) {
         if (!g || g->source.empty())
@@ -1221,7 +1384,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         claimFadeouts();
         g->closing = window;
     });
-    static auto OPEN   = Event::bus()->m_events.window.open.listen([](PHLWINDOW window) { windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_GOAL, 1.F, IMPULSE_OPEN); });
+    static auto OPEN = Event::bus()->m_events.window.open.listen([](PHLWINDOW window) {
+        addFrame(window);
+        windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_GOAL, 1.F, IMPULSE_OPEN);
+    });
+    for (const auto& window : Desktop::windowState()->windows())
+        addFrame(window);
     static auto ACTIVE = Event::bus()->m_events.window.active.listen(
         [](PHLWINDOW window, Desktop::eFocusReason) { windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_CURRENT, 0.6F, IMPULSE_FOCUS); });
     // The pointer's light follows it in the same frame: a move draws its

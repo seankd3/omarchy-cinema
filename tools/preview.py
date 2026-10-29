@@ -40,6 +40,9 @@ void main() {
     v_px = pos * resolution;
 }
 """
+# The plugin puts one of these after the film's shader (plugin/main.cpp).
+BACKDROP_MAIN = "\nvoid main() {\n    fragColor = backdrop(v_px);\n}\n"
+FRAME_MAIN = "\nuniform int frameWindow;\nuniform float frameAlpha;\nvoid main() {\n    fragColor = frame(v_px, frameWindow) * frameAlpha;\n}\n"
 
 
 def palette(theme):
@@ -70,13 +73,22 @@ def layout():
 OPEN, CLOSE, LAND, FOCUS, TYPE, VOICE = range(1, 7)
 
 
-def render(theme, t, windows, focused, velocity=None, pointer=None, impulses=()):
+def framed(theme):
+    return re.search(r"\bvec4\s+frame\s*\(", (theme / "backdrop.frag").read_text()) is not None
+
+
+def render(theme, t, windows, focused, velocity=None, pointer=None, impulses=(), frame=None):
     """velocity: (vx, vy) per window; pointer: (x, y, vx, vy); impulses:
-    (x, y, age, strength, kind), newest last."""
+    (x, y, age, strength, kind), newest last. With `frame` set to a window's
+    index, renders that window's frame (RGBA, premultiplied) instead of the
+    backdrop."""
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     contract = (ROOT / "plugin/contract.glsl").read_text().replace("#version 300 es", "#version 330 core")
-    source = contract + "\n#line 1\n" + (theme / "backdrop.frag").read_text()
+    source = contract + "\n#line 1\n" + (theme / "backdrop.frag").read_text() + (BACKDROP_MAIN if frame is None else FRAME_MAIN)
     program = ctx.program(vertex_shader=VERTEX, fragment_shader=source)
+    if frame is not None:
+        program["frameWindow"].value = frame
+        program["frameAlpha"].value = 1.0
 
     colors = palette(theme)
     for name in ("accent", "background", "foreground"):
@@ -132,16 +144,32 @@ def render(theme, t, windows, focused, velocity=None, pointer=None, impulses=())
 
     quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
     vao = ctx.vertex_array(program, [(quad, "2f", "pos")])
-    target = ctx.simple_framebuffer(PIXELS)
+    target = ctx.simple_framebuffer(PIXELS, components=4)
     target.use()
+    target.clear(0.0, 0.0, 0.0, 0.0)
     vao.render(moderngl.TRIANGLE_STRIP)
     # GL reads rows from the bottom up.
-    image = Image.frombytes("RGB", PIXELS, target.read(components=3)).transpose(Image.FLIP_TOP_BOTTOM)
+    mode = "RGB" if frame is None else "RGBA"
+    image = Image.frombytes(mode, PIXELS, target.read(components=len(mode))).transpose(Image.FLIP_TOP_BOTTOM)
     ctx.release()
     return image, colors
 
 
-def glass(image, windows, colors, focused):
+def with_frames(theme, image, t, windows, focused, **answers):
+    """`image` with each window's frame over it, as the plugin draws them
+    above the windows (premultiplied, so added over what is beneath scaled by
+    one minus its alpha)."""
+    if not framed(theme):
+        return image
+    out = np.asarray(image.convert("RGB"), dtype="f4") / 255
+    for i in range(len(windows)):
+        edge, _ = render(theme, t, windows, focused, frame=i, **answers)
+        rgba = np.asarray(edge, dtype="f4") / 255
+        out = rgba[..., :3] + out * (1 - rgba[..., 3:4])
+    return Image.fromarray((np.clip(out, 0, 1) * 255).astype("uint8"))
+
+
+def glass(image, windows, colors, focused, border=True):
     """The windows as the film's glass would show them: their background a
     darkened, blurred view of the backdrop, a lit border on the focused one,
     and a block of text lines that stay opaque."""
@@ -159,7 +187,8 @@ def glass(image, windows, colors, focused):
         tint = Image.new("RGB", region.size, background)
         out.paste(Image.blend(region, tint, 0.55), box[:2])
         draw = ImageDraw.Draw(out)
-        draw.rectangle(box, outline=accent if i == focused else tuple(c // 2 for c in accent), width=3)
+        if border:
+            draw.rectangle(box, outline=accent if i == focused else tuple(c // 2 for c in accent), width=3)
         for row in range(6):
             ty = box[1] + 60 + row * 44
             draw.rectangle((box[0] + 50, ty, box[0] + 50 + int((box[2] - box[0]) * (0.75 - 0.08 * (row % 3))), ty + 14), fill=foreground)
@@ -172,17 +201,20 @@ def answers(theme, t, out):
     (lx, ly, lw, lh), (rx, ry, rw, rh) = windows[0], windows[1]
     moved = list(windows)
     moved[1] = (rx - 260, ry + 90, rw, rh)  # mid-drag, down and to the left
-    frames = [
-        render(theme, t, windows, 0),
-        render(theme, t, moved, 1, velocity=[(0, 0), (-1800, 600), (0, 0)], pointer=(moved[1][0] + 200, moved[1][1] + 18, -1800, 600)),
-        render(theme, t, windows, 0, pointer=(lx + lw * 0.6, ly + lh * 0.4, 0, 0),
-               impulses=[(rx + rw / 2, ry + rh / 2, 0.25, 0.8, LAND)]
-               + [(lx + lw * f, ly + lh, a, 0.5, TYPE) for f, a in ((0.2, 0.9), (0.42, 0.6), (0.64, 0.3), (0.86, 0.08))]),
-        render(theme, t, windows[:2], 1,
-               impulses=[(rx + rw / 2, ry + rh * 1.5 + GAP, 0.3, 1.0, CLOSE), (lx + lw / 2, ly + lh / 2, 0.5, 1.0, OPEN), (rx + rw / 2, ry + rh / 2, 0.15, 0.6, FOCUS)]),
+    scenes = [
+        (windows, 0, {}),
+        (moved, 1, dict(velocity=[(0, 0), (-1800, 600), (0, 0)], pointer=(moved[1][0] + 200, moved[1][1] + 18, -1800, 600))),
+        (windows, 0, dict(pointer=(lx + lw * 0.6, ly + lh * 0.4, 0, 0),
+                          impulses=[(rx + rw / 2, ry + rh / 2, 0.25, 0.8, LAND)]
+                          + [(lx + lw * f, ly + lh, a, 0.5, TYPE) for f, a in ((0.2, 0.9), (0.42, 0.6), (0.64, 0.3), (0.86, 0.08))])),
+        (windows[:2], 1, dict(impulses=[(rx + rw / 2, ry + rh * 1.5 + GAP, 0.3, 1.0, CLOSE), (lx + lw / 2, ly + lh / 2, 0.5, 1.0, OPEN),
+                                        (rx + rw / 2, ry + rh / 2, 0.15, 0.6, FOCUS)])),
     ]
-    shown = [windows, moved, windows, windows[:2]]
-    tiles = [glass(image, wins, colors, f).resize((PIXELS[0] // 2, PIXELS[1] // 2)) for (image, colors), wins, f in zip(frames, shown, (0, 1, 0, 1))]
+    tiles = []
+    for wins, f, extra in scenes:
+        image, colors = render(theme, t, wins, f, **extra)
+        shown = with_frames(theme, glass(image, wins, colors, f, border=not framed(theme)), t, wins, f, **extra)
+        tiles.append(shown.resize((PIXELS[0] // 2, PIXELS[1] // 2)))
     sheet = Image.new("RGB", PIXELS)
     for k, tile in enumerate(tiles):
         sheet.paste(tile, ((k % 2) * PIXELS[0] // 2, (k // 2) * PIXELS[1] // 2))
@@ -205,7 +237,7 @@ def main():
         empty.save(out / f"{theme.name}-empty-{t:g}.png")
         windows = layout()
         backdrop, colors = render(theme, t, windows, 0)
-        glass(backdrop, windows, colors, 0).save(out / f"{theme.name}-windows-{t:g}.png")
+        with_frames(theme, glass(backdrop, windows, colors, 0, border=not framed(theme)), t, windows, 0).save(out / f"{theme.name}-windows-{t:g}.png")
         print(out / f"{theme.name}-empty-{t:g}.png")
         print(out / f"{theme.name}-windows-{t:g}.png")
 

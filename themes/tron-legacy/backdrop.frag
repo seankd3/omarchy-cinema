@@ -202,3 +202,27 @@ vec4 backdrop(vec2 px) {
 
     return vec4(col + (1.0 - exp(-light * 1.3)), 1.0);
 }
+
+// Each window's edge (specs/depth.md, part 2): a slab of glass standing on the
+// Grid. Its outer six pixels bend the world behind them outward, the way the
+// side of a thick pane does, and its rim is a crisp line of the window's own
+// light, brighter toward the horizon it is lit from and as focus lifts it;
+// orange on the focused window, as the circuit is.
+vec4 frame(vec2 px, int i) {
+    vec4 r = windowRect(i);
+    float rounding = windowRounding(i);
+    float d = rectDistance(px, r, rounding);
+    if (d < -2.0 || d > 30.0) return vec4(0.0);
+    vec2 e = vec2(1.0, 0.0);
+    vec2 n = normalize(vec2(rectDistance(px + e.xy, r, rounding) - rectDistance(px - e.xy, r, rounding),
+                            rectDistance(px + e.yx, r, rounding) - rectDistance(px - e.yx, r, rounding)) + 1e-6);
+    float lift = windowLift(i);
+    vec3 tint = i == focusedIndex ? ORANGE : accent;
+    float edge = (1.0 - smoothstep(0.0, 6.0, d)) * smoothstep(-2.0, 0.0, d);
+    vec3 bent = backdrop(px - n * 16.0 * edge).rgb * 1.15;
+    float toward = 0.6 + 0.4 * clamp(-n.y, 0.0, 1.0);
+    float rim = glowLine(abs(d - 0.5), 1.0) * toward * (0.8 + 0.8 * lift);
+    float a = clamp(max(edge * 0.9, rim), 0.0, 1.0);
+    vec3 col = bent * edge * 0.9 + tint * rim;
+    return vec4(col, a) * windowAlpha(i);
+}

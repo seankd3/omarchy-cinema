@@ -47,6 +47,15 @@ local function glow(alpha)
   return "rgba(" .. (colors.accent or "#ffffff"):sub(2) .. alpha .. ")"
 end
 
+-- A film whose backdrop.frag defines frame() draws each window's edge itself,
+-- so Hyprland's border and shadow stand down for it.
+local framed = false
+local shader = io.open(state .. "/omarchy/current/theme/backdrop.frag")
+if shader then
+  framed = shader:read("a"):find("vec4%s+frame%s*%(") ~= nil
+  shader:close()
+end
+
 local active = gradient(colors.hyprland_active_border or ("rgba(" .. (colors.accent or "#ffffff"):sub(2) .. "ee)"))
 local inactive = gradient(colors.hyprland_inactive_border or "rgba(595959aa)")
 
@@ -79,11 +88,12 @@ hl.config({
     -- 2026-10-28: "increase the panel spacing double it, preportional").
     gaps_out = 64,
     gaps_in = 32,
+    border_size = framed and 0 or nil,
   },
   group = { col = { border_active = active, border_inactive = inactive } },
   -- The windows glow in the film's light.
   decoration = {
-    shadow = { enabled = true, range = 22, render_power = 3, color = glow("40"), color_inactive = glow("10") },
+    shadow = { enabled = not framed, range = 22, render_power = 3, color = glow("40"), color_inactive = glow("10") },
   },
   render = { use_shader_blur_blend = true },
 })

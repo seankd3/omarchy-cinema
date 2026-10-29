@@ -197,8 +197,13 @@ float windowGlow(vec2 px, float radius) {
     return glow;
 }
 
+// What a film defines. backdrop(px): the colour of the world at px. And,
+// optionally, frame(px, i): window i's edge in that world (specs/depth.md,
+// part 2), a premultiplied colour over a band reaching 48 px outside the
+// window and at most 2 px inside it, drawn above the window in its own pass,
+// so it moves, tilts and fades with it. A frame can call backdrop() at a bent
+// point to show the world through the glass's thickness. A film that defines
+// frame() draws the windows' edges itself: Hyprland's border and shadow are
+// off for it (film.lua).
 vec4 backdrop(vec2 px);
-
-void main() {
-    fragColor = backdrop(v_px);
-}
+vec4 frame(vec2 px, int i);
