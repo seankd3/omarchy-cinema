@@ -11,19 +11,21 @@
 // lifts it; the holograms (globe, rings) are light and cast no shadow. Holo
 // lines hold each window, running along its edges in the seams and
 // converging on its corners. The viewer leans toward the pointer and the
-// hologram, nearest, shifts a few px, the lattice behind it less; a dragged
-// window pulls the hologram a little after it and leaves two faint
-// afterimages. Behind each window the world draws the sheen on its glass, a
+// hologram, nearest, shifts a few px, the lattice behind it less. Moving a
+// window is where the workshop shines: the window pulls the hologram after
+// it, swings the rings like a carousel and leaves dashed afterimages over
+// scanned light; when it lands a white-hot shock runs out through the
+// lattice and its seams flash, gone within 1.2 s. Behind each window the world draws the sheen on its glass, a
 // streak that slides as the window moves and the reactor's glow along its
 // lower glass, seen only through the glass. Each window's edge is a
 // holographic pane's (frame()): the workshop bends through its outer pixels,
 // its rim is cyan running to amber on the focused window as the border was,
 // brightest toward the reactor, and light passing behind it runs into the rim.
 //
-// What happens is answered briefly and softly: opening settles a dashed ring
-// onto the window's edge, closing lets one spread and fade where it was,
-// landing sends one soft ring through the lattice, focus warms the window's
-// edge. Typing gets no answer, so nothing moves while you work.
+// Everything else is answered briefly and softly: opening settles a dashed
+// ring onto the window's edge, closing lets one spread and fade where it
+// was, focus warms the window's edge. Typing gets no answer, so nothing moves
+// while you work.
 
 const vec3 AMBER = vec3(1.0, 0.70, 0.28);
 const vec3 HOT = vec3(0.86, 0.97, 1.0); // the reactor's white-hot core
@@ -135,10 +137,13 @@ int windowAt(vec2 at) {
 }
 
 // How much window i shades px, 1 in full shadow: its rect moved `offset` away
-// from the light, `soft` pixels soft, as present as the window is.
+// from the light, `soft` pixels soft, as present as the window is. It is
+// glass, so it shades the world beside it, never what is seen through it.
 float windowShadow(vec2 px, int i, vec2 offset, float soft) {
-    float d = rectDistance(px - offset, windowRect(i), windowRounding(i));
-    return (1.0 - smoothstep(-soft, soft, d)) * windowAlpha(i);
+    vec4 r = windowRect(i);
+    float rounding = windowRounding(i);
+    float d = rectDistance(px - offset, r, rounding);
+    return (1.0 - smoothstep(-soft, soft, d)) * smoothstep(-2.0, 3.0, rectDistance(px, r, rounding)) * windowAlpha(i);
 }
 
 // One pass over the windows: the distance to the nearest (`edge`) and which
@@ -198,24 +203,34 @@ vec3 holdLines(vec2 px, int i, vec3 cyan) {
     return tint * (glowLine(o, 0.9) * (0.1 + 0.3 * dash) * exp(-toCorner / 150.0) + node * 0.45) * windowAlpha(i);
 }
 
-// A moving window's wake: two faint dashed afterimages just behind it,
-// outside the window itself.
-vec3 afterimage(vec2 px, vec3 cyan) {
+// A moving window's wake, which may shine (Sean, 2026-10-29: "unless like
+// I'm moving windows round ... then you can really make things shine"):
+// dashed afterimages of it where it just was over a wash of scanned light,
+// outside the window itself, and the lattice it sweeps across lit up
+// (`lattice`). It is gone as soon as the window stops.
+vec3 afterimage(vec2 px, vec3 cyan, inout float lattice) {
     vec3 light = vec3(0.0);
     for (int i = 0; i < windowCount; i++) {
         vec2 v = windowVelocity(i);
         float speed = length(v);
+        vec3 tint = i == focusedIndex ? mix(cyan, HOT, 0.35) : cyan;
+        float wash = 0.0;
+        float k = min(speed / 1200.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
         // Only a moving window pays for its wake.
-        for (int g = 1; g <= (speed < 40.0 ? 0 : 2); g++) {
-            float k = min(speed / 1500.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
+        for (int g = 1; g <= (speed < 40.0 ? 0 : 4); g++) {
             vec4 ghost = windowRect(i);
-            ghost.xy -= v * 0.02 * float(g);
+            ghost.xy -= v * 0.04 * float(g);
             float d = rectDistance(px, ghost, windowRounding(i));
+            float fade = 1.0 - 0.22 * float(g);
+            // Dashes run along each edge of the outline.
             vec2 q = px - ghost.xy - ghost.zw * 0.5;
             float along = abs(q.x) * ghost.w > abs(q.y) * ghost.z ? q.y : q.x;
             float dash = step(0.4, fract(along / 20.0));
-            light += cyan * glowLine(abs(d), 1.2) * dash * (1.0 - 0.4 * float(g)) * 0.45 * k;
+            light += tint * glowLine(abs(d), 1.5) * dash * fade * 1.3 * k;
+            wash = max(wash, (1.0 - smoothstep(-30.0, 30.0, d)) * fade);
         }
+        light += tint * wash * (0.55 + 0.45 * sin(px.y * TAU / 5.0)) * 0.5 * k;
+        lattice += 3.0 * wash * k;
     }
     return light;
 }
@@ -233,12 +248,13 @@ vec3 answers(vec2 px, vec3 cyan, out float lattice) {
     vec3 light = vec3(0.0);
     lattice = 0.0;
     // Newest first: the ring is newest last, so past the first one older
-    // than the longest answer (1 s) every one is.
+    // than the longest answer (a landing's, 1.2 s) every one is.
     for (int k = impulseCount - 1; k >= 0; k--) {
         vec4 e = impulses[k];
         int kind = impulseKinds[k];
         float age = e.z;
-        if (age > 1.0) break;
+        if (age > 1.2) break;
+        if (age > 1.0 && kind != LAND) continue;
         if (kind == TYPE || kind == VOICE) continue;
         if (kind == CLOSE) {
             // A faint dashed ring spreads from where the window was and fades.
@@ -263,11 +279,14 @@ vec3 answers(vec2 px, vec3 cyan, out float lattice) {
             float dash = dashes(atan(q.y, q.x), length(q), 72.0, 0.5, 0.0);
             light += cyan * (glowLine(on, 1.2) * dash * 0.6 + 0.12 * exp(-on / 20.0)) * swell(age, 0.15, 0.7);
         } else if (kind == LAND) {
-            // One soft ring runs out through the lattice from the edge.
-            float front = abs(d - age * 260.0);
-            float glow = swell(age, 0.05, 1.0) * e.w;
-            lattice += 1.5 * exp(-front / 24.0) * glow;
-            light += cyan * (glowLine(front, 1.0) * 0.4 + 0.08 * exp(-front / 30.0)) * glow;
+            // The end of a move, which may shine: a white-hot front in a
+            // broad band runs out through the lattice, blazing it as it
+            // passes, and the seams round the window flash, all within 1.2 s.
+            float front = abs(d - age * 480.0);
+            float glow = (1.0 - smoothstep(0.0, 1.2, age)) * exp(-age * 1.5) * e.w;
+            light += (HOT * glowLine(front, 2.0) * 1.5 + cyan * 0.6 * exp(-front / 50.0)) * glow;
+            lattice += 6.0 * exp(-front / 36.0) * glow;
+            light += mix(HOT, cyan, 0.4) * exp(-d / 60.0) * exp(-age * 5.0) * 2.0 * e.w;
         } else if (kind == FOCUS) {
             // The window's edge warms softly in the reactor's light.
             light += mix(cyan, AMBER, 0.35) * exp(-d / 30.0) * 0.35 * swell(age, 0.2, 0.9) * e.w;
@@ -290,14 +309,15 @@ vec4 backdrop(vec2 px) {
 
     vec3 cyan = accent;
     float lattice;
-    vec3 answered = answers(px, cyan, lattice) + afterimage(px, cyan);
-    // The world as the viewer leaning toward the pointer sees it and a
-    // dragged window pulls it, a few px: the hologram, nearest, moves most;
-    // the lattice and the dust behind it less. Never the windows.
+    vec3 answered = answers(px, cyan, lattice);
+    answered += afterimage(px, cyan, lattice);
+    // The world as the viewer leaning toward the pointer sees it, a few px,
+    // and as a dragged window pulls it, more: the hologram, nearest, moves
+    // most; the lattice and the dust behind it less. Never the windows.
     vec2 lean = pointer.xy / resolution - 0.5;
     vec2 pulled = focusedIndex < 0 ? vec2(0.0) : windowVelocity(focusedIndex);
-    vec2 world = px + lean * 3.0 + pulled * 0.001;
-    vec2 holoAt = px + lean * 8.0 + pulled * 0.003;
+    vec2 world = px + lean * 3.0 + pulled * 0.003;
+    vec2 holoAt = px + lean * 8.0 + pulled * 0.01;
 
     // Everything is centred on the focused window and sized to it.
     vec2 c = focused.xy + focused.zw * 0.5;
@@ -306,9 +326,9 @@ vec4 backdrop(vec2 px) {
     float r = length(p);
     float a = atan(p.y, p.x);
     float Rg = reach * 0.45;
-    // The rings swing a little with the focused window as it moves, and
-    // settle back when it stops.
-    float swing = focusedIndex < 0 ? 0.0 : clamp(windowVelocity(focusedIndex).x * 0.00006, -0.15, 0.15);
+    // The rings swing with the focused window as it moves, like a carousel
+    // pushed round, and settle back when it stops.
+    float swing = focusedIndex < 0 ? 0.0 : clamp(windowVelocity(focusedIndex).x * 0.00016, -0.4, 0.4);
     vec2 look = clamp((pointer.xy - c) / max(reach, 1.0), -1.0, 1.0);
     float hand = exp(-length(px - pointer.xy) / 170.0);
 
