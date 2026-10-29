@@ -8,6 +8,21 @@
 // over the sky, and light is a lift toward white. Under the windows only a
 // near white wash of the sky's light shows, so the frosted glass reads as
 // white paper with dark text on it.
+//
+// The panes float in the sun's light (specs/depth.md). Each casts a glass
+// shadow on the cloud deck below it, toward the viewer and away from the
+// sun: a slate patch, on the cloud rimmed by a gold caustic, further and
+// softer as focus lifts the pane, and a lifted pane glows brighter against
+// the sky. A moving pane draws vapour trails from its corners and parts the
+// cloud behind it. Sunlight gathers round the pointer. Opening sweeps the
+// drone's scan ring in onto the pane, landing jolts the sky and sends a
+// pressure wave out with
+// a bright crest, focus floods the pane's seams with gold, throws a glint of
+// sun off it in a long flare and flares the sun across the whole sky,
+// closing leaves a puff of vapour, and typing rings small ripples at
+// the pane's foot. The blue ink of every answer fades out in the last 16 px
+// before a pane, so the frost cannot pull it under text; their light may come
+// right up to the glass, since white only raises the text's contrast.
 
 const vec3 ZENITH = vec3(0.60, 0.70, 0.81);
 const vec3 SKY = vec3(0.80, 0.86, 0.91);
@@ -17,6 +32,9 @@ const vec3 CLOUD = vec3(0.975, 0.98, 0.985);
 const vec3 SHADE = vec3(0.71, 0.77, 0.84);
 const vec3 DEEP = vec3(0.56, 0.64, 0.74);
 const vec3 MOON = vec3(0.90, 0.93, 0.96);
+const vec3 SLATE = vec3(0.50, 0.58, 0.69); // a pane's shadow
+const vec3 GOLD = vec3(1.0, 0.82, 0.55);   // the sun caught on glass
+const vec3 STREAK = vec3(0.58, 0.78, 0.96); // an anamorphic flare
 
 // Value noise whose lattice repeats every `period` cells in y, so the cloud
 // deck can slide by a whole period each cycle and the wrap never shows.
@@ -140,19 +158,212 @@ float around(vec2 px, vec4 rect) {
     return s / (2.0 * (w + h));
 }
 
+// Distance from p to the segment from a to b.
+float segment(vec2 p, vec2 a, vec2 b) {
+    vec2 ab = b - a;
+    vec2 ap = p - a;
+    return length(ap - ab * clamp(dot(ap, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0));
+}
+
+// The window an impulse at `at` happened in, or -1. An impulse is placed at
+// its window's middle, so of the windows holding `at` it is the one whose
+// middle is nearest (not the one on top: another can float over it).
+int windowAt(vec2 at) {
+    int found = -1;
+    float best = FAR;
+    for (int i = 0; i < windowCount; i++) {
+        vec4 r = windowRect(i);
+        float off = length(r.xy + r.zw * 0.5 - at);
+        if (rectDistance(at, r, 0.0) < 1.0 && off < best) {
+            found = i;
+            best = off;
+        }
+    }
+    return found;
+}
+
+// How much window i shades px, 1 in full shadow: its rect moved `offset` away
+// from the light, `soft` pixels soft, as present as the window is.
+float windowShadow(vec2 px, int i, vec2 offset, float soft) {
+    float d = rectDistance(px - offset, windowRect(i), windowRounding(i));
+    return (1.0 - smoothstep(-soft, soft, d)) * windowAlpha(i);
+}
+
+// A thin line `d` pixels away, `w` wide: 1 on it.
+float ink(float d, float w) {
+    return 1.0 - smoothstep(w * 0.4, w * 1.4, d);
+}
+
+// What happened lately that the whole sky feels: how far a landing jolts
+// it (x, pixels), how hard the sun flares (y) and the sensor ring flashes
+// (z). The same at every point.
+vec3 moments() {
+    vec3 m = vec3(0.0);
+    // Newest first: the ring is newest last, so past the first one older
+    // than the longest answer (a landing's, 1.6 s) every one is.
+    for (int k = impulseCount - 1; k >= 0; k--) {
+        float age = impulses[k].z, s = impulses[k].w;
+        int kind = impulseKinds[k];
+        if (age > 1.6) break;
+        if (kind == LAND) m.x += sin(age * 40.0) * exp(-age * 5.0) * 14.0 * s;
+        else if (kind == OPEN) m.y += 0.6 * exp(-pow((age / 0.9 - 0.9) / 0.12, 2.0));
+        else if (kind == FOCUS) {
+            float fade = exp(-age * 2.6) * s;
+            m.y += fade;
+            m.z += 2.5 * fade;
+        }
+    }
+    m.y = min(m.y, 1.0);
+    return m;
+}
+
+// The sky answering what happened lately, at px: how far it lifts toward
+// white (x) and toward the sun's gold (y), and how much of the drone's blue
+// ink (z) and of a flare's pale blue streak (w) it lays there.
+vec4 answers(vec2 px, vec2 sun) {
+    vec4 a = vec4(0.0);
+    for (int k = impulseCount - 1; k >= 0; k--) {
+        vec4 e = impulses[k];
+        int kind = impulseKinds[k];
+        float age = e.z;
+        if (age > 1.6) break;
+        if (kind == TYPE) {
+            float r = length(px - e.xy);
+            if (age > 0.9 || r > 160.0) continue;
+            // A ripple at the key's place on the pane's foot.
+            float fade = 1.0 - age / 0.9;
+            float front = abs(r - age * 110.0);
+            a.z += (ink(front, 2.4) + 0.25 * exp(-front / 10.0)) * fade * e.w;
+            a.y += exp(-r / 16.0) * exp(-age * 5.0) * 0.6 * e.w;
+            continue;
+        }
+        if (kind == CLOSE) {
+            float r = length(px - e.xy);
+            if (age > 1.5 || r > 200.0 + age * 650.0) continue;
+            // A puff of vapour where the pane was, spreading and thinning,
+            // its rim inked blue, and a streak of the light it gave off.
+            float R = 60.0 + age * 600.0;
+            float fade = exp(-age * 2.0);
+            a.x += ((1.0 - smoothstep(R * 0.3, R, r)) * 0.6 + exp(-abs(r - R) / 30.0) * 0.6) * fade;
+            a.y += exp(-r / 60.0) * exp(-age * 4.0) * 1.2;
+            a.z += (ink(abs(r - R), 3.0) + 0.3 * exp(-abs(r - R) / 24.0)) * fade;
+            if (abs(px.y - e.y) < 40.0) a.w += exp(-abs(px.y - e.y) / 4.0) * exp(-abs(px.x - e.x) / 600.0) * exp(-age * 4.0) * 1.2;
+            continue;
+        }
+        if (age > (kind == LAND ? 1.6 : kind == OPEN ? 0.9 : kind == FOCUS ? 1.4 : 0.0)) continue;
+        int i = windowAt(e.xy);
+        vec4 rect = i < 0 ? vec4(e.xy, 0.0, 0.0) : windowRect(i);
+        float d = rectDistance(px, rect, i < 0 ? 0.0 : windowRounding(i));
+        if (d < 0.0 || d > 900.0) continue;
+        if (kind == LAND) {
+            // A bright crest with the pressure line inked just ahead of it,
+            // and the sun flashing off the pane as it lands.
+            float front = d - age * 380.0;
+            if (front > 260.0) continue;
+            float fade = exp(-age * 2.0) * e.w;
+            a.x += (exp(-abs(front) / 22.0) * 1.1 + exp(-abs(front) / 80.0) * 0.4) * fade;
+            a.z += (ink(abs(front - 24.0), 3.0) + 0.35 * exp(-abs(front - 24.0) / 26.0)) * fade;
+            a.y += exp(-d / 50.0) * exp(-age * 3.0) * 1.8 * e.w;
+            continue;
+        }
+        // Where the pane faces the sun: its point nearest it, and the glint
+        // just off it toward the sun, out in the seam: a bloom there in a
+        // long, thin anamorphic flare across the sky.
+        vec2 corner = clamp(sun, rect.xy, rect.xy + rect.zw);
+        vec2 at = corner + normalize(sun - corner + vec2(0.0, -1e-3)) * 30.0;
+        float c = length(px - at);
+        float bloom = exp(-c / 36.0) * 1.4 + exp(-c / 220.0) * 0.6;
+        float dy = abs(px.y - at.y);
+        float line = dy > 120.0 ? 0.0 : exp(-dy / 4.0) * exp(-abs(px.x - at.x) / 800.0) * 1.4
+            + exp(-dy / 30.0) * exp(-abs(px.x - at.x) / 500.0) * 0.4;
+        if (kind == OPEN) {
+            // The drone's scan ring sweeps in onto the pane's edge and the
+            // sun catches it as it settles.
+            float t = age / 0.9;
+            float R = (1.0 - t) * (1.0 - t) * 340.0;
+            a.z += (ink(abs(d - R), 3.0) + 0.3 * exp(-abs(d - R) / 30.0)) * (0.3 + 0.7 * t);
+            float lock = exp(-pow((t - 0.9) / 0.12, 2.0));
+            a.x += exp(-d / 12.0) * lock;
+            a.y += (bloom + exp(-d / 50.0)) * lock;
+            a.w += line * lock;
+        } else {
+            // Focus: the sun glints off the pane, floods its seams with gold
+            // and a glint races round its edge; a ring rolls out from it.
+            float fade = exp(-age * 2.6) * e.w;
+            a.y += (bloom + exp(-d / 50.0) * 1.2) * fade * 1.4;
+            a.w += line * fade * 1.4;
+            a.x += exp(-d / 10.0) * fade;
+            if (age < 0.8 && d < 40.0) {
+                float head = fract(around(corner, rect) + age * 1.2);
+                float behind = fract(head - around(px, rect)) * 2.0 * (rect.z + rect.w);
+                float glint = exp(-behind / 90.0) * exp(-d / 6.0) * 1.6 * e.w;
+                a.x += glint;
+                a.y += glint * 0.5;
+            }
+            float front = abs(d - age * 460.0);
+            a.z += (ink(front, 2.6) + 0.3 * exp(-front / 30.0)) * exp(-age * 2.5) * e.w;
+        }
+    }
+    return a;
+}
+
+// A moving pane's wake: vapour trails from its corners (`glow`, with a blue
+// fringe in `blue`) and the cloud it parts behind it (`part`).
+void wake(vec2 px, out float glow, out float blue, out float part) {
+    glow = 0.0;
+    blue = 0.0;
+    part = 0.0;
+    for (int i = 0; i < windowCount; i++) {
+        vec2 v = windowVelocity(i);
+        float speed = length(v);
+        if (speed < 40.0) continue;
+        float k = min(speed / 1200.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
+        if (k <= 0.0) continue;
+        vec4 r = windowRect(i);
+        vec2 tail = -v * 0.3;
+        // Only a moving pane pays for its wake.
+        int corners = speed < 40.0 ? 0 : 4;
+        for (int c = 0; c < corners; c++) {
+            vec2 a = r.xy + r.zw * vec2(float(c & 1), float(c >> 1));
+            float t = clamp(dot(px - a, tail) / max(dot(tail, tail), 1e-3), 0.0, 1.0);
+            float dist = segment(px, a, a + tail);
+            float w = 2.0 + 16.0 * t;
+            glow += exp(-dist / w) * (1.0 - t) * 1.2 * k;
+            blue += exp(-dist / (w * 2.6)) * (1.0 - t) * 0.7 * k;
+        }
+        for (int g = 1; g <= corners - 1; g++) {
+            vec4 ghost = r;
+            ghost.xy -= v * 0.06 * float(g);
+            float d = rectDistance(px, ghost, windowRounding(i));
+            part = max(part, (1.0 - smoothstep(-30.0, 30.0, d)) * (1.0 - 0.25 * float(g)) * k);
+        }
+    }
+}
+
 vec4 backdrop(vec2 px) {
     float horizon = resolution.y * 0.56;
-    vec2 sun = vec2(resolution.x * 0.74, horizon - resolution.y * 0.035);
-    vec3 col = px.y < horizon ? sky(px, horizon, sun) : cloudDeck(px, horizon, sun);
+    vec2 sun0 = vec2(resolution.x * 0.74, horizon - resolution.y * 0.035);
+    vec3 moment = moments();
+    float burst = moment.y, flash = moment.z;
+
+    // The world as a landing jolts it: sky, cloud and sun, never the panes.
+    vec2 pw = px + vec2(0.0, moment.x);
+    vec2 sun = sun0;
+    vec3 col = pw.y < horizon ? sky(pw, horizon, sun) : cloudDeck(pw, horizon, sun);
     // The sun itself: a soft white disc in a wide warm bloom, hazy at dawn.
-    float ds = length(px - sun);
+    float ds = length(pw - sun);
     col = mix(col, SUN, 0.45 * exp(-ds / 380.0) + 0.5 * exp(-ds / 70.0));
     col = mix(col, vec3(1.0), 1.0 - smoothstep(14.0, 22.0, ds));
+    // Focus taken, or a pane opened, the sun flares: the whole sky warms and
+    // brightens for a beat, the bloom spreads and a streak runs through it.
+    col = mix(col, mix(vec3(1.0), GOLD, 0.45), burst * (0.22 + 0.5 * exp(-ds / 520.0)));
+    col = mix(col, STREAK, burst * exp(-abs(pw.y - sun.y) / 5.0) * exp(-abs(pw.x - sun.x) / 1100.0) * 0.7);
 
-    // The window nearest this point, for its line and its sunlit edge.
+    // The window nearest this point, for its line and its sunlit edge, and
+    // how near any is and how near a lifted one.
     float nearest = FAR;
     int closest = -1;
-    float near = 0.0;
+    float near = 0.0, lifted = 0.0;
     for (int i = 0; i < windowCount; i++) {
         float d = windowDistance(px, i);
         near += exp(-max(d, 0.0) / 70.0);
@@ -160,42 +371,83 @@ vec4 backdrop(vec2 px) {
             nearest = d;
             closest = i;
         }
+        lifted = max(lifted, windowLift(i) * exp(-max(d, 0.0) / 120.0) * windowAlpha(i));
     }
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
     near = clamp(near, 0.0, 1.0);
 
-    // The gaps between panes are lit a little, as glass gathers daylight.
-    col = mix(col, vec3(1.0), near * 0.18);
+    // The gaps between panes are lit a little, as glass gathers daylight,
+    // and a lifted pane, nearer the sun, more.
+    col = mix(col, vec3(1.0), near * 0.18 + lifted * 0.3);
 
-    if (closest >= 0 && nearest > -1.0 && nearest < 60.0) {
-        float fade = windowAlpha(closest);
-        vec4 rect = windowRect(closest);
-        // A fine blue line traced a little off each pane.
-        float line = 1.0 - smoothstep(0.35, 1.05, abs(nearest - 12.0));
-        col = mix(col, accent, line * 0.55 * fade);
-        // Light catches the edge facing the sun, and a glint runs along it.
-        vec2 q = px - clamp(px, rect.xy, rect.xy + rect.zw);
-        vec2 n = q / max(length(q), 1e-3);
-        vec2 toSun = normalize(sun - (rect.xy + rect.zw * 0.5));
-        float facing = 0.35 + 0.65 * max(dot(n, toSun), 0.0);
-        float rim = exp(-max(nearest, 0.0) / 2.5);
-        float glint = exp(-abs(px.x - rect.x - cycle(20.0) * rect.z) / 140.0) * step(px.y, rect.y + rect.w * 0.5);
-        col = mix(col, vec3(1.0), rim * fade * (0.45 * facing + 0.5 * glint));
-    }
+    // What follows shows only outside the panes (under them is the wash
+    // below), so a point well under one does not pay for it.
+    if (nearest > -1.0) {
+        // The panes' shadows, cast toward the viewer and away from the sun:
+        // slate, soft, and on the cloud rimmed by the gold caustic a pane's edge
+        // focuses (brightest where the shadow fades).
+        float shadow = 0.0;
+        for (int i = 0; i < windowCount; i++) {
+            vec4 r = windowRect(i);
+            float lift = windowLift(i);
+            vec2 away = normalize(vec2((r.x + r.z * 0.5 - sun0.x) / resolution.x, 0.6));
+            shadow = max(shadow, windowShadow(px, i, away * (24.0 + 56.0 * lift), 22.0 + 46.0 * lift));
+        }
+        float deck = smoothstep(horizon - 10.0, horizon + 40.0, px.y);
+        col = mix(col, SLATE, 0.4 * shadow);
+        col = mix(col, GOLD, 1.4 * shadow * (1.0 - shadow) * deck);
 
-    // The drone's sensor: a thin ring round the focused window, its arc
-    // circling once every 12 seconds with a fading trail. It rides the eased
-    // focus rect, so it glides to the next window when focus moves, and is as
-    // present as the focus, so it fades with a closing window.
-    float fd = focusAlpha > 0.0 ? rectDistance(px, focused, 0.0) : FAR;
-    if (abs(fd - RING) < 12.0) {
-        float fade = focusAlpha;
-        vec4 ring = focused + vec4(-RING, -RING, 2.0 * RING, 2.0 * RING);
-        float behind = fract(cycle(12.0) - around(px, ring)) * 2.0 * (ring.z + ring.w);
-        float trail = exp(-behind / 380.0);
-        float onRing = 1.0 - smoothstep(0.3, 1.0, abs(fd - RING));
-        col = mix(col, accent, onRing * (0.25 + 0.75 * trail) * fade);
-        col = mix(col, accent, (1.0 - smoothstep(0.0, 6.0, behind)) * exp(-abs(fd - RING) / 3.0) * 0.6 * fade);
+        // The cloud a moving pane parts: deeper below the deck's tops, and a
+        // white haze of its passage in the sky.
+        float trail, fringe, part;
+        wake(px, trail, fringe, part);
+        col = mix(col, mix(vec3(1.0), DEEP, deck), part * mix(0.5, 0.35, deck));
+
+        // Sunlight gathers round the pointer.
+        float hand = exp(-length(px - pointer.xy) / 230.0);
+        col = mix(col, mix(vec3(1.0), GOLD, 0.6), hand * 0.4);
+
+        if (closest >= 0 && nearest < 60.0) {
+            float fade = windowAlpha(closest);
+            vec4 rect = windowRect(closest);
+            // A fine blue line traced a little off each pane.
+            float line = 1.0 - smoothstep(0.35, 1.05, abs(nearest - 12.0));
+            col = mix(col, accent, line * 0.55 * fade);
+            // Light catches the edge facing the sun, and a glint runs along it.
+            vec2 q = px - clamp(px, rect.xy, rect.xy + rect.zw);
+            vec2 n = q / max(length(q), 1e-3);
+            vec2 toSun = normalize(sun - (rect.xy + rect.zw * 0.5));
+            float facing = 0.35 + 0.65 * max(dot(n, toSun), 0.0);
+            float rim = exp(-max(nearest, 0.0) / 2.5);
+            float glint = exp(-abs(px.x - rect.x - cycle(20.0) * rect.z) / 140.0) * step(px.y, rect.y + rect.w * 0.5);
+            col = mix(col, vec3(1.0), rim * fade * (0.45 * facing + 0.5 * glint));
+        }
+
+        // The drone's sensor: a thin ring round the focused window, its arc
+        // circling once every 12 seconds with a fading trail. It rides the eased
+        // focus rect, so it glides to the next window when focus moves, and is as
+        // present as the focus, so it fades with a closing window. Focus taken
+        // flashes it.
+        float fd = focusAlpha > 0.0 ? rectDistance(px, focused, 0.0) : FAR;
+        if (abs(fd - RING) < 12.0) {
+            float fade = focusAlpha;
+            vec4 ring = focused + vec4(-RING, -RING, 2.0 * RING, 2.0 * RING);
+            float behind = fract(cycle(12.0) - around(px, ring)) * 2.0 * (ring.z + ring.w);
+            float trail_ = exp(-behind / 380.0);
+            float onRing = 1.0 - smoothstep(0.3, 1.0 + flash * 0.4, abs(fd - RING));
+            col = mix(col, accent, min(onRing * (0.25 + 0.75 * trail_ + flash), 1.0) * fade);
+            col = mix(col, accent, (1.0 - smoothstep(0.0, 6.0, behind)) * exp(-abs(fd - RING) / 3.0) * 0.6 * fade);
+            col = mix(col, vec3(1.0), min(flash * 0.25, 1.0) * exp(-abs(fd - RING) / 6.0) * fade);
+        }
+
+        // The answers: blue ink and flare, kept off the panes (the frost would
+        // pull it under their text), then light.
+        vec4 a = answers(px, sun0);
+        float clear = smoothstep(6.0, 16.0, nearest);
+        col = mix(col, accent, min(a.z + fringe, 1.0) * 0.9 * clear);
+        col = mix(col, STREAK, min(a.w, 1.0) * 0.8 * clear);
+        col = mix(col, GOLD, min(a.y, 1.0) * 0.75);
+        col = mix(col, vec3(1.0), min(a.x + trail, 1.0));
     }
 
     // Under the glass only the sky's broad light shows, lifted near white:
