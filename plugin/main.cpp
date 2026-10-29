@@ -598,14 +598,20 @@ void main() {
         return std::ranges::any_of(State::monitorState()->monitors(), [](const auto& m) { return m->m_enabled && m->m_dpmsStatus && !covered(m); });
     }
 
-    // A config change that stops the answers lets go of what is pending, so
-    // turning depth or animations off and on again brings nothing back.
-    void settleAnswers() {
-        if (!g || answering())
+    // Lets go of everything pending: impulses and the last voice reading.
+    void letGo() {
+        if (!g)
             return;
         forgetImpulses();
         g->voice    = 0;
         g->speaking = false;
+    }
+
+    // A change that stops the answers lets go of what is pending, so turning
+    // depth or animations off and on again brings nothing back.
+    void settleAnswers() {
+        if (g && !answering())
+            letGo();
     }
 
     void forgetImpulses() {
@@ -1545,7 +1551,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // Every way the world stops answering lets pending answers go when it
     // happens, whether or not a frame is drawn then: a config change, the
     // session locking, a window going fullscreen, a monitor going to sleep.
-    static auto LOCKED     = g_pSessionLockManager->m_events.lock.listen([] { settleAnswers(); });
+    // Hyprland announces a lock before it marks the session locked, so the
+    // lock lets go at once instead of asking whether the world still answers.
+    static auto LOCKED     = g_pSessionLockManager->m_events.lock.listen([] { letGo(); });
     static auto FULLSCREEN = Event::bus()->m_events.window.fullscreen.listen([](PHLWINDOW) { settleAnswers(); });
     const auto  watchSleep = [](const PHLMONITOR& monitor) {
         if (g && monitor)
