@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes the applied Omarchy theme as Google Chrome's theme: the frame, tabs,
 toolbar, address bar and new tab page take the theme's colours, and the tab
-strip is lit from below by its accent, under a fine grain.
+strip is lit from below by its accent.
 
 Chrome follows a look only from a theme extension, and branded Chrome loads
 one only from its store, from its unpacked-extension page in developer mode,
@@ -26,7 +26,6 @@ import hashlib
 import io
 import json
 import os
-import random
 import re
 import struct
 import subprocess
@@ -74,16 +73,13 @@ def png(width, height, rows):
 
 def frame_image(base, glow, strength, scale):
     """The tab strip's backing: the frame colour, lit from below by the accent
-    as if the toolbar glowed, under a fine grain. Chrome tiles it from the top
-    left, so it varies only down the strip and the grain is per pixel."""
-    width, height = 128 * scale, 64 * scale
-    grain = random.Random(f"{base}{glow}{scale}")
+    as if the toolbar glowed. Chrome tiles it from the top left, so it is one
+    narrow column, taller than the strip."""
+    width, height = 8, 64 * scale
     rows = []
     for y in range(height):
         t = min(1.0, y / (42 * scale))
-        lit = mix(base, glow, strength * t * t)
-        rows.append([[min(255, max(0, c + n)) for c in lit]
-                     for n in (grain.choice((-2, -1, 0, 0, 1, 2)) for _ in range(width))])
+        rows.append([mix(base, glow, strength * t * t)] * width)
     return png(width, height, rows)
 
 
@@ -188,10 +184,14 @@ def main():
         listing = None
         if found is not None:
             # Chrome installs the package only when its version is newer than
-            # the one it has. The clock's seconds always are, even after the
-            # listing was taken away or this directory was lost.
-            now = int(time.time())
-            version = f"1.{now >> 16}.{now & 0xFFFF}"
+            # the one it has, so each package counts on from the last one
+            # issued, kept beside the key that names the extension, whatever
+            # the clock does. The clock's seconds are the floor for a key that
+            # lost its count.
+            count = OUT / "count"
+            n = max(int(count.read_text()) + 1 if count.exists() else 0, int(time.time()))
+            write(count, str(n).encode())
+            version = f"1.{n >> 16}.{n & 0xFFFF}"
             ext_id, package = crx(zipped(theme(*found, version)), str(key))
             write(OUT / "theme.crx", package)
             listing = OUT / f"{ext_id}.json"
