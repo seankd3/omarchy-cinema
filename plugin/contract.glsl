@@ -6,7 +6,9 @@
 // Lengths are logical pixels from the screen's top left. The windows are the
 // ones Hyprland is drawing on this screen in this frame, where it is drawing
 // them: mid-animation, mid-drag, sliding between workspaces, fading out after
-// closing. windowAlpha(i) fades with the window. `focused` is the focused window's rect
+// closing. windowAlpha(i) fades with the window; windowVelocity(i) is how it
+// moves (px a second), windowLift(i) eases to 1 while it has focus and back,
+// windowDepth(i) is its place in the stack (0 on top). `focused` is the focused window's rect
 // (x, y, w, h), easing to a new window when focus moves and then following it
 // exactly; with no focused window it is a rect in the middle of the screen
 // (focusAlpha says how present it is).
@@ -33,7 +35,8 @@ uniform vec3 background;
 uniform vec3 foreground;
 uniform vec4 focused;
 uniform vec4 reserved;
-// Two texels a window, 256 to a row: (x, y, w, h) and (alpha, rounding).
+// Three texels a window, 256 to a row: (x, y, w, h), (alpha, rounding,
+// lift, depth) and (velocity x, y). Read them through the window functions.
 uniform sampler2D windowData;
 uniform int windowCount;
 uniform int focusedIndex;
@@ -44,6 +47,25 @@ uniform int focusedIndex;
 // focused, focusedIndex and `focused` stay on it as it fades out and this
 // falls with it; with no window focused on this screen it eases to 0.
 uniform float focusAlpha;
+
+// The pointer: position (xy) and velocity (zw, px a second) on this screen.
+// It moves in the same frame as the cursor.
+uniform vec4 pointer;
+
+// What happened lately (specs/depth.md): the last 32 things, newest last, each
+// a point, its age in seconds (it is gone after 3), a strength from 0 to 1 and
+// a kind. Every film answers each kind its own way. Typing is a printable key
+// pressed into a window, placed along that window's lower edge; nothing of the
+// key itself reaches the shader.
+const int OPEN = 1;   // a window opened, at its middle
+const int CLOSE = 2;  // a window closed, at its middle
+const int LAND = 3;   // a window stopped moving, at its middle; stronger the faster it came
+const int FOCUS = 4;  // a window took focus, at its middle
+const int TYPE = 5;   // a key typed into the focused window
+const int VOICE = 6;  // speech began (Voxtype)
+uniform vec4 impulses[32]; // x, y, age, strength
+uniform int impulseKinds[32];
+uniform int impulseCount;
 
 // Text a backdrop can draw: the newest plaintext of the agents on this machine
 // (specs/agent-rain.md), a ring of 16384 characters 128 to a row, of which
@@ -113,11 +135,27 @@ vec4 windowTexel(int texel) {
 }
 
 vec4 windowRect(int i) {
-    return windowTexel(2 * i);
+    return windowTexel(3 * i);
 }
 
 float windowAlpha(int i) {
-    return windowTexel(2 * i + 1).x;
+    return windowTexel(3 * i + 1).x;
+}
+
+float windowRounding(int i) {
+    return windowTexel(3 * i + 1).y;
+}
+
+float windowLift(int i) {
+    return windowTexel(3 * i + 1).z;
+}
+
+float windowDepth(int i) {
+    return windowTexel(3 * i + 1).w;
+}
+
+vec2 windowVelocity(int i) {
+    return windowTexel(3 * i + 2).xy;
 }
 
 // Distance from px to a rect's edge, rounded by `radius`: negative inside it.
@@ -130,8 +168,7 @@ float rectDistance(vec2 px, vec4 rect, float radius) {
 // Distance to window i, pushed away as it fades, so a window fading in grows
 // out of nothing and one fading out sinks away.
 float windowDistance(vec2 px, int i) {
-    vec4 extra = windowTexel(2 * i + 1);
-    return rectDistance(px, windowTexel(2 * i), extra.y) + (1.0 - extra.x) * 200.0;
+    return rectDistance(px, windowRect(i), windowRounding(i)) + (1.0 - windowAlpha(i)) * 200.0;
 }
 
 // Distance to the nearest window: negative inside one.

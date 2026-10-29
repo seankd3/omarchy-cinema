@@ -33,7 +33,11 @@
 #include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/SessionLockManager.hpp>
+#include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/protocols/InputMethodV2.hpp>
+#include <hyprland/src/pointer/PointerManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -56,6 +60,7 @@
 #include <array>
 #include <chrono>
 #include <cstring>
+#include <deque>
 #include <cmath>
 #include <filesystem>
 #include <format>
@@ -76,7 +81,22 @@ namespace {
     // by at most a fifth of a second of slow motion, blurred.
     constexpr double GLASS_EVERY = 0.2; // seconds
     constexpr double FOCUS_EASE  = 0.32; // seconds
-    // Texels per row of the window data texture: two per window.
+    // A window's and the pointer's velocity ease over this long, so one late
+    // frame does not spike them.
+    constexpr double VELOCITY_EASE = 0.08; // seconds
+    // What happened lately (specs/depth.md, part 1): the last IMPULSES things,
+    // each gone IMPULSE_LIFE after it happened. Kinds as contract.glsl names them.
+    constexpr size_t IMPULSES     = 32;
+    constexpr double IMPULSE_LIFE = 3.0; // seconds
+    enum eImpulse : int {
+        IMPULSE_OPEN = 1,
+        IMPULSE_CLOSE,
+        IMPULSE_LAND,
+        IMPULSE_FOCUS,
+        IMPULSE_TYPE,
+        IMPULSE_VOICE,
+    };
+    // Texels per row of the window data texture: three per window.
     constexpr int    DATA_WIDTH = 256;
     // The feed's snapshot: "CFD1", generation (u64), count and next position
     // (u32), little-endian like this machine, then the ring of characters.
@@ -106,12 +126,17 @@ void main() {
 
     using Rect = std::array<float, 4>;
 
-    // A window as the backdrop sees it: where it is drawn, how faded, how round.
+    // A window as the backdrop sees it: where it is drawn, how faded, how round,
+    // how it moves, how far it is lifted toward the viewer and how deep in the
+    // stack it sits (0 on top).
     struct SShape {
-        Rect  rect{};
-        float alpha    = 1;
-        float rounding = 0;
-        bool  operator==(const SShape&) const = default;
+        Rect                 rect{};
+        float                alpha    = 1;
+        float                rounding = 0;
+        std::array<float, 2> velocity{};
+        float                lift  = 0;
+        float                depth = 0;
+        bool                 operator==(const SShape&) const = default;
     };
 
     // What the backdrop shows on one monitor, apart from its own motion.
@@ -124,9 +149,37 @@ void main() {
         bool                operator==(const SScene&) const = default;
     };
 
+    // What the world answers besides the windows: a change here redraws the
+    // backdrop and leaves the glass on its own refresh (specs/depth.md, part 6).
+    struct SAnswer {
+        std::array<float, 4> pointer{}; // x, y, velocity x, y
+        uint64_t             impulses = 0; // the impulse ring's generation
+        bool                 operator==(const SAnswer&) const = default;
+    };
+
+    // How something moves between frames, so its velocity is known and its
+    // lift eases. Kept by a window's stable id, and per monitor for the pointer.
+    struct SMotion {
+        Vector2D                              at;
+        std::array<float, 2>                  velocity{};
+        float                                 lift   = 0;
+        bool                                  moving = false;
+        std::chrono::steady_clock::time_point seen;
+    };
+
+    struct SImpulse {
+        Vector2D                              at; // global logical px
+        std::chrono::steady_clock::time_point start;
+        float                                 strength = 1;
+        int                                   kind     = 0;
+    };
+
     struct SMonitor {
         SScene                                pending; // read for the frame being drawn
         SScene                                drawn;
+        SAnswer                               answer; // read for the frame being drawn
+        SAnswer                               answered;
+        SMotion                               pointer;
         // What the focus decoration follows: the focused window, or, once it
         // has closed with nothing else focused here, its fadeout until that
         // has faded. A source is a window's stable id, which its fadeout
@@ -145,6 +198,7 @@ void main() {
         GLuint   id = 0, vao = 0, vbo = 0, data = 0, feed = 0, glyphs = 0;
         GLint    proj, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
         GLint    feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
+        GLint    pointer, impulses, impulseKinds, impulseCount;
         uint64_t feedUploaded = 0; // the feed change in the texture
         bool     glyphsUploaded = false;
     };
@@ -176,6 +230,10 @@ void main() {
         std::chrono::steady_clock::time_point   lastTick, lastGlass, lastPowerCheck;
         wl_event_source*                        timer = nullptr;
         std::unordered_map<MONITORID, SMonitor> monitors;
+        std::unordered_map<uint64_t, SMotion>   motion; // each window's, by stable id
+        std::deque<SImpulse>                    impulses;
+        uint64_t                                impulseGeneration = 0;
+        uint64_t                                typed             = 0; // TYPE impulses so far
         // Hyprland keeps a closed window's rounding inside its fadeout, out of
         // reach, so the plugin keeps it beside: each window fadeout's rounding
         // from the moment it is made until Hyprland lets it go.
@@ -405,6 +463,10 @@ void main() {
         p.feedPos      = glGetUniformLocation(p.id, "feedPos");
         p.glyphsUniform = glGetUniformLocation(p.id, "glyphs");
         p.feedPresence  = glGetUniformLocation(p.id, "feedPresence");
+        p.pointer       = glGetUniformLocation(p.id, "pointer");
+        p.impulses      = glGetUniformLocation(p.id, "impulses");
+        p.impulseKinds  = glGetUniformLocation(p.id, "impulseKinds");
+        p.impulseCount  = glGetUniformLocation(p.id, "impulseCount");
 
         GLint vao = 0, buffer = 0;
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
@@ -429,6 +491,59 @@ void main() {
 
     float easeOut(float t) {
         return 1.F - std::pow(1.F - t, 3.F);
+    }
+
+    // Moves `m` to `at` as seen `now`: its velocity eases toward the move over
+    // the time since it was last seen, and its lift toward `lifted`. Returns
+    // whether it stopped this frame after moving. A first sighting, or one
+    // after a long gap, starts still; a second reading in the same frame (a
+    // window on two monitors) changes nothing.
+    bool step(SMotion& m, const Vector2D& at, bool lifted, std::chrono::steady_clock::time_point now) {
+        const double dt = std::chrono::duration<double>(now - m.seen).count();
+        if (m.seen == std::chrono::steady_clock::time_point{} || dt > 0.25) {
+            m = {.at = at, .lift = m.lift, .seen = now};
+            return false;
+        }
+        if (dt < 0.001)
+            return false;
+        const bool   moving = at != m.at;
+        const double k      = 1.0 - std::exp(-dt / VELOCITY_EASE);
+        const auto   moved  = (at - m.at) / dt;
+        m.velocity[0] += float((moved.x - m.velocity[0]) * k);
+        m.velocity[1] += float((moved.y - m.velocity[1]) * k);
+        if (!moving && std::hypot(m.velocity[0], m.velocity[1]) < 1.F)
+            m.velocity = {};
+        const float target = lifted ? 1.F : 0.F;
+        m.lift += float((target - m.lift) * (1.0 - std::exp(-dt / (FOCUS_EASE / 3.0))));
+        if (std::abs(target - m.lift) < 0.002F)
+            m.lift = target;
+        const bool landed = m.moving && !moving;
+        m.moving          = moving;
+        m.at              = at;
+        m.seen            = now;
+        return landed;
+    }
+
+    // Something happened at `at`: every film answers it its own way. The
+    // monitor it happened on draws again now; its age rides the backdrop's
+    // own frames after that.
+    void addImpulse(const Vector2D& at, float strength, int kind) {
+        if (!g || g->source.empty())
+            return;
+        g->impulses.push_back({.at = at, .start = std::chrono::steady_clock::now(), .strength = strength, .kind = kind});
+        if (g->impulses.size() > IMPULSES)
+            g->impulses.pop_front();
+        g->impulseGeneration++;
+        if (const auto monitor = State::monitorState()->query().vec(at).run())
+            g_pHyprRenderer->damageMonitor(monitor);
+    }
+
+    // A window's middle, where it is or where it is going, for the impulses it
+    // makes; only for a window on a workspace being shown.
+    void windowImpulse(const PHLWINDOW& w, Desktop::View::IGeometric::eGeometricValueType state, float strength, int kind) {
+        if (!w || !w->m_workspace || !w->m_workspace->visible())
+            return;
+        addImpulse(w->position(state) + w->size(state) / 2.0, strength, kind);
     }
 
     bool isWindowFadeout(const SP<Desktop::IFadeout>& fadeout) {
@@ -466,6 +581,7 @@ void main() {
     // The windows Hyprland draws on this monitor in this frame, and those
     // fading out after closing, where they are drawn; and where attention is.
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {
+        const auto now = std::chrono::steady_clock::now();
         SScene     scene;
         const auto focused = Desktop::focusState()->window();
         PHLWINDOW  focusedHere;
@@ -485,8 +601,16 @@ void main() {
                 scene.focusedIndex = scene.shapes.size();
                 focusedHere        = w;
             }
-            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding()});
+            auto& motion = g->motion[w->metadata().stableID()];
+            if (step(motion, position + monitor->m_position, w == focused, now))
+                addImpulse(position + monitor->m_position + size / 2.0, std::clamp(float(std::hypot(motion.velocity[0], motion.velocity[1]) / 3000.0), 0.25F, 1.F),
+                           IMPULSE_LAND);
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(), motion.velocity,
+                                    motion.lift});
         }
+        // Depth in the stack, 0 on top: Hyprland draws its windows bottom first.
+        for (size_t i = 0; i < scene.shapes.size(); i++)
+            scene.shapes[i].depth = float(scene.shapes.size() - 1 - i);
 
         // Closed windows fading out, on the workspaces Hyprland draws them on:
         // the active one and every special workspace still visible, even one
@@ -520,7 +644,6 @@ void main() {
         // moves is followed exactly. Its presence is the window's own opacity,
         // fading with it after it closes; with nothing focused here (focus on
         // another screen, or the last window gone) it eases away.
-        const auto now = std::chrono::steady_clock::now();
         if (!state.seen) {
             state.seen       = true;
             state.focusFrom  = target;
@@ -541,6 +664,22 @@ void main() {
         return scene;
     }
 
+    // The pointer over this monitor and the impulse ring as it stands, after
+    // letting go of impulses that have run out.
+    SAnswer readAnswer(PHLMONITOR monitor, SMonitor& state) {
+        const auto now = std::chrono::steady_clock::now();
+        while (!g->impulses.empty() && std::chrono::duration<double>(now - g->impulses.front().start).count() > IMPULSE_LIFE) {
+            g->impulses.pop_front();
+            g->impulseGeneration++;
+        }
+        // A window not drawn for ten seconds is closed or out of sight; it
+        // starts still if it comes back.
+        std::erase_if(g->motion, [&](const auto& entry) { return now - entry.second.seen > std::chrono::seconds(10); });
+        const auto at = Pointer::mgr()->untransformedPosition() - monitor->m_position;
+        step(state.pointer, at, false, now);
+        return {{float(at.x), float(at.y), state.pointer.velocity[0], state.pointer.velocity[1]}, g->impulseGeneration};
+    }
+
     bool covered(PHLMONITOR monitor) {
         return Fullscreen::controller()->getFullscreenModes(monitor).internal == Fullscreen::FSMODE_FULLSCREEN;
     }
@@ -557,7 +696,8 @@ void main() {
         monitor->m_blurFBShouldRender = true;
     }
 
-    // Uploads the shapes, two texels each: (x, y, w, h) and (alpha, rounding).
+    // Uploads the shapes, three texels each: (x, y, w, h), (alpha, rounding,
+    // lift, depth) and (velocity x, y).
     // Fills the texture bound on the active unit from `data`, with the
     // unpack state set plainly and put back after, since Hyprland's own
     // uploads rely on what they set.
@@ -588,14 +728,19 @@ void main() {
     }
 
     void uploadShapes(const std::vector<SShape>& shapes) {
-        const int          texels = std::max<int>(2 * shapes.size(), 1);
+        const int          texels = std::max<int>(3 * shapes.size(), 1);
         const int          width  = std::min(texels, DATA_WIDTH);
         const int          height = (texels + DATA_WIDTH - 1) / DATA_WIDTH;
         std::vector<float> data(size_t(width) * height * 4, 0.F);
         for (size_t i = 0; i < shapes.size(); i++) {
-            std::copy(shapes[i].rect.begin(), shapes[i].rect.end(), data.begin() + i * 8);
-            data[i * 8 + 4] = shapes[i].alpha;
-            data[i * 8 + 5] = shapes[i].rounding;
+            const auto at = data.begin() + i * 12;
+            std::copy(shapes[i].rect.begin(), shapes[i].rect.end(), at);
+            at[4] = shapes[i].alpha;
+            at[5] = shapes[i].rounding;
+            at[6] = shapes[i].lift;
+            at[7] = shapes[i].depth;
+            at[8] = shapes[i].velocity[0];
+            at[9] = shapes[i].velocity[1];
         }
         upload(GL_RGBA32F, width, height, GL_RGBA, GL_FLOAT, data.data(), GL_NEAREST);
     }
@@ -779,7 +924,7 @@ vec4 cinemaGlass(vec4 c) {{
 
     class CBackdropPass : public IPassElement {
       public:
-        CBackdropPass(PHLMONITOR monitor, SScene scene) : m_monitor(monitor), m_scene(std::move(scene)) {}
+        CBackdropPass(PHLMONITOR monitor, SScene scene, SAnswer answer) : m_monitor(monitor), m_scene(std::move(scene)), m_answer(answer) {}
 
         std::vector<UP<IPassElement>> draw(Render::CRenderContext& ctx) override {
             const auto monitor = m_monitor.lock();
@@ -854,6 +999,25 @@ vec4 cinemaGlass(vec4 c) {{
             glUniform1i(p.feedCount, lettered && feedPresence > 0 && p.feedUploaded ? int(g->feedCount) : 0);
             glUniform1i(p.feedPos, int(g->feedPos));
             glUniform1f(p.feedPresence, feedPresence);
+            glUniform4fv(p.pointer, 1, m_answer.pointer.data());
+            // The impulses with their ages now, on this monitor's coordinates:
+            // ages from the monotonic clock, so the hourly wrap of `time`
+            // never reaches them.
+            std::array<float, 4 * IMPULSES> impulses{};
+            std::array<int, IMPULSES>       kinds{};
+            int                             count = 0;
+            for (const auto& impulse : g->impulses) {
+                const auto at   = impulse.at - monitor->m_position;
+                const auto age  = std::chrono::duration<float>(now - impulse.start).count();
+                impulses[4 * count + 0] = float(at.x);
+                impulses[4 * count + 1] = float(at.y);
+                impulses[4 * count + 2] = age;
+                impulses[4 * count + 3] = impulse.strength;
+                kinds[count++]          = impulse.kind;
+            }
+            glUniform4fv(p.impulses, IMPULSES, impulses.data());
+            glUniform1iv(p.impulseKinds, IMPULSES, kinds.data());
+            glUniform1i(p.impulseCount, count);
 
             glBindVertexArray(p.vao);
             ctx.m_data.damage.forEachRect([&ctx](const auto& rect) {
@@ -898,6 +1062,7 @@ vec4 cinemaGlass(vec4 c) {{
       private:
         PHLMONITORREF m_monitor;
         SScene        m_scene;
+        SAnswer       m_answer;
     };
 
     void onPre(PHLMONITOR monitor) {
@@ -905,9 +1070,11 @@ vec4 cinemaGlass(vec4 c) {{
             return;
         auto& state   = g->monitors[monitor->m_id];
         state.pending = readScene(monitor, state);
-        if (state.pending == state.drawn)
-            return;
-        redraw(monitor);
+        state.answer  = readAnswer(monitor, state);
+        if (state.pending != state.drawn)
+            redraw(monitor);
+        else if (state.answer != state.answered)
+            g_pHyprRenderer->damageMonitor(monitor);
     }
 
     // The backdrop is drawn in the monitor's own frames. A workspace captured
@@ -919,9 +1086,10 @@ vec4 cinemaGlass(vec4 c) {{
         auto& ctx = event.context->get();
         if (ctx.readOnlyEffects() || !program())
             return;
-        auto& state = g->monitors[event.monitor->m_id];
-        state.drawn = state.pending;
-        Render::IHyprRenderer::addPassElement(ctx, makeUnique<CBackdropPass>(event.monitor, state.pending));
+        auto& state    = g->monitors[event.monitor->m_id];
+        state.drawn    = state.pending;
+        state.answered = state.answer;
+        Render::IHyprRenderer::addPassElement(ctx, makeUnique<CBackdropPass>(event.monitor, state.pending, state.answer));
     }
 
     // Plugged in: any mains or USB-C supply online.
@@ -1012,8 +1180,47 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     static auto CLOSE    = Event::bus()->m_events.window.close.listen([](PHLWINDOW window) {
         if (!g)
             return;
+        windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_CURRENT, 1.F, IMPULSE_CLOSE);
         claimFadeouts();
         g->closing = window;
+    });
+    static auto OPEN   = Event::bus()->m_events.window.open.listen([](PHLWINDOW window) { windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_GOAL, 1.F, IMPULSE_OPEN); });
+    static auto ACTIVE = Event::bus()->m_events.window.active.listen(
+        [](PHLWINDOW window, Desktop::eFocusReason) { windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_CURRENT, 0.6F, IMPULSE_FOCUS); });
+    // The pointer's light follows it in the same frame: a move draws its
+    // monitor again (a hardware cursor alone would not).
+    static auto MOVE = Event::bus()->m_events.input.mouse.move.listen([](const Vector2D& at, Event::SCallbackInfo&) {
+        if (!g || g->source.empty())
+            return;
+        if (const auto monitor = State::monitorState()->query().vec(at).run())
+            g_pHyprRenderer->damageMonitor(monitor);
+    });
+    // Typing (specs/depth.md, part 1): a printable key, with no modifier held
+    // but Shift (AltGr still types), into a client window holding the
+    // keyboard, with no input method grab and the session unlocked. The key
+    // only decides this; nothing of it is kept.
+    static auto KEY = Event::bus()->m_events.input.keyboard.key.listen([](const IKeyboard::SKeyEvent& event, Event::SCallbackInfo&) {
+        if (!g || g->source.empty() || event.state != WL_KEYBOARD_KEY_STATE_PRESSED || g_pSessionLockManager->isSessionLocked())
+            return;
+        const auto window   = Desktop::focusState()->window();
+        const auto keyboard = g_pSeatManager->m_keyboard.lock();
+        if (!window || !keyboard || !keyboard->m_xkbState || g_pSeatManager->m_state.keyboardFocus.lock() != window->wlSurface()->resource())
+            return;
+        if (const auto ime = g_pInputManager->m_relay.m_inputMethod.lock(); ime && ime->hasGrab())
+            return;
+        for (const char* mod : {XKB_MOD_NAME_CTRL, XKB_MOD_NAME_ALT, XKB_MOD_NAME_LOGO})
+            if (xkb_state_mod_name_is_active(keyboard->m_xkbState, mod, XKB_STATE_MODS_EFFECTIVE) > 0)
+                return;
+        const auto code = xkb_keysym_to_utf32(xkb_state_key_get_one_sym(keyboard->m_xkbState, event.keycode + 8));
+        if (code < 0x20 || code == 0x7f)
+            return;
+        // Along the window's lower edge, spread by the golden ratio so a burst
+        // of typing walks across it.
+        const auto   at    = window->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+        const auto   size  = window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+        const double along = std::fmod(0.5 + double(g->typed++) * 0.6180339887, 1.0);
+        if (window->m_workspace && window->m_workspace->visible())
+            addImpulse({at.x + size.x * along, at.y + size.y}, 0.5F, IMPULSE_TYPE);
     });
     static auto RELOADED = Event::bus()->m_events.config.reloaded.listen([] {
         if (g)

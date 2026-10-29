@@ -7,9 +7,14 @@ checked without a live session: an empty workspace, and workspace 1's layout
 the windows drawn as glass over it.
 
     uv run tools/preview.py <theme-dir> [seconds ...]
+    uv run tools/preview.py <theme-dir> --answers [seconds]
 
 Writes <theme-dir>/../../scratch/preview/<theme>-{empty,windows}-<t>.png at
-the P16's 2880 x 1800 (2304 x 1440 logical at 1.25).
+the P16's 2880 x 1800 (2304 x 1440 logical at 1.25). With --answers it writes
+<theme>-answers-<t>.png instead: the film answering the desktop
+(specs/depth.md) in four frames, at rest, a window dragged with the pointer on
+it, a window just landed with typing in the focused one, and a window opening,
+one closing and focus moving.
 """
 
 import re
@@ -61,7 +66,13 @@ def layout():
     ]
 
 
-def render(theme, t, windows, focused):
+# Impulse kinds, as contract.glsl names them.
+OPEN, CLOSE, LAND, FOCUS, TYPE, VOICE = range(1, 7)
+
+
+def render(theme, t, windows, focused, velocity=None, pointer=None, impulses=()):
+    """velocity: (vx, vy) per window; pointer: (x, y, vx, vy); impulses:
+    (x, y, age, strength, kind), newest last."""
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     contract = (ROOT / "plugin/contract.glsl").read_text().replace("#version 300 es", "#version 330 core")
     source = contract + "\n#line 1\n" + (theme / "backdrop.frag").read_text()
@@ -84,11 +95,20 @@ def render(theme, t, windows, focused):
     for name, value in values.items():
         if name in program:
             program[name].value = value
+    if "pointer" in program:
+        program["pointer"].value = pointer or (LOGICAL[0] * 0.5, LOGICAL[1] * 0.5, 0.0, 0.0)
+    if "impulseCount" in program:
+        program["impulseCount"].value = len(impulses)
+        rows = [tuple(i[:4]) for i in impulses] + [(0.0, 0.0, 0.0, 0.0)] * (32 - len(impulses))
+        program["impulses"].write(np.array(rows, dtype="f4").tobytes())
+        kinds = [int(i[4]) for i in impulses] + [0] * (32 - len(impulses))
+        program["impulseKinds"].write(np.array(kinds, dtype="i4").tobytes())
 
-    data = np.zeros((max(2 * len(windows), 1), 4), dtype="f4")
+    data = np.zeros((max(3 * len(windows), 1), 4), dtype="f4")
     for i, rect in enumerate(windows):
-        data[2 * i] = rect
-        data[2 * i + 1] = (1.0, 0.0, 0.0, 0.0)
+        data[3 * i] = rect
+        data[3 * i + 1] = (1.0, 0.0, 1.0 if i == focused else 0.0, float(len(windows) - 1 - i))
+        data[3 * i + 2] = (*(velocity[i] if velocity else (0.0, 0.0)), 0.0, 0.0)
     texture = ctx.texture((len(data), 1), 4, data.tobytes(), dtype="f4")
     texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
     texture.use(0)
@@ -146,11 +166,40 @@ def glass(image, windows, colors, focused):
     return out
 
 
+def answers(theme, t, out):
+    """The four storyboard frames side by side, two by two, at half size."""
+    windows = layout()
+    (lx, ly, lw, lh), (rx, ry, rw, rh) = windows[0], windows[1]
+    moved = list(windows)
+    moved[1] = (rx - 260, ry + 90, rw, rh)  # mid-drag, down and to the left
+    frames = [
+        render(theme, t, windows, 0),
+        render(theme, t, moved, 1, velocity=[(0, 0), (-1800, 600), (0, 0)], pointer=(moved[1][0] + 200, moved[1][1] + 18, -1800, 600)),
+        render(theme, t, windows, 0, pointer=(lx + lw * 0.6, ly + lh * 0.4, 0, 0),
+               impulses=[(rx + rw / 2, ry + rh / 2, 0.25, 0.8, LAND)]
+               + [(lx + lw * f, ly + lh, a, 0.5, TYPE) for f, a in ((0.2, 0.9), (0.42, 0.6), (0.64, 0.3), (0.86, 0.08))]),
+        render(theme, t, windows[:2], 1,
+               impulses=[(rx + rw / 2, ry + rh * 1.5 + GAP, 0.3, 1.0, CLOSE), (lx + lw / 2, ly + lh / 2, 0.5, 1.0, OPEN), (rx + rw / 2, ry + rh / 2, 0.15, 0.6, FOCUS)]),
+    ]
+    shown = [windows, moved, windows, windows[:2]]
+    tiles = [glass(image, wins, colors, f).resize((PIXELS[0] // 2, PIXELS[1] // 2)) for (image, colors), wins, f in zip(frames, shown, (0, 1, 0, 1))]
+    sheet = Image.new("RGB", PIXELS)
+    for k, tile in enumerate(tiles):
+        sheet.paste(tile, ((k % 2) * PIXELS[0] // 2, (k // 2) * PIXELS[1] // 2))
+    path = out / f"{theme.name}-answers-{t:g}.png"
+    sheet.save(path)
+    print(path)
+
+
 def main():
     theme = Path(sys.argv[1]).resolve()
-    times = [float(t) for t in sys.argv[2:]] or [12.0]
     out = ROOT / "scratch/preview"
     out.mkdir(parents=True, exist_ok=True)
+    if "--answers" in sys.argv:
+        for t in [float(a) for a in sys.argv[2:] if a != "--answers"] or [12.0]:
+            answers(theme, t, out)
+        return
+    times = [float(t) for t in sys.argv[2:]] or [12.0]
     for t in times:
         empty, _ = render(theme, t, [], 0)
         empty.save(out / f"{theme.name}-empty-{t:g}.png")

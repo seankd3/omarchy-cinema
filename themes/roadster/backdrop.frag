@@ -163,7 +163,7 @@ vec4 backdrop(vec2 px) {
     vec2 reach = abs(px - at) - vec2(1.4, 0.7) * size;
     if (size > 8.0 && max(reach.x, reach.y) < 24.0) {
         float on = focusedIndex < 0 ? inside
-            : 1.0 - smoothstep(-1.0, 1.0, rectDistance(px, windowRect(focusedIndex), windowTexel(2 * focusedIndex + 1).y));
+            : 1.0 - smoothstep(-1.0, 1.0, rectDistance(px, windowRect(focusedIndex), windowRounding(focusedIndex)));
         float shown = mix(1.0, 0.35 * focusAlpha * on, present);
         vec2 d = wedge(px, at, size);
         light += mix(red, WHITE, 0.65) * glowLine(d.x, 1.3) * shown;
