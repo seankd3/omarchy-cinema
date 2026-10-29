@@ -3,6 +3,12 @@
 produced, as a ring of characters, for themes whose backdrop draws text (The
 Matrix rains it). specs/agent-rain.md is the contract.
 
+It also sends how loud speech is while Voxtype records, and when speech starts
+and stops, for every film (specs/depth.md, "Voice"): its own small message on
+the same socket, from its own thread, apart from the text and its lettering
+gate. Only loudness and activity: Voxtype's audio bridge carries no audio or
+transcript, and nothing is kept.
+
 It follows the session logs the agents already write as they work, Claude
 Code's (child agents' too) and Codex's (T3 Code threads run on both), takes
 each record's text once from its canonical place, and sends the plugin a
@@ -13,9 +19,13 @@ only in this process and the plugin; nothing is written anywhere.
 import bisect
 import glob
 import json
+import math
 import os
+import select
 import socket
 import struct
+import subprocess
+import threading
 import time
 
 HOME = os.path.expanduser("~")
@@ -33,6 +43,10 @@ LETTERED = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.join(HOME, ".lo
 SEND_EVERY = 0.25  # at most four snapshots a second
 ALIVE_EVERY = 5.0  # the current snapshot again, so the plugin knows the feed is up
 VERSION = b"CFD1"  # magic, then generation u64, count u32, next position u32
+VOICE = b"CVO1"  # magic, then loudness f32 (0 to 1), speaking u32 (0 or 1)
+VOXTYPE_STATE = os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"), "voxtype/state")
+RECORDING = {"recording", "streaming"}  # Voxtype's states that take speech in
+VOICE_EVERY = 1 / 60  # at most sixty loudness readings a second
 
 
 class History:
@@ -177,7 +191,76 @@ class Log:
         return out
 
 
+def loudness(rms):
+    """Voxtype's RMS as 0 to 1: -50 dBFS (a quiet room) to -10 (loud speech)."""
+    if rms <= 0:
+        return 0.0
+    return min(max((20 * math.log10(rms) + 50) / 40, 0.0), 1.0)
+
+
+def voice():
+    """While Voxtype records, follow its audio bridge and send the plugin the
+    latest loudness, at most VOICE_EVERY apart, and each change of speaking at
+    once; when recording stops or the bridge goes, send silence."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    sock.setblocking(False)
+
+    def send(level, speaking):
+        try:
+            sock.sendto(VOICE + struct.pack("<fI", level, 1 if speaking else 0), SOCKET)
+        except (BlockingIOError, FileNotFoundError, ConnectionRefusedError, OSError):
+            pass
+
+    while True:
+        try:
+            with open(VOXTYPE_STATE) as file:
+                state = file.read().strip()
+        except OSError:
+            state = ""
+        if state not in RECORDING:
+            time.sleep(0.1)
+            continue
+        try:
+            bridge = subprocess.Popen(["voxtype-audio-bridge"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        except OSError:
+            time.sleep(1.0)  # no bridge installed: no voice
+            continue
+        speaking, last = False, 0.0
+        try:
+            while True:
+                # Whether or not frames come, recording stopping ends this.
+                try:
+                    with open(VOXTYPE_STATE) as file:
+                        if file.read().strip() not in RECORDING:
+                            break
+                except OSError:
+                    break
+                if not select.select([bridge.stdout], [], [], 0.2)[0]:
+                    continue
+                line = bridge.stdout.readline()
+                if not line:
+                    break  # the bridge exited
+                try:
+                    frame = json.loads(line)
+                except ValueError:
+                    continue
+                if frame.get("status") == "disconnected":
+                    break
+                if "rms" not in frame:
+                    continue
+                now = time.monotonic()
+                vad = bool(frame.get("vad"))
+                if vad != speaking or now - last >= VOICE_EVERY:
+                    send(loudness(float(frame["rms"])), vad)
+                    speaking, last = vad, now
+        finally:
+            bridge.kill()
+            bridge.wait()
+            send(0.0, False)
+
+
 def main():
+    threading.Thread(target=voice, daemon=True).start()
     history = History()
     logs = {}
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)

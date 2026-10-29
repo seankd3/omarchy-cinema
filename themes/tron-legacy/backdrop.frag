@@ -7,8 +7,9 @@
 // them, each casts its shadow toward the viewer, further and softer as focus
 // lifts it; a moving window leaves its circuit behind it as a light trail;
 // landing sends a wave of light out through the grid, typing taps small
-// ones, opening draws a ring in, closing derezzes one out, focus flashes the
-// circuit, and the grid lights up under the pointer.
+// ones, opening draws a ring in, closing derezzes one out, speaking sends one
+// and the horizon glows with your voice, focus flashes the circuit, and the
+// grid lights up under the pointer.
 
 const vec3 ORANGE = vec3(1.0, 0.52, 0.10);
 const float CELL = 40.0; // grid spacing on the floor, in floor units
@@ -83,6 +84,7 @@ float gridLit(vec2 px) {
         if (kind == LAND) lit += 4.0 * e.w * wave(px, foot(e.xy), e.z, 900.0, 40.0);
         else if (kind == TYPE) lit += 2.0 * e.w * wave(px, e.xy, e.z, 420.0, 14.0) * step(e.z, 0.8);
         else if (kind == CLOSE) lit += 3.0 * wave(px, foot(e.xy), e.z, 1500.0, 30.0);
+        else if (kind == VOICE) lit += 2.5 * wave(px, foot(e.xy), e.z, 700.0, 50.0);
         else if (kind == OPEN && e.z < 0.6) {
             // Drawn in: the ring closes on the window's foot as it opens.
             float r = length((px - foot(e.xy)) * vec2(1.0, 2.4));
@@ -146,7 +148,8 @@ vec4 backdrop(vec2 px) {
     } else {
         // Black sky, a band of light along the horizon, faint high cloud.
         float above = horizon - px.y;
-        light += cyan * 0.22 * exp(-above / 50.0);
+        // The horizon glows with your voice while you dictate.
+        light += cyan * 0.22 * exp(-above / (50.0 + 60.0 * voice)) * (1.0 + 2.5 * voice);
         light += cyan * 0.03 * noise(px * 0.004 + orbit(120.0, 2.0)) * exp(-above / 400.0);
     }
 

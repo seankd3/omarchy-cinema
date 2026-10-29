@@ -105,6 +105,10 @@ namespace {
     constexpr int    FEED_BUDGET = 8; // datagrams taken per wakeup, at most
     constexpr auto   FEED_STALE  = std::chrono::seconds(10);
     constexpr float  FEED_EASE   = 3.F; // seconds for the text to come or drain away
+    // Voice (specs/depth.md): "CVO1", loudness (f32, 0 to 1), speaking (u32).
+    // A reading older than VOICE_STALE is silence: the feed or Voxtype stopped.
+    constexpr size_t VOICE_SIZE  = 12;
+    constexpr auto   VOICE_STALE = std::chrono::milliseconds(500);
     // The lettering is 16 by 6 cells; anything larger than this is not an
     // atlas, and is refused from its header before it is decoded.
     constexpr uint32_t GLYPHS_MAX_WIDTH = 1024, GLYPHS_MAX_HEIGHT = 512;
@@ -154,6 +158,7 @@ void main() {
     struct SAnswer {
         std::array<float, 4> pointer{}; // x, y, velocity x, y
         uint64_t             impulses = 0; // the impulse ring's generation
+        float                voice    = 0; // speech loudness, 0 to 1
         bool                 operator==(const SAnswer&) const = default;
     };
 
@@ -198,7 +203,7 @@ void main() {
         GLuint   id = 0, vao = 0, vbo = 0, data = 0, feed = 0, glyphs = 0;
         GLint    proj, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
         GLint    feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
-        GLint    pointer, impulses, impulseKinds, impulseCount;
+        GLint    pointer, impulses, impulseKinds, impulseCount, voice;
         uint64_t feedUploaded = 0; // the feed change in the texture
         bool     glyphsUploaded = false;
     };
@@ -234,6 +239,10 @@ void main() {
         std::deque<SImpulse>                    impulses;
         uint64_t                                impulseGeneration = 0;
         uint64_t                                typed             = 0; // TYPE impulses so far
+        // Voxtype's speech, as the feed last sent it.
+        float                                   voice    = 0;
+        bool                                    speaking = false;
+        std::chrono::steady_clock::time_point   voiceReceived;
         // Hyprland keeps a closed window's rounding inside its fadeout, out of
         // reach, so the plugin keeps it beside: each window fadeout's rounding
         // from the moment it is made until Hyprland lets it go.
@@ -467,6 +476,7 @@ void main() {
         p.impulses      = glGetUniformLocation(p.id, "impulses");
         p.impulseKinds  = glGetUniformLocation(p.id, "impulseKinds");
         p.impulseCount  = glGetUniformLocation(p.id, "impulseCount");
+        p.voice         = glGetUniformLocation(p.id, "voice");
 
         GLint vao = 0, buffer = 0;
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
@@ -677,7 +687,8 @@ void main() {
         std::erase_if(g->motion, [&](const auto& entry) { return now - entry.second.seen > std::chrono::seconds(10); });
         const auto at = Pointer::mgr()->untransformedPosition() - monitor->m_position;
         step(state.pointer, at, false, now);
-        return {{float(at.x), float(at.y), state.pointer.velocity[0], state.pointer.velocity[1]}, g->impulseGeneration};
+        const float voice = now - g->voiceReceived <= VOICE_STALE ? g->voice : 0.F;
+        return {{float(at.x), float(at.y), state.pointer.velocity[0], state.pointer.velocity[1]}, g->impulseGeneration, voice};
     }
 
     bool covered(PHLMONITOR monitor) {
@@ -749,6 +760,27 @@ void main() {
     // FEED_BUDGET datagrams a wakeup, never waiting: a truncated, oversized or
     // malformed one is dropped, and any valid one, a repeat too, says the
     // feed is alive.
+    // A voice reading: the loudness now, and speech starting is an impulse
+    // where dictated text arrives, along the focused window's lower edge.
+    void onVoice(const uint8_t* data) {
+        float    level    = 0;
+        uint32_t speaking = 0;
+        std::memcpy(&level, data, 4);
+        std::memcpy(&speaking, data + 4, 4);
+        if (!std::isfinite(level))
+            return;
+        g->voice         = std::clamp(level, 0.F, 1.F);
+        g->voiceReceived = std::chrono::steady_clock::now();
+        if (speaking && !g->speaking) {
+            if (const auto window = Desktop::focusState()->window(); window && window->m_workspace && window->m_workspace->visible()) {
+                const auto at   = window->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+                const auto size = window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+                addImpulse({at.x + size.x / 2.0, at.y + size.y}, 1.F, IMPULSE_VOICE);
+            }
+        }
+        g->speaking = speaking != 0;
+    }
+
     int onFeed(int fd, uint32_t, void*) {
         if (!g)
             return 0;
@@ -757,6 +789,10 @@ void main() {
             const ssize_t length = recv(fd, buffer.data(), buffer.size(), MSG_DONTWAIT | MSG_TRUNC);
             if (length < 0)
                 break;
+            if (size_t(length) == VOICE_SIZE && std::memcmp(buffer.data(), "CVO1", 4) == 0) {
+                onVoice(buffer.data() + 4);
+                continue;
+            }
             if (size_t(length) != buffer.size() || std::memcmp(buffer.data(), "CFD1", 4) != 0)
                 continue;
             uint64_t generation = 0;
@@ -1000,6 +1036,7 @@ vec4 cinemaGlass(vec4 c) {{
             glUniform1i(p.feedPos, int(g->feedPos));
             glUniform1f(p.feedPresence, feedPresence);
             glUniform4fv(p.pointer, 1, m_answer.pointer.data());
+            glUniform1f(p.voice, m_answer.voice);
             // The impulses with their ages now, on this monitor's coordinates:
             // ages from the monotonic clock, so the hourly wrap of `time`
             // never reaches them.

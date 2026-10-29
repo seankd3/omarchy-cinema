@@ -67,6 +67,12 @@ uniform vec4 impulses[32]; // x, y, age, strength
 uniform int impulseKinds[32];
 uniform int impulseCount;
 
+// How loud speech is while Voxtype records, 0 to 1 (0 when it does not). Only
+// loudness: nothing of what is said reaches the shader. A VOICE impulse marks
+// each start of speech, along the focused window's lower edge, where the
+// dictated text arrives.
+uniform float voice;
+
 // Text a backdrop can draw: the newest plaintext of the agents on this machine
 // (specs/agent-rain.md), a ring of 16384 characters 128 to a row, of which
 // feedCount are real and the next goes at feedPos. When the agents stop, the
