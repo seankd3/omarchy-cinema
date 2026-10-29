@@ -106,9 +106,10 @@ age).
   world never feeds back into it. The plugin draws that tree, scaled to the
   window, into a small cell of a colour atlas in the backdrop pass, and
   `windowColor(i)` reads the cell.
-  - *When.* Every window drawn on the monitor is measured again about four
-    times a second, round robin, at most 8 windows a frame, in the frames the
-    backdrop draws anyway; no commit tracking. A colour that changed by more
+  - *When.* Round robin over the windows drawn on the monitor, 8 a frame, in
+    the frames the backdrop draws anyway; no commit tracking. So a window is
+    measured again within ceil(windows / 8) backdrop frames: every frame with
+    up to 8 windows, a quarter of a second for 60 windows at 30 fps. A colour that changed by more
     than 1/255 on any channel is an answer that changed (part 6): the monitor
     draws again, and the glass follows on its own refresh. With animations off,
     when the world holds still, its light holds still too (last colours stay).
