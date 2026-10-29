@@ -292,8 +292,7 @@ vec4 backdrop(vec2 px) {
     if (pane >= 0) {
         vec4 r = windowRect(pane);
         vec2 at = px - r.xy;
-        float streak = dot(at, vec2(0.70710678)) / (r.z + r.w) * 1.2 + dot(r.xy, vec2(0.70710678)) / (resolution.x + resolution.y) * 0.8;
-        float band = exp(-pow((fract(streak + 0.2) - 0.5) * 7.0, 2.0));
+        float band = glassStreak(px, r);
         light += HEAD * (0.05 * exp(-at.y / 60.0) + 0.035 * band) * windowAlpha(pane);
     }
 
@@ -335,18 +334,8 @@ vec4 frame(vec2 px, int i) {
     bool focus = i == focusedIndex;
     float lift = windowLift(i);
 
-    // What just happened to this window, newest first; all of it is over
-    // within a second.
-    float flare = 0.0;
-    vec2 middle = r.xy + r.zw * 0.5;
-    for (int k = impulseCount - 1; k >= 0; k--) {
-        int kind = impulseKinds[k];
-        vec4 ev = impulses[k];
-        if (ev.z > 1.0) break;
-        if ((kind != FOCUS && kind != OPEN && kind != LAND) || length(ev.xy - middle) > 2.0 + length(r.zw) * 0.02) continue;
-        flare += kind == LAND ? 2.0 * ev.w * exp(-ev.z * 4.0)
-            : 0.6 * smoothstep(0.0, 0.12, ev.z) * exp(-ev.z * 3.5) * (kind == OPEN ? 1.0 : ev.w);
-    }
+    // What just happened to this window, all over within a second.
+    float flare = windowFlare(i, 2.0);
 
     float toward = 0.55 + 0.45 * clamp(dot(n, -LIGHT), 0.0, 1.0);
     float strength = (focus ? 0.9 + 0.6 * lift : 0.45) * toward * (1.0 + flare);

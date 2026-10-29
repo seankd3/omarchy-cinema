@@ -88,8 +88,7 @@ vec3 sheen(vec2 px, int i) {
     vec4 r = windowRect(i);
     vec2 at = px - r.xy;
     float upper = exp(-at.y / 70.0) * (1.0 - 0.4 * at.x / r.z);
-    float streak = dot(at, vec2(0.70710678)) / (r.z + r.w) * 1.2 + dot(r.xy, vec2(0.70710678)) / (resolution.x + resolution.y) * 0.8;
-    float band = exp(-pow((fract(streak + 0.2) - 0.5) * 7.0, 2.0));
+    float band = glassStreak(px, r);
     return WARM_LIGHT * (0.06 * upper + 0.05 * band) * windowAlpha(i);
 }
 
@@ -312,18 +311,9 @@ vec4 frame(vec2 px, int i) {
     float lift = windowLift(i);
     float breath = focus ? voice : 0.0;
 
-    // What just happened to this window, newest first; all of it is over
-    // within a second.
-    float flare = 0.0;
+    // What just happened to this window, all over within a second.
+    float flare = windowFlare(i, 1.8);
     vec2 middle = r.xy + r.zw * 0.5;
-    for (int k = impulseCount - 1; k >= 0; k--) {
-        int kind = impulseKinds[k];
-        vec4 ev = impulses[k];
-        if (ev.z > 1.0) break;
-        if ((kind != FOCUS && kind != OPEN && kind != LAND) || length(ev.xy - middle) > 2.0 + length(r.zw) * 0.02) continue;
-        flare += kind == LAND ? 1.8 * ev.w * exp(-ev.z * 4.0)
-            : 0.6 * smoothstep(0.0, 0.12, ev.z) * exp(-ev.z * 3.5) * (kind == OPEN ? 1.0 : ev.w);
-    }
 
     vec3 tint = focus ? accent : PURPLE * 1.3;
     vec2 q = abs(px - middle) - r.zw * 0.5;

@@ -13,8 +13,8 @@ Writes <theme-dir>/../../scratch/preview/<theme>-{empty,windows}-<t>.png at
 the P16's 2880 x 1800 (2304 x 1440 logical at 1.25). With --answers it writes
 <theme>-answers-<t>.png instead: the film answering the desktop
 (specs/depth.md) in four frames, at rest, a window dragged with the pointer on
-it, a window just landed with typing in the focused one, and a window opening,
-one closing and focus moving.
+it, a window just landed while you type and speak into the focused one, and a
+window opening, one closing and focus moving.
 """
 
 import re
@@ -42,7 +42,18 @@ void main() {
 """
 # The plugin puts one of these after the film's shader (plugin/main.cpp).
 BACKDROP_MAIN = "\nvoid main() {\n    fragColor = backdrop(v_px);\n}\n"
-FRAME_MAIN = "\nuniform int frameWindow;\nuniform float frameAlpha;\nvoid main() {\n    fragColor = frame(v_px, frameWindow) * frameAlpha;\n}\n"
+FRAME_MAIN = """
+uniform int frameWindow;
+uniform float frameAlpha;
+uniform float frameBorder;
+void main() {
+    float d = rectDistance(v_px, windowRect(frameWindow), windowRounding(frameWindow));
+    float ring = smoothstep(-1.0, 0.0, d) * (1.0 - smoothstep(frameBorder, frameBorder + 1.0, d));
+    vec4 under = ring > 0.0 ? vec4(backdrop(v_px).rgb, 1.0) * ring : vec4(0.0);
+    vec4 edge = frame(v_px, frameWindow);
+    fragColor = (edge + under * (1.0 - edge.a)) * frameAlpha;
+}
+"""
 
 
 def palette(theme):
@@ -77,7 +88,7 @@ def framed(theme):
     return re.search(r"\bvec4\s+frame\s*\(", (theme / "backdrop.frag").read_text()) is not None
 
 
-def render(theme, t, windows, focused, velocity=None, pointer=None, impulses=(), frame=None):
+def render(theme, t, windows, focused, velocity=None, pointer=None, impulses=(), frame=None, voice=0.0):
     """velocity: (vx, vy) per window; pointer: (x, y, vx, vy); impulses:
     (x, y, age, strength, kind), newest last. With `frame` set to a window's
     index, renders that window's frame (RGBA, premultiplied) instead of the
@@ -89,6 +100,8 @@ def render(theme, t, windows, focused, velocity=None, pointer=None, impulses=(),
     if frame is not None:
         program["frameWindow"].value = frame
         program["frameAlpha"].value = 1.0
+        if "frameBorder" in program:
+            program["frameBorder"].value = 2.0
 
     colors = palette(theme)
     for name in ("accent", "background", "foreground"):
@@ -107,6 +120,8 @@ def render(theme, t, windows, focused, velocity=None, pointer=None, impulses=(),
     for name, value in values.items():
         if name in program:
             program[name].value = value
+    if "voice" in program:
+        program["voice"].value = voice
     if "pointer" in program:
         program["pointer"].value = pointer or (LOGICAL[0] * 0.5, LOGICAL[1] * 0.5, 0.0, 0.0)
     if "impulseCount" in program:
@@ -204,8 +219,8 @@ def answers(theme, t, out):
     scenes = [
         (windows, 0, {}),
         (moved, 1, dict(velocity=[(0, 0), (-1800, 600), (0, 0)], pointer=(moved[1][0] + 200, moved[1][1] + 18, -1800, 600))),
-        (windows, 0, dict(pointer=(lx + lw * 0.6, ly + lh * 0.4, 0, 0),
-                          impulses=[(rx + rw / 2, ry + rh / 2, 0.25, 0.8, LAND)]
+        (windows, 0, dict(pointer=(lx + lw * 0.6, ly + lh * 0.4, 0, 0), voice=0.7,
+                          impulses=[(lx + lw / 2, ly + lh, 0.6, 1.0, VOICE), (rx + rw / 2, ry + rh / 2, 0.25, 0.8, LAND)]
                           + [(lx + lw * f, ly + lh, a, 0.5, TYPE) for f, a in ((0.2, 0.9), (0.42, 0.6), (0.64, 0.3), (0.86, 0.08))])),
         (windows[:2], 1, dict(impulses=[(rx + rw / 2, ry + rh * 1.5 + GAP, 0.3, 1.0, CLOSE), (lx + lw / 2, ly + lh / 2, 0.5, 1.0, OPEN),
                                         (rx + rw / 2, ry + rh / 2, 0.15, 0.6, FOCUS)])),

@@ -66,6 +66,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <numeric>
 #include <regex>
 #include <sstream>
 #include <unordered_map>
@@ -135,7 +136,21 @@ void main() {
     // The two things a film's shader can draw: the world, and (if it defines
     // frame()) each window's edge in it, faded with the window.
     const char* BACKDROP_MAIN = "\nvoid main() {\n    fragColor = backdrop(v_px);\n}\n";
-    const char* FRAME_MAIN    = "\nuniform int frameWindow;\nuniform float frameAlpha;\nvoid main() {\n    fragColor = frame(v_px, frameWindow) * frameAlpha;\n}\n";
+    // The frame also paints the world over Hyprland's border ring, so a
+    // film's edge replaces the border wherever, and only where, it draws: with
+    // no plugin or no frame, the border shows as before.
+    const char* FRAME_MAIN = R"(
+uniform int frameWindow;
+uniform float frameAlpha;
+uniform float frameBorder;
+void main() {
+    float d = rectDistance(v_px, windowRect(frameWindow), windowRounding(frameWindow));
+    float ring = smoothstep(-1.0, 0.0, d) * (1.0 - smoothstep(frameBorder, frameBorder + 1.0, d));
+    vec4 under = ring > 0.0 ? vec4(backdrop(v_px).rgb, 1.0) * ring : vec4(0.0);
+    vec4 edge = frame(v_px, frameWindow);
+    fragColor = (edge + under * (1.0 - edge.a)) * frameAlpha;
+}
+)";
     // How far outside a window its frame may draw, in logical px.
     constexpr double FRAME_BAND = 48.0;
 
@@ -217,7 +232,7 @@ void main() {
         GLuint id = 0;
         GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
         GLint  feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
-        GLint  pointer, impulses, impulseKinds, impulseCount, voice, frameWindow, frameAlpha;
+        GLint  pointer, impulses, impulseKinds, impulseCount, voice, frameWindow, frameAlpha, frameBorder;
     };
 
     // What the film's programs draw with: the unit square and the textures,
@@ -248,6 +263,12 @@ void main() {
         SP<Config::Values::CIntValue>           batteryFps;
         // How much of a window's background stays: 1 solid, 0 clear glass.
         SP<Config::Values::CFloatValue>         glass;
+        // How far the windows' depth goes (specs/depth.md, "Tiers"): 0 is the
+        // backdrop alone, with no answers, no frames and no facts moving.
+        SP<Config::Values::CIntValue>           depth;
+        // Whether the world is going: animations on, the session unlocked and
+        // some monitor showing it. Nothing is collected while it is not.
+        bool                                    worldActive = true;
         std::string                             glassShader; // the surface shader in use, empty for Hyprland's own
         wl_event_source*                        glassIdle = nullptr;
         bool                                    plugged = true;
@@ -496,6 +517,7 @@ void main() {
         p.voice         = at("voice");
         p.frameWindow   = at("frameWindow");
         p.frameAlpha    = at("frameAlpha");
+        p.frameBorder   = at("frameBorder");
         return true;
     }
 
@@ -573,8 +595,20 @@ void main() {
     // Something happened at `at`: every film answers it its own way. The
     // monitor it happened on draws again now; its age rides the backdrop's
     // own frames after that.
+    // Whether the world answers the desktop now: depth on and the world going.
+    bool answering() {
+        return g && !g->source.empty() && g->depth->value() > 0 && g->worldActive;
+    }
+
+    void forgetImpulses() {
+        if (g->impulses.empty())
+            return;
+        g->impulses.clear();
+        g->impulseGeneration++;
+    }
+
     void addImpulse(const Vector2D& at, float strength, int kind) {
-        if (!g || g->source.empty())
+        if (!answering())
             return;
         g->impulses.push_back({.at = at, .start = std::chrono::steady_clock::now(), .strength = strength, .kind = kind});
         if (g->impulses.size() > IMPULSES)
@@ -631,8 +665,15 @@ void main() {
         SScene     scene;
         const auto focused = Desktop::focusState()->window();
         PHLWINDOW  focusedHere;
+        // Each shape's place in Hyprland's stacking, lowest first: tiled
+        // windows, then floating ones, then special workspaces, then pinned
+        // windows, each in the window list's order; closed windows fading out
+        // on the tiled or floating plane they left, at their old place.
+        std::vector<double> stacking;
+        double              order = 0;
 
         for (const auto& w : Desktop::windowState()->windows()) {
+            order++;
             if (!w->mapped() || w->isHidden() || !w->m_workspace || !g_pHyprRenderer->shouldRenderWindow(w, monitor))
                 continue;
             // Where and how faded renderWindow draws it, from the presentation
@@ -651,12 +692,12 @@ void main() {
             if (step(motion, position + monitor->m_position, w == focused, now))
                 addImpulse(position + monitor->m_position + size / 2.0, std::clamp(float(std::hypot(motion.velocity[0], motion.velocity[1]) / 3000.0), 0.25F, 1.F),
                            IMPULSE_LAND);
-            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(), motion.velocity,
-                                    motion.lift, 0.F, w->metadata().stableID()});
+            const bool still = g->depth->value() == 0;
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(),
+                                    still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, w->metadata().stableID()});
+            const int layer = (w->m_state & Desktop::View::WINDOW_STATE_PINNED) ? 3 : w->onSpecialWorkspace() ? 2 : w->isFloating() ? 1 : 0;
+            stacking.push_back(layer * 1e6 + order);
         }
-        // Depth in the stack, 0 on top: Hyprland draws its windows bottom first.
-        for (size_t i = 0; i < scene.shapes.size(); i++)
-            scene.shapes[i].depth = float(scene.shapes.size() - 1 - i);
 
         // Closed windows fading out, on the workspaces Hyprland draws them on:
         // the active one and every special workspace still visible, even one
@@ -676,7 +717,14 @@ void main() {
             // Only a fadeout already running when the plugin loaded has none.
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(),
                                     rounding != g->fadeoutRounding.end() ? rounding->second : float(*ROUNDING)});
+            stacking.push_back((fadeout->plane() == Desktop::FADEOUT_PLANE_WINDOW_TILED ? 0 : 1) * 1e6 + fadeout->zIndex() + 0.5);
         }
+        // Depth, 0 on top.
+        std::vector<size_t> rank(stacking.size());
+        std::iota(rank.begin(), rank.end(), 0);
+        std::ranges::sort(rank, {}, [&](size_t k) { return stacking[k]; });
+        for (size_t k = 0; k < rank.size(); k++)
+            scene.shapes[rank[k]].depth = float(rank.size() - 1 - k);
 
         if (focusedHere || scene.focusedIndex < 0)
             state.focusFadeout.reset(); // a new focus, or the fadeout is over
@@ -721,6 +769,10 @@ void main() {
         // A window not drawn for ten seconds is closed or out of sight; it
         // starts still if it comes back.
         std::erase_if(g->motion, [&](const auto& entry) { return now - entry.second.seen > std::chrono::seconds(10); });
+        if (!answering()) {
+            forgetImpulses();
+            return {{float(monitor->m_size.x / 2.0), float(monitor->m_size.y / 2.0), 0.F, 0.F}, g->impulseGeneration, 0.F};
+        }
         const auto at = Pointer::mgr()->untransformedPosition() - monitor->m_position;
         step(state.pointer, at, false, now);
         const float voice = now - g->voiceReceived <= VOICE_STALE ? g->voice : 0.F;
@@ -805,6 +857,11 @@ void main() {
         std::memcpy(&speaking, data + 4, 4);
         if (!std::isfinite(level))
             return;
+        if (!answering()) {
+            g->voice    = 0;
+            g->speaking = false;
+            return;
+        }
         g->voice         = std::clamp(level, 0.F, 1.F);
         g->voiceReceived = std::chrono::steady_clock::now();
         if (speaking && !g->speaking) {
@@ -1162,7 +1219,7 @@ vec4 cinemaGlass(vec4 c) {{
     // textures the backdrop drew this frame.
     class CFramePass : public IPassElement {
       public:
-        CFramePass(PHLMONITOR monitor, uint64_t window, float alpha) : m_monitor(monitor), m_window(window), m_alpha(alpha) {}
+        CFramePass(PHLMONITOR monitor, uint64_t window, float alpha, float border) : m_monitor(monitor), m_window(window), m_alpha(alpha), m_border(border) {}
 
         std::vector<UP<IPassElement>> draw(Render::CRenderContext& ctx) override {
             const auto monitor = m_monitor.lock();
@@ -1184,6 +1241,7 @@ vec4 cinemaGlass(vec4 c) {{
                 setUniforms(g->gpu.frame, monitor, state.drawn, state.answered, proj, area, now);
                 glUniform1i(g->gpu.frame.frameWindow, index);
                 glUniform1f(g->gpu.frame.frameAlpha, m_alpha);
+                glUniform1f(g->gpu.frame.frameBorder, m_border);
             });
             return {};
         }
@@ -1217,6 +1275,7 @@ vec4 cinemaGlass(vec4 c) {{
         PHLMONITORREF m_monitor;
         uint64_t      m_window;
         float         m_alpha;
+        float         m_border;
     };
 
     // The frame's place on every window: above it, below its popups, taking
@@ -1237,9 +1296,9 @@ vec4 cinemaGlass(vec4 c) {{
         // scene is not the monitor's.
         void draw(Render::CRenderContext& ctx, PHLMONITOR monitor, float const& a, const Render::SWindowRenderPresentation&) override {
             const auto window = owningWindow();
-            if (!g || !g->framed || !window || ctx.readOnlyEffects())
+            if (!g || !g->framed || g->depth->value() == 0 || !window || ctx.readOnlyEffects())
                 return;
-            Render::IHyprRenderer::addPassElement(ctx, makeUnique<CFramePass>(monitor, window->metadata().stableID(), a));
+            Render::IHyprRenderer::addPassElement(ctx, makeUnique<CFramePass>(monitor, window->metadata().stableID(), a, float(window->presentation().borderSize())));
         }
         eDecorationType getDecorationType() override {
             return DECORATION_CUSTOM;
@@ -1306,6 +1365,18 @@ vec4 cinemaGlass(vec4 c) {{
     // The backdrop's own motion. Time stands still while there is nothing to
     // see it on: animations off, the session locked, or every monitor asleep
     // or showing a fullscreen window. readTheme starts and stops the timer.
+    // The world stops answering while it stands still (specs/depth.md,
+    // impulses): what was pending is let go, and nothing is collected until it
+    // goes again, so nothing replays.
+    void setWorldActive(bool active) {
+        if (!active && g->worldActive) {
+            forgetImpulses();
+            g->voice    = 0;
+            g->speaking = false;
+        }
+        g->worldActive = active;
+    }
+
     int onTick(void*) {
         if (!g)
             return 0;
@@ -1325,8 +1396,10 @@ vec4 cinemaGlass(vec4 c) {{
         const float elapsed = std::min(std::chrono::duration<float>(now - g->lastTick).count(), 0.1F);
         g->lastTick         = now;
         static auto ANIMATIONS = CConfigValue<Config::INTEGER>("animations:enabled");
-        if (!*ANIMATIONS || g_pSessionLockManager->isSessionLocked())
+        if (!*ANIMATIONS || g_pSessionLockManager->isSessionLocked()) {
+            setWorldActive(false);
             return 0;
+        }
 
         const bool glass = now - g->lastGlass >= std::chrono::duration<double>(GLASS_EVERY);
         bool       seen  = false;
@@ -1340,6 +1413,7 @@ vec4 cinemaGlass(vec4 c) {{
         }
         if (glass)
             g->lastGlass = now;
+        setWorldActive(seen);
         if (seen)
             g->time = std::fmod(g->time + elapsed, 3600.F);
         return 0;
@@ -1367,7 +1441,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                             Config::Values::SFloatValueOptions{.min = 0.F, .max = 1.F});
     HyprlandAPI::addConfigValueV2(handle, g->fps);
     HyprlandAPI::addConfigValueV2(handle, g->batteryFps);
+    g->depth      = makeShared<Config::Values::CIntValue>("plugin:backdrop:depth", "How far windows' depth goes: 0 the backdrop alone (no answers or frames), 1 to 3 the tiers of specs/depth.md", 2,
+                                                         Config::Values::SIntValueOptions{.min = 0, .max = 3});
     HyprlandAPI::addConfigValueV2(handle, g->glass);
+    HyprlandAPI::addConfigValueV2(handle, g->depth);
     g->plugged  = plugged();
     g->lastTick = g->lastGlass = g->lastPowerCheck = std::chrono::steady_clock::now();
     g->timer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onTick, nullptr);

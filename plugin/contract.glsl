@@ -249,6 +249,23 @@ float glassStreak(vec2 px, vec4 r) {
     return exp(-pow((fract(across * 0.7 + 0.15) - 0.5) * 9.0, 2.0));
 }
 
+// How much window i flares from what just happened to it, within a second:
+// focus and opening as a soft swell, landing as `landing` times its strength.
+float windowFlare(int i, float landing) {
+    vec4 r = windowRect(i);
+    vec2 middle = r.xy + r.zw * 0.5;
+    float flare = 0.0;
+    for (int k = impulseCount - 1; k >= 0; k--) {
+        int kind = impulseKinds[k];
+        vec4 ev = impulses[k];
+        if (ev.z > 1.0) break;
+        if ((kind != FOCUS && kind != OPEN && kind != LAND) || length(ev.xy - middle) > 2.0 + length(r.zw) * 0.02) continue;
+        flare += kind == LAND ? landing * ev.w * exp(-ev.z * 4.0)
+            : 0.6 * smoothstep(0.0, 0.12, ev.z) * exp(-ev.z * 3.5) * (kind == OPEN ? 1.0 : ev.w);
+    }
+    return flare;
+}
+
 // A soft rise over `rise` seconds and fade until `life`, for brief answers.
 float swell(float age, float rise, float life) {
     return smoothstep(0.0, rise, age) * (1.0 - smoothstep(rise, life, age));
