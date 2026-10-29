@@ -66,10 +66,13 @@ Each is one fact with one source; nothing is stored that can be computed.
     typing). Placed along the focused window's lower edge; the keycode and
     keysym are used only to decide this and are not kept. `VOICE`: the voice-activity
     edges below.
-  - *Privacy.* Nothing about keys or voice is stored or logged: only that
-    typing or speech happened, and how loud. On a shared screen this tells a
-    viewer nothing the screen and the call do not already show (the typed
-    text appears in the app, the voice is heard).
+  - *Disclosure.* Nothing about keys or voice is stored or logged. The
+    screen does show that typing or speech is happening, when, and how loud,
+    to anyone who sees it, live or in a recording or share, password entry
+    included: the plugin cannot tell a password field, and Voxtype's
+    loudness shows whether or not a call carries the voice. That is the
+    boundary, stated rather than hidden; `plugin:backdrop:depth 0` turns
+    every answer off.
 - **Voice.** `voice`: Voxtype's speech loudness, 0 to 1. The feed service is
   the one door for outside input to the plugin; voice is its own small
   message on the same socket, independent of the agents' text snapshot and
