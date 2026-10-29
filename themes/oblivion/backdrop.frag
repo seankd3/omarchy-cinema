@@ -23,6 +23,17 @@
 // the pane's foot. The blue ink of every answer fades out in the last 16 px
 // before a pane, so the frost cannot pull it under text; their light may come
 // right up to the glass, since white only raises the text's contrast.
+//
+// The panes and the sky are one scene. The cloud deck flows round each pane,
+// bending and curling at its edges, and piles up white against them where it
+// catches the sun. The viewer leans toward the pointer and a dragged pane
+// pulls the deck after it, near rows more than far ones; the sky and the moon
+// stay put. Under each pane the glass catches a sheen that slides as the
+// pane moves and the sun's warm glow along the side facing it. Each pane's
+// edge is Tower 49's glass (frame()): a fine blue line, the sky bending
+// through the pane's thickness, the sun glinting on the edge that faces it,
+// and the light passing by outside, the gold of a focus or the scan ring,
+// catching it.
 
 const vec3 ZENITH = vec3(0.60, 0.70, 0.81);
 const vec3 SKY = vec3(0.80, 0.86, 0.91);
@@ -117,10 +128,12 @@ vec3 sky(vec2 px, float horizon, vec2 sun) {
     return col;
 }
 
-vec3 cloudDeck(vec2 px, float horizon, vec2 sun) {
+// The cloud deck below the horizon; `lean` moves the viewer across it (in
+// the deck's own units), so near rows shift more than far ones.
+vec3 cloudDeck(vec2 px, float horizon, vec2 sun, float lean) {
     float dy = max(px.y - horizon, 0.5);
     float depth = 90.0 * resolution.y / dy;
-    vec2 world = vec2((px.x - resolution.x * 0.5) * depth / resolution.y, depth);
+    vec2 world = vec2((px.x - resolution.x * 0.5) * depth / resolution.y + lean, depth);
     // The deck slides toward the tower one tile of noise every 15 minutes.
     vec2 p = world * 0.011 + vec2(0.0, 16.0 * cycle(900.0));
     // Broad banks of heavier cloud with thin valleys between, for depth.
@@ -173,10 +186,10 @@ int windowAt(vec2 at) {
     float best = FAR;
     for (int i = 0; i < windowCount; i++) {
         vec4 r = windowRect(i);
-        float off = length(r.xy + r.zw * 0.5 - at);
-        if (rectDistance(at, r, 0.0) < 1.0 && off < best) {
+        vec2 off = at - r.xy - r.zw * 0.5;
+        if (all(lessThan(abs(off), r.zw * 0.5 + 1.0)) && dot(off, off) < best) {
             found = i;
-            best = off;
+            best = dot(off, off);
         }
     }
     return found;
@@ -187,6 +200,31 @@ int windowAt(vec2 at) {
 float windowShadow(vec2 px, int i, vec2 offset, float soft) {
     float d = rectDistance(px - offset, windowRect(i), windowRounding(i));
     return (1.0 - smoothstep(-soft, soft, d)) * windowAlpha(i);
+}
+
+// The outward direction of a rounded rect's edge nearest px.
+vec2 edgeNormal(vec2 px, vec4 rect, float radius) {
+    vec2 p = px - rect.xy - rect.zw * 0.5;
+    vec2 q = abs(p) - rect.zw * 0.5 + radius;
+    vec2 g = (q.x > 0.0 && q.y > 0.0) ? normalize(q) : (q.x > q.y ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
+    return g * vec2(p.x < 0.0 ? -1.0 : 1.0, p.y < 0.0 ? -1.0 : 1.0);
+}
+
+// The sheen a window's glass catches: a soft diagonal streak, 1 at its
+// middle, whose place on the glass moves as the window does across the
+// screen, the way a reflection slides over a pane that moves.
+float glassStreak(vec2 px, vec4 r) {
+    float across = dot(px - r.xy, normalize(vec2(1.0, -1.25))) / max(r.z, 1.0) + r.x / resolution.x * 0.8;
+    return exp(-pow((fract(across * 0.7 + 0.15) - 0.5) * 9.0, 2.0));
+}
+
+// Where the horizon lies and the sun stands, for the sky and the panes' edges.
+float horizonY() {
+    return resolution.y * 0.56;
+}
+
+vec2 sunAt() {
+    return vec2(resolution.x * 0.74, horizonY() - resolution.y * 0.035);
 }
 
 // A thin line `d` pixels away, `w` wide: 1 on it.
@@ -341,15 +379,41 @@ void wake(vec2 px, out float glow, out float blue, out float part) {
 }
 
 vec4 backdrop(vec2 px) {
-    float horizon = resolution.y * 0.56;
-    vec2 sun0 = vec2(resolution.x * 0.74, horizon - resolution.y * 0.035);
+    float horizon = horizonY();
+    vec2 sun0 = sunAt();
     vec3 moment = moments();
     float burst = moment.y, flash = moment.z;
 
+    // The window nearest this point, for its line and its sunlit edge; how
+    // near any is and how near a lifted one; and how the cloud flows round
+    // them: pushed out from each edge and curling along it.
+    float nearest = FAR;
+    int closest = -1;
+    float near = 0.0, lifted = 0.0;
+    vec2 flow = vec2(0.0);
+    for (int i = 0; i < windowCount; i++) {
+        float d = windowDistance(px, i);
+        near += exp(-max(d, 0.0) / 70.0);
+        if (d < nearest) {
+            nearest = d;
+            closest = i;
+        }
+        float a = windowAlpha(i);
+        lifted = max(lifted, windowLift(i) * exp(-max(d, 0.0) / 120.0) * a);
+        vec2 n = edgeNormal(px, windowRect(i), windowRounding(i));
+        flow += (n * 26.0 * exp(-max(d, 0.0) / 70.0) + vec2(n.y, -n.x) * 16.0 * exp(-max(d, 0.0) / 45.0)) * a;
+    }
+    float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
+    near = clamp(near, 0.0, 1.0);
+
     // The world as a landing jolts it: sky, cloud and sun, never the panes.
+    // The viewer leans toward the pointer and a dragged pane pulls the deck
+    // after it.
     vec2 pw = px + vec2(0.0, moment.x);
     vec2 sun = sun0;
-    vec3 col = pw.y < horizon ? sky(pw, horizon, sun) : cloudDeck(pw, horizon, sun);
+    float lean = (pointer.x / resolution.x - 0.5) * 40.0
+        + (focusedIndex < 0 ? 0.0 : windowVelocity(focusedIndex).x * 0.015);
+    vec3 col = pw.y < horizon ? sky(pw, horizon, sun) : cloudDeck(pw + flow, horizon, sun, lean);
     // The sun itself: a soft white disc in a wide warm bloom, hazy at dawn.
     float ds = length(pw - sun);
     col = mix(col, SUN, 0.45 * exp(-ds / 380.0) + 0.5 * exp(-ds / 70.0));
@@ -359,26 +423,13 @@ vec4 backdrop(vec2 px) {
     col = mix(col, mix(vec3(1.0), GOLD, 0.45), burst * (0.22 + 0.5 * exp(-ds / 520.0)));
     col = mix(col, STREAK, burst * exp(-abs(pw.y - sun.y) / 5.0) * exp(-abs(pw.x - sun.x) / 1100.0) * 0.7);
 
-    // The window nearest this point, for its line and its sunlit edge, and
-    // how near any is and how near a lifted one.
-    float nearest = FAR;
-    int closest = -1;
-    float near = 0.0, lifted = 0.0;
-    for (int i = 0; i < windowCount; i++) {
-        float d = windowDistance(px, i);
-        near += exp(-max(d, 0.0) / 70.0);
-        if (d < nearest) {
-            nearest = d;
-            closest = i;
-        }
-        lifted = max(lifted, windowLift(i) * exp(-max(d, 0.0) / 120.0) * windowAlpha(i));
-    }
-    float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
-    near = clamp(near, 0.0, 1.0);
-
     // The gaps between panes are lit a little, as glass gathers daylight,
-    // and a lifted pane, nearer the sun, more.
+    // and a lifted pane, nearer the sun, more; on the deck the cloud piles
+    // up white against each pane and catches the sun.
+    float deck = smoothstep(horizon - 10.0, horizon + 40.0, px.y);
+    float piled = exp(-max(nearest - 3.0, 0.0) / 22.0) * deck;
     col = mix(col, vec3(1.0), near * 0.18 + lifted * 0.3);
+    col = mix(col, mix(vec3(1.0), SUN, 0.5), piled * 0.5);
 
     // What follows shows only outside the panes (under them is the wash
     // below), so a point well under one does not pay for it.
@@ -393,7 +444,6 @@ vec4 backdrop(vec2 px) {
             vec2 away = normalize(vec2((r.x + r.z * 0.5 - sun0.x) / resolution.x, 0.6));
             shadow = max(shadow, windowShadow(px, i, away * (24.0 + 56.0 * lift), 22.0 + 46.0 * lift));
         }
-        float deck = smoothstep(horizon - 10.0, horizon + 40.0, px.y);
         col = mix(col, SLATE, 0.4 * shadow);
         col = mix(col, GOLD, 1.4 * shadow * (1.0 - shadow) * deck);
 
@@ -456,6 +506,20 @@ vec4 backdrop(vec2 px) {
     // cannot lower their contrast.
     if (inside > 0.0) col = mix(col, mix(daylight(px, horizon), vec3(1.0), 0.95), inside);
 
+    // The glass catches the sky's light: behind each pane the world draws
+    // the sheen on it, a streak lifted to white that slides as the pane
+    // moves, and the sun's warm glow along the side facing it. Only the glass
+    // shows it, the text stays over it, and it is never darker than the
+    // background (colors.toml's), so it cannot lower the text's contrast.
+    if (closest >= 0 && nearest < 0.0) {
+        vec4 r = windowRect(closest);
+        vec2 toSun = normalize(sun0 - r.xy - r.zw * 0.5);
+        float facing = exp(-(dot(r.zw * 0.5, abs(toSun)) - dot(px - r.xy - r.zw * 0.5, toSun)) / 90.0);
+        float a = windowAlpha(closest) * inside;
+        col = mix(col, vec3(1.0), 0.8 * glassStreak(px, r) * a);
+        col = max(mix(col, mix(vec3(1.0), GOLD, 0.35), 0.35 * facing * a), background);
+    }
+
     // The bar's lower edge: a fine pale blue line with a soft glint gliding
     // along it, and the frosted bar above lifted toward white.
     if (reserved.x > 0.0) {
@@ -469,4 +533,35 @@ vec4 backdrop(vec2 px) {
     }
 
     return vec4(col, 1.0);
+}
+
+// Each pane's edge (specs/depth.md, part 2): Tower 49's glass. A fine blue
+// line traces it, deeper at the top of the focused pane and paler at its
+// foot as the border was, a soft grey-blue on the others; the sky just
+// outside bends through the pane's thickness in its outer pixels; the sun
+// glints on the edge that faces it; and the light passing by outside, the
+// gold of a focus or a landing, catches the edge and warms it.
+vec4 frame(vec2 px, int i) {
+    vec4 r = windowRect(i);
+    float rounding = windowRounding(i);
+    float d = rectDistance(px, r, rounding);
+    if (d < -2.0 || d > 14.0) return vec4(0.0);
+    bool focus = i == focusedIndex;
+    vec2 n = edgeNormal(px, r, rounding);
+    float down = clamp((px.y - r.y) / max(r.w, 1.0), 0.0, 1.0);
+    vec3 tint = focus ? mix(vec3(0.24, 0.60, 0.82), vec3(0.65, 0.85, 0.95), down) : vec3(0.62, 0.70, 0.77);
+    // One look at the world 12 px out, beside the glass: what its edge bends
+    // into view and what light is passing there.
+    vec3 outside = backdrop(px + n * 12.0).rgb;
+    float warm = smoothstep(0.04, 0.22, outside.r - outside.b);
+    tint = mix(tint, GOLD, warm * 0.85);
+    float facing = max(dot(n, normalize(sunAt() - r.xy - r.zw * 0.5)), 0.0);
+    float line = (1.0 - smoothstep(0.4, 1.4, abs(d - 0.5))) * (focus ? 0.95 : 0.7) * (1.0 + 0.8 * warm);
+    float edge = (1.0 - smoothstep(0.0, 4.0, d)) * smoothstep(-2.0, 0.0, d);
+    vec3 bent = mix(outside, vec3(1.0), 0.3);
+    float glint = line * facing * (0.5 + 0.5 * windowLift(i));
+    float halo = exp(-max(d, 0.0) / 7.0) * step(0.0, d) * (focus ? 0.12 : 0.0) * (1.0 + 2.0 * warm);
+    float a = clamp(max(max(edge * 0.8, line), halo), 0.0, 1.0);
+    vec3 col = bent * edge * 0.8 * (1.0 - line) + tint * line + vec3(1.0) * glint * 0.6 + tint * halo;
+    return vec4(min(col, vec3(a)), a) * windowAlpha(i);
 }
