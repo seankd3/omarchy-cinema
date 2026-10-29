@@ -176,12 +176,17 @@ def main():
         # when its version is newer than the one it has, so each package
         # counts on from the last one issued under that key. The count lives
         # beside the key, and a key without its count is replaced: a new key
-        # is a new extension, which Chrome installs whatever its version.
+        # is a new extension, which Chrome installs whatever its version. The
+        # key appears whole, and its count starts over only once it is in
+        # place, so an interrupted start leaves the old state or the new key.
         key, count = OUT / "key.pem", OUT / "count"
         if not (key.exists() and count.exists()):
             os.umask(0o077)
+            new_key = OUT / ".key.pem.new"
+            new_key.unlink(missing_ok=True)  # one an interrupted start left keeps its mode
             subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048",
-                            "-out", str(key)], capture_output=True, check=True)
+                            "-out", str(new_key)], capture_output=True, check=True)
+            os.replace(new_key, key)
             write(count, b"0")
         found = colors()
         listing = None
