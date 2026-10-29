@@ -10,18 +10,19 @@
 // each window casts a shadow on the honeycomb, further and softer as focus
 // lifts it, and the light lies on its glass. Each is edged by its own AT
 // field, which catches the light passing behind the glass. The honeycomb is
-// nearer than the far lattice, so it shifts more as the pointer moves and as
-// a window is dragged. And the field answers the desktop: a window landing or
-// opening flares AT field rings out from its edge, closing collapses one into
-// where it was, focus throws a field round the window, a moving window sets
-// the honeycomb rippling and lighting cell by cell round it and in its wake,
-// typing pulses the cells under the window, and the field breathes with your
-// voice.
+// nearer than the far lattice, so it shifts a few pixels more as the pointer
+// moves and a window is dragged. The field answers briefly and softly, never
+// while you work (Sean, 2026-10-29: "nice and elegant and give depth to the
+// window, but we don't need too much crazy movement"): a window landing sends
+// one soft AT field ring out from its edge, opening or taking focus lights
+// the cells along its edge for a moment, closing lets the field where it was
+// dim out, a moving window leaves a short faint trail of cells, and the field
+// breathes gently with your voice. Typing has no answer.
 
 const vec3 RED = vec3(1.0, 0.16, 0.08);
 const vec3 PURPLE = vec3(0.40, 0.20, 0.85);
 const vec3 GREEN = vec3(0.55, 0.92, 0.22);
-const vec3 WHITE_HOT = vec3(1.0, 0.86, 0.62);
+const vec3 WARM_LIGHT = vec3(1.0, 0.86, 0.62);
 const float CELL = 28.0; // honeycomb spacing in pixels: two cells span a gap
 // Where NERV's light comes from: above, a little to the left. Shadows fall
 // away from it and the frames are brightest facing it.
@@ -112,81 +113,44 @@ vec3 sheen(vec2 px, int i) {
     float upper = exp(-at.y / 70.0) * (1.0 - 0.4 * at.x / r.z);
     float streak = dot(at, vec2(0.70710678)) / (r.z + r.w) * 1.2 + dot(r.xy, vec2(0.70710678)) / (resolution.x + resolution.y) * 0.8;
     float band = exp(-pow((fract(streak + 0.2) - 0.5) * 7.0, 2.0));
-    return WHITE_HOT * (0.06 * upper + 0.05 * band) * windowAlpha(i);
+    return WARM_LIGHT * (0.06 * upper + 0.05 * band) * windowAlpha(i);
 }
 
 // The field answering what happened at px, whose honeycomb cell is centred
-// at `cell`: the light of its rings and walls (rgb) and how much the cell
-// itself lights (a).
+// at `cell`, briefly and softly: the light of a ring (rgb) and how much the
+// cell lights (a).
 vec4 answers(vec2 px, vec2 cell) {
     vec3 ring = vec3(0.0);
     float lit = 0.0;
     // Newest first: the ring is in the order things happened, so once one is
-    // older than the longest answer (1.5 s) every one before it is too.
+    // older than the longest answer (1.2 s) every one before it is too.
     for (int k = impulseCount - 1; k >= 0; k--) {
         vec4 e = impulses[k];
         int kind = impulseKinds[k];
         float age = e.z;
-        if (age > 1.5) break;
-        if (kind == TYPE) {
-            // The cells round the key pulse, and a small ring leaves them.
-            if (age > 0.7 || length(px - e.xy) > 220.0) continue;
-            float pulse = smoothstep(0.0, 0.06, age) * exp(-age * 4.5) * e.w;
-            lit += 5.0 * pulse * exp(-length(cell - e.xy) / 26.0);
-            ring += accent * 0.5 * pulse * glowLine(abs(octagon(px - e.xy) - 40.0 - age * 220.0), 1.2);
-        } else if (kind == LAND || kind == OPEN || kind == VOICE) {
-            // AT field rings flare out from the window's edge: three on
-            // landing, harder the faster it came; one as it opens, slowing as
-            // the field unfolds; a broad slow one as you start to speak.
+        if (age > 1.2) break;
+        if (kind == LAND) {
+            // One soft AT field ring leaves the window's edge, a little
+            // brighter the faster it came, and the cells it crosses glow.
             vec4 r = impulseRect(e.xy);
             float f = fieldDistance(px, r);
-            float reach = kind == LAND ? age * 1300.0 : kind == OPEN ? 340.0 * (1.0 - exp(-age * 3.2)) : age * 520.0;
-            if (f < -2.0 || f > reach + 120.0) continue;
-            float fc = fieldDistance(cell, r);
-            float fade = exp(-age * (kind == VOICE ? 1.6 : 2.0)) * (kind == LAND ? 0.6 + 0.6 * e.w : 1.0) * (1.0 - smoothstep(1.0, 1.5, age));
-            vec3 tint = mix(mix(WHITE_HOT, accent, min(age * 4.0, 1.0)), RED, min(age * 0.8, 1.0));
-            float width = kind == VOICE ? 3.0 : 1.6;
-            // Behind the outer front a soft wash, so the field carries
-            // through frosted glass as well as in the seams, and the cells
-            // it has crossed stay lit, fading.
-            float behind = reach - f;
-            ring += tint * fade * 0.35 * exp(-behind / 90.0) * step(0.0, behind);
-            lit += 1.8 * fade * exp(-(reach - fc) / 420.0) * step(0.0, fc) * step(fc, reach);
-            // Each front is a crisp ring, and the cells it crosses burn.
-            int count = kind == LAND ? 3 : 1;
-            for (int j = 0; j < count; j++) {
-                float at = reach - float(j) * 70.0;
-                if (at < 0.0) break;
-                float strength = fade * (1.0 - 0.25 * float(j));
-                if (abs(at - f) < 40.0) ring += tint * strength * glowLine(abs(at - f), width);
-                if (abs(at - fc) < 140.0) lit += 2.6 * strength * exp(-abs(fc - at) / 34.0);
-            }
-            // The flash where the field leaves the window.
-            if (kind != VOICE) ring += WHITE_HOT * 1.6 * fade * exp(-max(f, 0.0) / 30.0) * exp(-age * 4.0);
+            float reach = 40.0 + age * 700.0;
+            if (f < -2.0 || abs(f - reach) > 160.0) continue;
+            float fade = exp(-age * 3.0) * (1.0 - smoothstep(0.8, 1.2, age)) * (0.5 + 0.5 * e.w);
+            ring += accent * fade * (0.45 * glowLine(abs(f - reach), 1.4) + 0.12 * exp(-abs(f - reach) / 50.0));
+            lit += 0.9 * fade * exp(-abs(fieldDistance(cell, r) - reach) / 34.0);
+        } else if (kind == OPEN || kind == FOCUS) {
+            // The cells along the window's edge glow up and settle.
+            if (age > 1.0) continue;
+            float fc = fieldDistance(cell, impulseRect(e.xy));
+            if (fc < -30.0 || fc > 160.0) continue;
+            float fade = smoothstep(0.0, 0.15, age) * exp(-age * 3.0) * (kind == OPEN ? 1.0 : e.w);
+            lit += fade * exp(-abs(fc) / 45.0);
         } else if (kind == CLOSE) {
-            // The field collapses into where the window was, red, and the
-            // cells it crosses flicker out.
-            if (age > 0.9) continue;
-            float left = 1.0 - age / 0.9;
-            float at = 760.0 * left * left;
-            float f = octagon(px - e.xy);
-            if (f > at + 200.0) continue;
-            float fc = octagon(cell - e.xy);
-            ring += mix(RED, accent, left) * left * (glowLine(abs(f - at), 1.6) + 0.3 * exp(-abs(f - at) / 60.0));
-            lit += 2.0 * left * exp(-abs(fc - at) / 30.0);
-            ring += RED * 2.0 * exp(-f / 50.0) * exp(-abs(age - 0.85) * 14.0);
-        } else if (kind == FOCUS) {
-            // Focus throws a field round the window: a wall springs out from
-            // its edge and the cells along it flare.
-            if (age > 1.2) continue;
-            vec4 r = impulseRect(e.xy);
-            float f = fieldDistance(px, r);
-            if (f < -2.0 || f > 400.0) continue;
-            float fc = fieldDistance(cell, r);
-            float at = 20.0 + 150.0 * (1.0 - exp(-age * 6.0));
-            float fade = exp(-age * 3.0) * e.w;
-            ring += mix(WHITE_HOT, accent, min(age * 5.0, 1.0)) * fade * (1.6 * glowLine(abs(f - at), 1.8) + 0.4 * exp(-abs(f - at) / 40.0) * step(f, at));
-            lit += 2.4 * fade * exp(-abs(fc - at) / 40.0) + 1.2 * fade * exp(-max(fc, 0.0) / 60.0);
+            // The field where the window stood dims out softly.
+            if (age > 0.8) continue;
+            float fade = smoothstep(0.0, 0.1, age) * (1.0 - age / 0.8);
+            lit += 0.6 * fade * exp(-octagon(cell - e.xy) / 260.0);
         }
     }
     return vec4(ring, lit);
@@ -227,10 +191,10 @@ vec4 backdrop(vec2 px) {
     vec3 light = vec3(0.0);
 
     // The pointer and a dragged window move the viewpoint: the honeycomb, the
-    // nearer layer, shifts against them by up to a few tens of pixels, the far
-    // lattice by a third of that.
+    // nearer layer, shifts against them by a few pixels, the far lattice by a
+    // third of that.
     vec2 drag = focusedIndex >= 0 ? windowVelocity(focusedIndex) : vec2(0.0);
-    vec2 view = (pointer.xy - resolution * 0.5) * 0.012 + drag * 0.006;
+    vec2 view = (pointer.xy - resolution * 0.5) * 0.006 + drag * 0.003;
 
     // Far behind: slow purple haze and a lattice three times the size, offset
     // against the focused window so it reads as deeper than the near one.
@@ -247,8 +211,7 @@ vec4 backdrop(vec2 px) {
 
     // How awake the cell is: near any window's edge (inside or out, so seams
     // between windows add up) and most near the focused one. A moving window
-    // sets it rippling: rings of cells light and run outward from the window,
-    // and the cells where it has just been stay lit behind it, fading.
+    // leaves a short, faint trail of lit cells where it has just been.
     float wake = 0.0, stir = 0.0;
     for (int i = 0; i < windowCount; i++) {
         wake += 0.6 * exp(-abs(windowDistance(cell.xy, i)) / 28.0);
@@ -257,20 +220,17 @@ vec4 backdrop(vec2 px) {
         if (speed < 40.0) continue;
         float pace = min(speed / 1400.0, 1.0) * windowAlpha(i);
         vec4 r = windowRect(i);
-        float fc = fieldDistance(cell.xy, r);
-        if (fc < 0.0) continue;
-        stir += 2.2 * pace * exp(-fc / 160.0) * pow(0.5 + 0.5 * cos(fc / 26.0 - cycle(1.0) * TAU * 3.0), 3.0);
-        for (int k = 1; k <= 4; k++) {
+        if (fieldDistance(cell.xy, r) < 0.0) continue;
+        for (int k = 1; k <= 2; k++) {
             vec4 ghost = r;
-            ghost.xy -= v * 0.03 * float(k);
-            stir += (1.4 - 0.3 * float(k)) * pace * exp(-abs(fieldDistance(cell.xy, ghost)) / 26.0);
+            ghost.xy -= v * 0.025 * float(k);
+            stir += (0.6 - 0.2 * float(k)) * pace * exp(-abs(fieldDistance(cell.xy, ghost)) / 26.0);
         }
     }
     float toFocus = abs(focusedWindow(cell.xy));
     wake += 2.0 * exp(-toFocus / 40.0) + 0.35 * exp(-toFocus / 500.0);
-    // The field breathes with your voice, swelling out from the focused
-    // window as you speak.
-    wake += voice * (2.2 * exp(-toFocus / (60.0 + 140.0 * voice)) + 0.4 * exp(-toFocus / 600.0));
+    // The field breathes gently with your voice round the focused window.
+    wake += voice * 0.6 * exp(-toFocus / 80.0);
 
     // An octagonal ring leaves the focused window's centre every six seconds
     // and spreads for twelve, orange turning to red as it fades, a faint wash
@@ -306,13 +266,13 @@ vec4 backdrop(vec2 px) {
     light += orange * glowLine(cell.z, 0.8) * 0.035;
     light += tint * (tile * 0.06 + rim * 0.3) * lit * veil * shade;
 
-    // A cell the field's answer reaches burns whole, its rim near white, and
-    // through the glass too, where its tile carries the light. The answers
-    // are the field's own light, so the shadows only half dim them; within
-    // the blur's reach of a window they keep to the glass's limit.
+    // A cell the field's answer reaches glows whole, and through the glass
+    // too, where its tile carries the light. The answers are the field's own
+    // light, so the shadows only half dim them; within the blur's reach of a
+    // window they keep to the glass's limit.
     vec4 answer = answers(px, cell.xy);
-    float burn = min(answer.a + stir, 3.0);
-    vec3 flare = ((mix(orange, WHITE_HOT, 0.3) * rim * 0.45 + orange * tile * 0.34) * burn * mix(1.0, 0.7, glass)
+    float burn = min(answer.a + stir, 1.5);
+    vec3 flare = ((orange * rim * 0.4 + orange * tile * 0.2) * burn * mix(1.0, 0.7, glass)
                   + answer.rgb * mix(1.0, 0.8, glass)) * (0.5 + 0.5 * shade);
     float close = 1.0 - smoothstep(0.0, BLUR_REACH, nearest);
     float flarePeak = max(flare.r, max(flare.g, flare.b));
@@ -344,13 +304,13 @@ vec4 backdrop(vec2 px) {
 
 // Each window's edge (specs/depth.md, part 2): its own AT field. A wall of
 // orange light hugs the glass a few pixels out, its corners cut at 45
-// degrees, brightest facing the light, at its corners, as focus lifts it and
-// as you speak; Unit-01's purple round the windows without focus. The glass's
-// outer pixels show the field bent from behind it, and that light catches on
-// the wall, so a ring passing behind the glass lights the edge. The wall
-// flares when the window opens, lands or takes focus, springing out as focus
-// arrives. Its light stays within a dozen pixels of the wall, so it never
-// lies over the text of a window beneath.
+// degrees, brightest facing the light, at its corners and as focus lifts it;
+// Unit-01's purple round the windows without focus. The glass's outer pixels
+// show the field bent from behind it, and that light catches on the wall, so
+// light passing behind the glass lights the edge. The wall brightens softly
+// for a moment when the window opens, lands or takes focus. Its light stays
+// within a dozen pixels of the wall, so it never lies over the text of a
+// window beneath.
 vec4 frame(vec2 px, int i) {
     vec4 r = windowRect(i);
     float rounding = windowRounding(i);
@@ -365,36 +325,30 @@ vec4 frame(vec2 px, int i) {
     // What just happened to this window, newest first; all of it is over
     // within a second.
     float flare = 0.0;
-    vec3 thrown = vec3(0.0);
     vec2 middle = r.xy + r.zw * 0.5;
     for (int k = impulseCount - 1; k >= 0; k--) {
         int kind = impulseKinds[k];
         vec4 ev = impulses[k];
         if (ev.z > 1.0) break;
-        if (kind == TYPE || kind == CLOSE || length(ev.xy - middle) > 2.0 + length(r.zw) * 0.02) continue;
-        if (kind == FOCUS) {
-            flare += 1.6 * exp(-ev.z * 4.0) * ev.w;
-            float at = 6.0 + 40.0 * sqrt(min(ev.z / 0.45, 1.0));
-            thrown += mix(WHITE_HOT, accent, min(ev.z * 4.0, 1.0)) * 1.8 * exp(-ev.z * 5.0) * glowLine(abs(f - at), 1.4);
-        } else if (kind == OPEN) flare += 2.2 * exp(-ev.z * 3.0);
-        else if (kind == LAND) flare += 1.8 * ev.w * exp(-ev.z * 5.0);
+        if ((kind != FOCUS && kind != OPEN && kind != LAND) || length(ev.xy - middle) > 2.0 + length(r.zw) * 0.02) continue;
+        flare += 0.6 * smoothstep(0.0, 0.12, ev.z) * exp(-ev.z * 3.5) * (kind == OPEN ? 1.0 : ev.w);
     }
 
     vec3 tint = focus ? accent : PURPLE * 1.3;
     vec2 q = abs(px - middle) - r.zw * 0.5;
     float corner = smoothstep(-80.0, -24.0, min(q.x, q.y));
     float toward = 0.5 + 0.5 * clamp(dot(n, LIGHT), 0.0, 1.0);
-    float strength = (focus ? 0.8 + 0.6 * lift : 0.45) * toward * (1.0 + 1.3 * corner) * (1.0 + flare + 1.5 * breath);
-    float w = abs(wallDistance(px, r, 6.0 + 4.0 * breath, 18.0));
+    float strength = (focus ? 0.8 + 0.6 * lift : 0.45) * toward * (1.0 + 1.3 * corner) * (1.0 + flare + 0.4 * breath);
+    float w = abs(wallDistance(px, r, 6.0, 18.0));
     float wall = (1.0 - smoothstep(0.0, 1.1, w) + 0.3 * exp(-w / 2.0)) * strength;
     float hairline = glowLine(abs(d - 0.5), 0.8) * 0.5 * strength;
-    float wash = 0.12 * exp(-max(f, 0.0) / 5.0) * (1.0 + 2.0 * flare + 2.0 * breath) * (focus ? 1.0 : 0.5);
+    float wash = 0.12 * exp(-max(f, 0.0) / 5.0) * (1.0 + flare + 0.5 * breath) * (focus ? 1.0 : 0.5);
 
     // The field just behind the glass's edge, seen bent through its outer
     // pixels and caught by the wall.
     float edge = (1.0 - smoothstep(0.0, 6.0, d)) * smoothstep(-2.0, 0.0, d);
     vec3 behind = d < 10.0 ? backdrop(px - n * (max(d, 0.0) + 12.0)).rgb - background : vec3(0.0);
-    vec3 glow = tint * (wall + hairline + wash) + thrown + behind * 3.0 * (wall + hairline) / max(strength, 0.3);
+    vec3 glow = tint * (wall + hairline + wash) + behind * 3.0 * (wall + hairline) / max(strength, 0.3);
     float a = clamp(max(edge * 0.9, max(wall, hairline)), 0.0, 1.0);
     return vec4((background + behind) * 1.1 * edge * 0.9 + glow, a) * windowAlpha(i);
 }
