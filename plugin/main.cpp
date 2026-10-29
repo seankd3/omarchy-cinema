@@ -121,7 +121,6 @@ void main() {
         Rect                focus{};
         float               focusAlpha = 0; // how present the focus is (contract.glsl)
         Rect                reserved{}; // room the bar and other panels keep: top, right, bottom, left
-        bool                glass = false; // Hyprland blurs a window or fadeout here, so it shows the backdrop through the blur cache
         bool                operator==(const SScene&) const = default;
     };
 
@@ -487,7 +486,6 @@ void main() {
                 focusedHere        = w;
             }
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding()});
-            scene.glass = scene.glass || w->shouldBlur(drawn);
         }
 
         // Closed windows fading out, on the workspaces Hyprland draws them on:
@@ -508,7 +506,6 @@ void main() {
             // Only a fadeout already running when the plugin loaded has none.
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(),
                                     rounding != g->fadeoutRounding.end() ? rounding->second : float(*ROUNDING)});
-            scene.glass = scene.glass || fadeout->effects().preBlur.has_value();
         }
 
         if (focusedHere || scene.focusedIndex < 0)
@@ -548,10 +545,16 @@ void main() {
         return Fullscreen::controller()->getFullscreenModes(monitor).internal == Fullscreen::FSMODE_FULLSCREEN;
     }
 
-    // Asks Hyprland to draw the whole monitor again, glass included.
+    // Asks Hyprland to draw the whole monitor again in this frame, glass
+    // included. Hyprland decides at render.pre, before the plugin's listener,
+    // whether a frame blurs the glass again, and window motion never asks it
+    // to, so the blur is queued here as well as made dirty; Hyprland still
+    // runs it only with blur on (Hyprland 0.57.0 src/render/GLRenderer.cpp:388,
+    // Renderer.cpp:967).
     void redraw(PHLMONITOR monitor) {
         g_pHyprRenderer->damageMonitor(monitor);
-        monitor->m_blurFBDirty = true;
+        monitor->m_blurFBDirty        = true;
+        monitor->m_blurFBShouldRender = true;
     }
 
     // Uploads the shapes, two texels each: (x, y, w, h) and (alpha, rounding).
@@ -897,11 +900,6 @@ vec4 cinemaGlass(vec4 c) {{
         SScene        m_scene;
     };
 
-    // Hyprland decides at render.pre, before this listener, whether this frame
-    // blurs the glass again, and window motion never asks it to: so when the
-    // scene has changed, the blur is queued here, for this same frame, when
-    // anything in the scene is blurred (Hyprland 0.57.0
-    // src/render/GLRenderer.cpp:388, Renderer.cpp:967).
     void onPre(PHLMONITOR monitor) {
         if (!g || g->source.empty())
             return;
@@ -910,8 +908,6 @@ vec4 cinemaGlass(vec4 c) {{
         if (state.pending == state.drawn)
             return;
         redraw(monitor);
-        if (state.pending.glass)
-            monitor->m_blurFBShouldRender = true;
     }
 
     // The backdrop is drawn in the monitor's own frames. A workspace captured
