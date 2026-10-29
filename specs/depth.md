@@ -96,6 +96,25 @@ shadow window i casts on the scene, away from the light, longer and softer
 with lift) and `impulseWave` (a ring expanding from an impulse, fading with
 age).
 
+- **Window light.** `windowColor(i)`: the average colour of what window i
+  shows, its own content, so a window lights the world around it the way a
+  screen lights a dark room (Sean, 2026-10-29: "I want them to feel
+  connected more", across all themes). Measured on the GPU, never read back:
+  in the backdrop pass, the plugin draws each window's main surface texture
+  (the client's buffer, before any glass, backdrop or decoration, so the
+  world never feeds back into it) into a small cell of a colour atlas with a
+  few filtered taps, only when the surface has committed a new buffer since
+  its cell was drawn, and at most 8 windows a frame (the rest keep their last
+  colour); `windowColor(i)` reads the cell. A window with no buffer yet, or
+  closed and fading, keeps its last colour or black. Films cast it as light
+  spilling from the window onto the world (on the floor in front of it, into
+  cloud, into the rain), strongest near the window, fading with distance and
+  with `windowAlpha`.
+
+The other direction, **the world's light on the glass**, is no new fact:
+each film draws it in `backdrop()` under the window, and Hyprland's glass
+shows it through the glass background only, never over text.
+
 ### 2. Frame and thickness: each window's edge belongs to the film
 
 A plugin window decoration (`HyprlandAPI::addWindowDecoration`, on the OVER
@@ -270,6 +289,9 @@ Jurassic Park (another lane) adopts each part as it lands.
   its glass looks like composited over the moving backdrop.
 - How the transformed source draw reaches the glass function (part 3), or
   part 3's stated fallback.
+- Drawing a client's surface texture (every buffer kind Hyprland imports:
+  shm, dmabuf, external-only) into a plugin atlas from the backdrop pass, and
+  knowing when a surface committed a new buffer.
 
 ## Acceptance
 
