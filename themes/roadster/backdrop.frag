@@ -12,20 +12,22 @@
 // and streaks toward the viewer, further and softer as focus lifts it. The
 // floor's lanes bow out round each window's foot, so the dots and the speed
 // streaks route round it, and the floor's own lines run from each foot's
-// corners toward the viewer. The viewer leans toward the pointer and a
-// dragged window pulls the floor a few px after it, near rows more than far
-// ones; a moving window leaves short, faint speed lines behind it. Behind
+// corners toward the viewer. The viewer leans toward the pointer and the
+// floor shifts a few px, near rows more than far ones. Moving a window is
+// where the cockpit shines: the window pulls the floor after it, throws speed
+// lines back from its trailing edge and a flight path marker rides ahead of
+// it; at touchdown its seams flash and a shock runs out over the floor, gone
+// within 1.2 s. Behind
 // each window the world draws the sheen on its glass, a streak that slides
 // as the window moves and the horizon's glow along its upper glass. Each
 // window's edge is the cockpit's (frame()): a fine, quiet red line as the
 // border was, lit from the horizon, the floor bending through its outer
 // pixels, and light passing behind it running into it.
 //
-// What happens is answered briefly and softly: opening closes faint target
-// brackets onto the window, closing lets one red ring spread where it was,
-// landing sends one soft ring over the floor from the window's foot, focus
-// warms the window's edge. Typing gets no answer, so nothing moves while you
-// work.
+// Everything else is answered briefly and softly: opening closes faint
+// target brackets onto the window, closing lets one red ring spread where it
+// was, focus warms the window's edge. Typing gets no answer, so nothing moves
+// while you work.
 
 const vec3 WHITE = vec3(1.0, 0.94, 0.94);
 // The brightest the scene is behind the glass, a channel each. With the glass
@@ -126,10 +128,13 @@ int windowAt(vec2 at) {
 }
 
 // How much window i shades px, 1 in full shadow: its rect moved `offset` away
-// from the light, `soft` pixels soft, as present as the window is.
+// from the light, `soft` pixels soft, as present as the window is. It is
+// glass, so it shades the world beside it, never what is seen through it.
 float windowShadow(vec2 px, int i, vec2 offset, float soft) {
-    float d = rectDistance(px - offset, windowRect(i), windowRounding(i));
-    return (1.0 - smoothstep(-soft, soft, d)) * windowAlpha(i);
+    vec4 r = windowRect(i);
+    float rounding = windowRounding(i);
+    float d = rectDistance(px - offset, r, rounding);
+    return (1.0 - smoothstep(-soft, soft, d)) * smoothstep(-2.0, 3.0, rectDistance(px, r, rounding)) * windowAlpha(i);
 }
 
 // The outward direction of a rounded rect's edge nearest px.
@@ -161,12 +166,13 @@ vec3 answers(vec2 px, vec3 red, float horizon, out float lit) {
     vec3 light = vec3(0.0);
     lit = 0.0;
     // Newest first: the ring is newest last, so past the first one older
-    // than the longest answer (1 s) every one is.
+    // than the longest answer (a landing's, 1.2 s) every one is.
     for (int k = impulseCount - 1; k >= 0; k--) {
         vec4 e = impulses[k];
         int kind = impulseKinds[k];
         float age = e.z;
-        if (age > 1.0) break;
+        if (age > 1.2) break;
+        if (age > 1.0 && kind != LAND) continue;
         if (kind == TYPE || kind == VOICE) continue;
         if (kind == CLOSE) {
             // One red ring spreads where the window was and fades.
@@ -178,14 +184,18 @@ vec3 answers(vec2 px, vec3 red, float horizon, out float lit) {
         int i = windowAt(e.xy);
         vec4 rect = i < 0 ? vec4(e.xy, 0.0, 0.0) : windowRect(i);
         if (kind == LAND) {
-            // One soft ring runs over the floor from the window's foot.
+            // Touchdown, the end of a move, which may shine: the seams round
+            // the window flash, and a shock runs out over the floor from its
+            // foot, flaring the dots as it passes, all within 1.2 s.
+            float d = rectDistance(px, rect, 0.0);
+            light += mix(red, WHITE, 0.3) * exp(-max(d, 0.0) / 45.0) * step(0.0, d) * exp(-age * 5.0) * 1.6 * e.w;
             if (px.y < horizon) continue;
             vec2 foot = vec2(clamp(px.x, rect.x, rect.x + rect.z), rect.y + rect.w);
-            float front = abs(length((px - foot) * vec2(1.0, 2.4)) - age * 500.0);
-            if (front > 200.0) continue;
-            float glow = swell(age, 0.05, 1.0) * e.w;
-            lit += 1.2 * exp(-front / 30.0) * glow;
-            light += red * (glowLine(front, 1.2) * 0.35 + 0.06 * exp(-front / 40.0)) * glow;
+            float front = abs(length((px - foot) * vec2(1.0, 2.4)) - age * 900.0);
+            if (front > 400.0) continue;
+            float glow = (1.0 - smoothstep(0.0, 1.2, age)) * exp(-age * 1.8) * e.w;
+            lit += 6.0 * exp(-front / 40.0) * glow;
+            light += red * (glowLine(front, 2.0) + 0.45 * exp(-front / 60.0)) * glow;
             continue;
         }
         float d = rectDistance(px, rect, 0.0);
@@ -204,8 +214,10 @@ vec3 answers(vec2 px, vec3 red, float horizon, out float lit) {
     return light;
 }
 
-// A moving window's speed lines: short, faint streaks back from its trailing
-// edge across its width.
+// A moving window's speed lines, which may shine (Sean, 2026-10-29: "unless
+// like I'm moving windows round ... then you can really make things shine"):
+// streaks of light back from its trailing edge across its width, and the
+// flight path marker riding ahead of it, gone as soon as the window stops.
 vec3 speedLines(vec2 px, vec3 red) {
     vec3 light = vec3(0.0);
     for (int i = 0; i < windowCount; i++) {
@@ -214,7 +226,7 @@ vec3 speedLines(vec2 px, vec3 red) {
         // Only a moving window pays for its lines (a loop count, not a
         // branch, so the work is skipped, not merely masked).
         for (int on = 0; on < (speed < 40.0 ? 0 : 1); on++) {
-            float k = min(speed / 1500.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
+            float k = min(speed / 1200.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
             vec4 r = windowRect(i);
             vec2 n = v / max(speed, 1e-3);
             vec2 side = vec2(-n.y, n.x);
@@ -226,11 +238,22 @@ vec3 speedLines(vec2 px, vec3 red) {
             if (back > 0.0 && abs(w) < wide) {
                 float lane = floor(w / 18.0);
                 float seed = hash(vec2(lane, float(i) + 3.1));
-                float len = speed * (0.02 + 0.04 * hash(vec2(lane, 9.7)));
+                float start = seed * 40.0;
+                float len = speed * (0.06 + 0.14 * hash(vec2(lane, 9.7)));
                 float across = abs(fract(w / 18.0) - 0.5) * 18.0;
-                float streak = step(0.5, seed) * (1.0 - smoothstep(0.0, len, back)) * (1.0 - smoothstep(0.5, 1.4, across));
-                light += mix(red, WHITE, 0.4) * streak * 0.45 * k;
+                float streak = step(0.35, seed) * step(start, back) * (1.0 - smoothstep(start, start + len, back))
+                    * (1.0 - smoothstep(0.5, 1.4, across));
+                light += mix(red, WHITE, 0.55 + 0.4 * seed) * streak * 1.2 * k;
+                light += red * exp(-back / (speed * 0.12)) * 0.22 * k;
             }
+            // The flight path marker: a ring with wings and a fin, ahead of
+            // the leading edge, as present as the speed.
+            vec2 m = px - (r.xy + r.zw * 0.5 + n * (ext + 50.0 + speed * 0.02));
+            float ring = abs(length(m) - 9.0);
+            float wings = abs(m.y) + max(abs(abs(m.x) - 17.0) - 8.0, 0.0);
+            float fin = abs(m.x) + max(abs(m.y + 13.0) - 4.0, 0.0);
+            float marker = glowLine(min(ring, min(wings, fin)), 1.4);
+            light += mix(red, WHITE, 0.7) * marker * smoothstep(150.0, 600.0, speed) * 1.3 * windowAlpha(i);
         }
     }
     return light;
@@ -295,11 +318,11 @@ vec4 backdrop(vec2 px) {
     if (below > 0.0) {
         float drive = cycle(16.0) * 16.0;
         float depth = CAMERA * resolution.y / below;
-        // The viewer leans toward the pointer and a dragged window pulls the
-        // floor a few px after it (in cells, so near rows shift more); the
-        // lanes bow round the windows' feet.
+        // The viewer leans toward the pointer, a few px, and a dragged window
+        // pulls the floor after it, more (in cells, so near rows shift
+        // more); the lanes bow round the windows' feet.
         float lean = (pointer.x / resolution.x - 0.5) * 0.3
-            + (focusedIndex < 0 ? 0.0 : windowVelocity(focusedIndex).x * 0.0002);
+            + (focusedIndex < 0 ? 0.0 : windowVelocity(focusedIndex).x * 0.0006);
         vec2 fp = vec2(px.x - bend, px.y);
         vec2 cell = vec2((fp.x - resolution.x * 0.5) * CAMERA / below + lean, depth + drive);
         // The nearest dot projected back onto the screen, so every dot is
