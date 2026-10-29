@@ -134,23 +134,13 @@ void main() {
 )";
 
     // The two things a film's shader can draw: the world, and (if it defines
-    // frame()) each window's edge in it, faded with the window.
-    const char* BACKDROP_MAIN = "\nvoid main() {\n    fragColor = backdrop(v_px);\n}\n";
-    // The frame also paints the world over Hyprland's border ring, so a
-    // film's edge replaces the border wherever, and only where, it draws: with
-    // no plugin or no frame, the border shows as before.
-    const char* FRAME_MAIN = R"(
-uniform int frameWindow;
-uniform float frameAlpha;
-uniform float frameBorder;
-void main() {
-    float d = rectDistance(v_px, windowRect(frameWindow), windowRounding(frameWindow));
-    float ring = smoothstep(-1.0, 0.0, d) * (1.0 - smoothstep(frameBorder, frameBorder + 1.0, d));
-    vec4 under = ring > 0.0 ? vec4(backdrop(v_px).rgb, 1.0) * ring : vec4(0.0);
-    vec4 edge = frame(v_px, frameWindow);
-    fragColor = (edge + under * (1.0 - edge.a)) * frameAlpha;
-}
-)";
+    // frame()) each window's edge in it (main-backdrop.glsl, main-frame.glsl).
+    const char* BACKDROP_MAIN =
+#include "main-backdrop.inc"
+        ;
+    const char* FRAME_MAIN =
+#include "main-frame.inc"
+        ;
     // How far outside a window its frame may draw, in logical px.
     constexpr double FRAME_BAND = 48.0;
 
@@ -266,9 +256,6 @@ void main() {
         // How far the windows' depth goes (specs/depth.md, "Tiers"): 0 is the
         // backdrop alone, with no answers, no frames and no facts moving.
         SP<Config::Values::CIntValue>           depth;
-        // Whether the world is going: animations on, the session unlocked and
-        // some monitor showing it. Nothing is collected while it is not.
-        bool                                    worldActive = true;
         std::string                             glassShader; // the surface shader in use, empty for Hyprland's own
         wl_event_source*                        glassIdle = nullptr;
         bool                                    plugged = true;
@@ -595,9 +582,27 @@ void main() {
     // Something happened at `at`: every film answers it its own way. The
     // monitor it happened on draws again now; its age rides the backdrop's
     // own frames after that.
-    // Whether the world answers the desktop now: depth on and the world going.
+    bool covered(PHLMONITOR monitor);
+    void forgetImpulses();
+
+    // Whether the world answers the desktop now, read at the moment it is
+    // asked: depth on, animations on, the session unlocked and some monitor
+    // showing the world. Nothing is collected while it does not.
     bool answering() {
-        return g && !g->source.empty() && g->depth->value() > 0 && g->worldActive;
+        static auto ANIMATIONS = CConfigValue<Config::INTEGER>("animations:enabled");
+        if (!g || g->source.empty() || g->depth->value() == 0 || !*ANIMATIONS || g_pSessionLockManager->isSessionLocked())
+            return false;
+        return std::ranges::any_of(State::monitorState()->monitors(), [](const auto& m) { return m->m_enabled && m->m_dpmsStatus && !covered(m); });
+    }
+
+    // A config change that stops the answers lets go of what is pending, so
+    // turning depth or animations off and on again brings nothing back.
+    void settleAnswers() {
+        if (!g || answering())
+            return;
+        forgetImpulses();
+        g->voice    = 0;
+        g->speaking = false;
     }
 
     void forgetImpulses() {
@@ -665,11 +670,13 @@ void main() {
         SScene     scene;
         const auto focused = Desktop::focusState()->window();
         PHLWINDOW  focusedHere;
-        // Each shape's place in Hyprland's stacking, lowest first: tiled
-        // windows, then floating ones, then special workspaces, then pinned
-        // windows, each in the window list's order; closed windows fading out
-        // on the tiled or floating plane they left, at their old place.
+        // Each shape's place in the order Hyprland draws it, lowest first
+        // (Hyprland 0.57.0 src/render/Renderer.cpp:476-575, 1294-1330): per
+        // workspace, the normal one before special ones, its tiled windows
+        // (the focused one last), then its tiled windows fading out, then its
+        // floating windows, then those fading out; pinned windows over all.
         std::vector<double> stacking;
+        const auto          drawOrder = [](int workspace, int pass, double order) { return workspace * 1e7 + pass * 1e6 + order; };
         double              order = 0;
 
         for (const auto& w : Desktop::windowState()->windows()) {
@@ -695,8 +702,8 @@ void main() {
             const bool still = g->depth->value() == 0;
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(),
                                     still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, w->metadata().stableID()});
-            const int layer = (w->m_state & Desktop::View::WINDOW_STATE_PINNED) ? 3 : w->onSpecialWorkspace() ? 2 : w->isFloating() ? 1 : 0;
-            stacking.push_back(layer * 1e6 + order);
+            const bool pinned = (w->m_state & Desktop::View::WINDOW_STATE_PINNED) && w->isFloating();
+            stacking.push_back(drawOrder(pinned ? 2 : w->onSpecialWorkspace() ? 1 : 0, w->isFloating() ? 2 : 0, order + (w == focused && !w->isFloating() ? 1e5 : 0)));
         }
 
         // Closed windows fading out, on the workspaces Hyprland draws them on:
@@ -717,7 +724,8 @@ void main() {
             // Only a fadeout already running when the plugin loaded has none.
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(),
                                     rounding != g->fadeoutRounding.end() ? rounding->second : float(*ROUNDING)});
-            stacking.push_back((fadeout->plane() == Desktop::FADEOUT_PLANE_WINDOW_TILED ? 0 : 1) * 1e6 + fadeout->zIndex() + 0.5);
+            stacking.push_back(drawOrder(workspace && workspace->type() == Workspace::eWorkspaceType::SPECIAL ? 1 : 0,
+                                         fadeout->plane() == Desktop::FADEOUT_PLANE_WINDOW_TILED ? 1 : 3, fadeout->zIndex()));
         }
         // Depth, 0 on top.
         std::vector<size_t> rank(stacking.size());
@@ -1365,18 +1373,6 @@ vec4 cinemaGlass(vec4 c) {{
     // The backdrop's own motion. Time stands still while there is nothing to
     // see it on: animations off, the session locked, or every monitor asleep
     // or showing a fullscreen window. readTheme starts and stops the timer.
-    // The world stops answering while it stands still (specs/depth.md,
-    // impulses): what was pending is let go, and nothing is collected until it
-    // goes again, so nothing replays.
-    void setWorldActive(bool active) {
-        if (!active && g->worldActive) {
-            forgetImpulses();
-            g->voice    = 0;
-            g->speaking = false;
-        }
-        g->worldActive = active;
-    }
-
     int onTick(void*) {
         if (!g)
             return 0;
@@ -1396,10 +1392,8 @@ vec4 cinemaGlass(vec4 c) {{
         const float elapsed = std::min(std::chrono::duration<float>(now - g->lastTick).count(), 0.1F);
         g->lastTick         = now;
         static auto ANIMATIONS = CConfigValue<Config::INTEGER>("animations:enabled");
-        if (!*ANIMATIONS || g_pSessionLockManager->isSessionLocked()) {
-            setWorldActive(false);
+        if (!*ANIMATIONS || g_pSessionLockManager->isSessionLocked())
             return 0;
-        }
 
         const bool glass = now - g->lastGlass >= std::chrono::duration<double>(GLASS_EVERY);
         bool       seen  = false;
@@ -1413,7 +1407,6 @@ vec4 cinemaGlass(vec4 c) {{
         }
         if (glass)
             g->lastGlass = now;
-        setWorldActive(seen);
         if (seen)
             g->time = std::fmod(g->time + elapsed, 3600.F);
         return 0;
@@ -1505,9 +1498,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
             addImpulse({at.x + size.x * along, at.y + size.y}, 0.5F, IMPULSE_TYPE);
     });
     static auto RELOADED = Event::bus()->m_events.config.reloaded.listen([] {
-        if (g)
-            readTheme();
+        if (!g)
+            return;
+        readTheme();
+        settleAnswers();
     });
+    static auto REFRESHED = Event::bus()->m_events.config.props_refreshed.listen([](bool) { settleAnswers(); });
 
     return {"backdrop", "Draws the current Omarchy theme's backdrop between the wallpaper and the windows.", "Sean", "0.2"};
 }

@@ -40,20 +40,9 @@ void main() {
     v_px = pos * resolution;
 }
 """
-# The plugin puts one of these after the film's shader (plugin/main.cpp).
-BACKDROP_MAIN = "\nvoid main() {\n    fragColor = backdrop(v_px);\n}\n"
-FRAME_MAIN = """
-uniform int frameWindow;
-uniform float frameAlpha;
-uniform float frameBorder;
-void main() {
-    float d = rectDistance(v_px, windowRect(frameWindow), windowRounding(frameWindow));
-    float ring = smoothstep(-1.0, 0.0, d) * (1.0 - smoothstep(frameBorder, frameBorder + 1.0, d));
-    vec4 under = ring > 0.0 ? vec4(backdrop(v_px).rgb, 1.0) * ring : vec4(0.0);
-    vec4 edge = frame(v_px, frameWindow);
-    fragColor = (edge + under * (1.0 - edge.a)) * frameAlpha;
-}
-"""
+# The plugin links one of these after the film's shader (plugin/main-*.glsl).
+BACKDROP_MAIN = (ROOT / "plugin/main-backdrop.glsl").read_text()
+FRAME_MAIN = (ROOT / "plugin/main-frame.glsl").read_text()
 
 
 def palette(theme):
