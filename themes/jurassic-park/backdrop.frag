@@ -359,12 +359,15 @@ vec3 rayAt(vec2 px, vec3 forward, vec3 right, vec3 up) {
     return rd + vec3(1e-6) * (1.0 - abs(sign(rd)));
 }
 
-// Where a screen point's ray meets the ground; a point above the horizon is
-// taken just under it.
-vec3 groundAt(vec2 px, vec3 ro, vec3 forward, vec3 right, vec3 up) {
-    float horizon = resolution.y * (0.5 - DOWN);
-    vec3 rd = rayAt(vec2(px.x, max(px.y, horizon + 24.0)), forward, right, up);
-    return ro + rd * (-ro.y / rd.y);
+// Where a screen point's ray meets the ground, at most REACH away: a ray that
+// meets it further off, or not at all above the horizon, is taken REACH along
+// its track, so a light set there still shows before the void takes it.
+const float REACH = 0.45 * SIGHT;
+
+vec2 groundAt(vec2 px, vec3 ro, vec3 forward, vec3 right, vec3 up) {
+    vec3 rd = rayAt(px, forward, right, up);
+    float far = REACH / length(rd.xz);
+    return ro.xz + rd.xz * (rd.y < 0.0 ? min(-ro.y / rd.y, far) : far);
 }
 
 // A line `d` pixels away: a crisp core `w` pixels wide in a soft glow.
@@ -389,15 +392,15 @@ vec4 backdrop(vec2 px) {
 
     // fsn's spotlight: the focused window is the selected item, so a pool of
     // light lies at its foot and the cone rises from it to a lamp just over
-    // its top edge. With nothing focused it rests on the landscape in front
-    // of the camera, and glides between the two as the focus comes and goes.
-    vec4 idle = vec4(resolution.x * 0.42, resolution.y * 0.55, resolution.x * 0.16, resolution.y * 0.2);
-    vec4 spot = mix(idle, focused, focusAlpha);
-    vec3 g0 = groundAt(spot.xy + vec2(0.0, spot.w), ro, forward, right, up);
-    vec3 g1 = groundAt(spot.xy + spot.zw, ro, forward, right, up);
-    vec2 pool = (g0.xz + g1.xz) * 0.5;
-    float radius = length(g1.xz - g0.xz) * 0.15 + 0.6;
-    vec3 over = rayAt(vec2(spot.x + spot.z * 0.5, spot.y - 30.0), forward, right, up);
+    // its top edge. It stays on a closing window until it has faded; with
+    // nothing focused the contract's focus rect rests in the middle of the
+    // screen, so the light rests on the landscape there and glides to and
+    // from the windows as the focus does.
+    vec2 g0 = groundAt(focused.xy + vec2(0.0, focused.w), ro, forward, right, up);
+    vec2 g1 = groundAt(focused.xy + focused.zw, ro, forward, right, up);
+    vec2 pool = (g0 + g1) * 0.5;
+    float radius = length(g1 - g0) * 0.15 + 0.6;
+    vec3 over = rayAt(vec2(focused.x + focused.z * 0.5, focused.y - 30.0), forward, right, up);
     float lampY = max(ro.y + over.y * length(pool - ro.xz) / length(over.xz), 3.0);
     vec3 lamp = vec3(pool.x, lampY, pool.y);
 
@@ -461,11 +464,13 @@ vec4 backdrop(vec2 px) {
     col = mix(col, col * min(UNDER_GLASS, GLASS_CAP / max(peak, 1e-4)), inside);
 
     // The bar's lower edge is a wire, with a warp flash travelling along it,
-    // and the landscape is dimmed under the bar so its text reads.
+    // and the landscape is dimmed under the bar so its text reads. The flash
+    // runs on 2000 pixels past the right edge before it starts again, so its
+    // trail has died away (under 0.2%) when it does.
     if (reserved.x > 0.0) {
         float below = px.y - reserved.x;
         col *= mix(1.0, 0.35, step(below, 0.0));
-        float flash = cycle(20.0) * (resolution.x + 800.0) - 400.0;
+        float flash = cycle(20.0) * (resolution.x + 2400.0) - 400.0;
         float trail = px.x < flash ? exp(-(flash - px.x) / 300.0) : exp(-(px.x - flash) / 8.0);
         col += WIRE * glowLine(abs(below), 1.0) * (0.35 + 0.9 * trail);
     }
