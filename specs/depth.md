@@ -99,17 +99,24 @@ age).
 - **Window light.** `windowColor(i)`: the average colour of what window i
   shows, its own content, so a window lights the world around it the way a
   screen lights a dark room (Sean, 2026-10-29: "I want them to feel
-  connected more", across all themes). Measured on the GPU, never read back:
-  in the backdrop pass, the plugin draws each window's main surface texture
-  (the client's buffer, before any glass, backdrop or decoration, so the
-  world never feeds back into it) into a small cell of a colour atlas with a
-  few filtered taps, only when the surface has committed a new buffer since
-  its cell was drawn, and at most 8 windows a frame (the rest keep their last
-  colour); `windowColor(i)` reads the cell. A window with no buffer yet, or
-  closed and fading, keeps its last colour or black. Films cast it as light
-  spilling from the window onto the world (on the floor in front of it, into
-  cloud, into the rain), strongest near the window, fading with distance and
-  with `windowAlpha`.
+  connected more", across all themes). Measured on the GPU, never read back,
+  from the client's content as Hyprland lays it out: the window's surface
+  tree (main surface and subsurfaces, each at its place and through its
+  viewport's source box), before glass, backdrop or decorations, so the
+  world never feeds back into it. The plugin draws that tree, scaled to the
+  window, into a small cell of a colour atlas in the backdrop pass, and
+  `windowColor(i)` reads the cell.
+  - *When.* Every window drawn on the monitor is measured again about four
+    times a second, round robin, at most 8 windows a frame, in the frames the
+    backdrop draws anyway; no commit tracking. A colour that changed by more
+    than 1/255 on any channel is an answer that changed (part 6): the monitor
+    draws again, and the glass follows on its own refresh. With animations off,
+    when the world holds still, its light holds still too (last colours stay).
+    A window not yet measured, with no buffer, or closed and fading has black,
+    or keeps its last colour while it fades.
+  - Films cast it as light spilling from the window onto the world (on the
+    floor in front of it, into cloud, into the rain), strongest near the
+    window, fading with distance and with `windowAlpha`.
 
 The other direction, **the world's light on the glass**, is no new fact:
 each film draws it in `backdrop()` under the window, and Hyprland's glass
@@ -289,9 +296,10 @@ Jurassic Park (another lane) adopts each part as it lands.
   its glass looks like composited over the moving backdrop.
 - How the transformed source draw reaches the glass function (part 3), or
   part 3's stated fallback.
-- Drawing a client's surface texture (every buffer kind Hyprland imports:
-  shm, dmabuf, external-only) into a plugin atlas from the backdrop pass, and
-  knowing when a surface committed a new buffer.
+- Drawing a window's surface tree (every texture kind Hyprland imports:
+  shm, dmabuf, and external-only where 0.57 supports it) into a plugin atlas
+  from the backdrop pass; a texture kind that cannot be drawn leaves that
+  surface out of the colour.
 
 ## Acceptance
 
