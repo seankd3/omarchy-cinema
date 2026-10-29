@@ -44,7 +44,7 @@ Each is one fact with one source; nothing is stored that can be computed.
   `render.pre` from Hyprland's pointer.
 - **Impulses.** One ring of the last 32 things that happened, each a point,
   an age in seconds, a strength and a kind: `OPEN`, `CLOSE`, `LAND`,
-  `FOCUS`, `KEY`, `VOICE`. Every film reads the same ring and answers each
+  `FOCUS`, `TYPE`, `VOICE`. Every film reads the same ring and answers each
   kind its own way (Tron's grid ripples, Evangelion's AT field flares, the
   Matrix's rain splashes). This one ring replaces a uniform per event.
   - *Time.* The plugin stamps each impulse on the monotonic clock and uploads
@@ -56,17 +56,20 @@ Each is one fact with one source; nothing is stored that can be computed.
     when a window stops moving: its drawn position was changing last frame
     and is not this frame (the same per-frame position the velocity comes
     from, so a tiling animation, a drag and a keyboard move all land the same
-    way, with no event of their own to miss). `KEY`: a key press Hyprland
-    delivered to a client window, never one a compositor binding, an input
-    method or a lock surface consumed (the point of delivery is to be found
-    in InputManager before building; if no such point exists, KEY is
-    dropped, not approximated); placed along the focused window's lower edge;
-    the key's identity is discarded on receipt. `VOICE`: the voice-activity
+    way, with no event of their own to miss). `TYPE`: typing, defined by what was pressed, not where it went (this
+    laptop is aarch64, where Hyprland's function hooks do nothing, so the
+    point where a key reaches a client cannot be observed): a key whose
+    keysym in the keyboard's current xkb state is printable, pressed with no
+    modifier held but Shift, while a client window has keyboard focus, no
+    input method holds a grab and the session is not locked. No binding of
+    Omarchy's is a printable key without a modifier (that would break
+    typing). Placed along the focused window's lower edge; the keycode and
+    keysym are used only to decide this and are not kept. `VOICE`: the voice-activity
     edges below.
-  - *Privacy.* Nothing about keys or voice is stored or logged. The screen
-    does show when typing and speech happen; while the screen is being shared
-    or recorded (Hyprland's screenshare state), `KEY` and `VOICE` impulses
-    and `voice` stop.
+  - *Privacy.* Nothing about keys or voice is stored or logged: only that
+    typing or speech happened, and how loud. On a shared screen this tells a
+    viewer nothing the screen and the call do not already show (the typed
+    text appears in the app, the voice is heard).
 - **Voice.** `voice`: Voxtype's speech loudness, 0 to 1. The feed service is
   the one door for outside input to the plugin; voice is its own small
   message on the same socket, independent of the agents' text snapshot and
@@ -113,17 +116,26 @@ film's program in the pass's GL state is verified before building.
 
 ### 3. Glass that survives motion
 
-Today's glass is applied in the window shader's blur variant (SPEC.md
-"Glass"). A window drawn through any transformer (Hyprland's wobble or
-motion blur, or our tilt) is first drawn into its own buffer without that
-variant, so it would turn solid while it moves. The fix keeps one rule in
-one place: the glass function (background colours to glass) is one GLSL
-source, used by the window shader patch as today and by a **glass
-transformer** that runs first in a moving glass window's transformer chain
-and applies it to the window's buffer, so every later stage, and Hyprland's
-blur behind the transformed window (it blurs through the buffer's alpha
-matte), sees glass. It is attached in `render.pre` whenever a glass window
-has another active transformer, and is inactive otherwise.
+Today's glass is decided in the window shader's blur variant, per surface,
+from the colour and alpha the app drew (SPEC.md "Glass"). A window drawn
+through any transformer (Hyprland's wobble or motion blur, or our tilt) is
+first drawn, surface by surface, into its own buffer with blur off, then
+composited once with Hyprland's blur behind it where that buffer is
+translucent (its matte is the window's box; the blur is weighted by one
+minus the buffer's alpha, ElementRenderer.cpp:760 and surface.frag
+`USE_BLUR_MATTE`). So the rule is: **glass is decided per surface as each
+surface is drawn, in the direct path and in the transformed source path
+alike**, by the one glass function, and the composite applies nothing again
+(the patch is excluded from the matte composite). The translucent buffer then
+carries glass through every transformer stage to Hyprland's own blur.
+
+How the transformed source draw reaches the glass function is verified
+before building (candidates: a transformer's `preWindowRender`, which
+Hyprland calls with the main pass's render data before the source pass; a
+variant flag that pass already sets). If neither holds, glass windows get no
+transformer (no tilt, wobble or motion blur on them), the physical tier is
+the frame, the world's answers and the 3D switch, and this part is closed as
+not buildable on 0.57.
 
 ### 4. Motion with mass
 
@@ -154,26 +166,30 @@ A new transition built on Hyprland's scene renderer (it renders any
 workspace on its own for screen capture), not on Hyprland's workspace
 animation, which Omarchy turns off so a switch is instant.
 
-- **What is drawn.** For the switch's length (about 450 ms) the plugin draws
-  one opaque layer at `RENDER_POST_WINDOWS`: above the wallpaper, the bottom
-  layers and the windows, below the top and overlay layers, where Omarchy's
-  bar, dock and notifications are (`hyprctl layers`: levels 2 and 3). In it:
-  the backdrop as the camera moves (`switchProgress`, `switchDirection`),
-  then two panels along the film's path, the workspace left and the one
-  arriving, each a buffer of that workspace's windows alone
-  (`WORKSPACE_WINDOWS`) composited over the moving backdrop, so their glass
-  shows the film's world behind it. At the end the arriving panel is exactly
-  where its windows are and the layer stops; the live windows show.
-- **The buffers** are taken once, when the switch starts: the workspace left
-  as it was last drawn, the one arriving as it is; they are not refreshed
-  during the 450 ms. How a plugin renders a workspace scene into its own
-  buffer (screen capture's isolated scene resources and render session) is
-  verified before building.
-- **A switch during a switch** starts from what is on screen: the panel
-  arriving becomes the panel leaving, from its current place, and the new
-  destination arrives; nothing jumps.
-- **Input** goes where Hyprland sends it, to the arriving workspace from the
-  start, as during its own workspace animations.
+- **Presence.** Each workspace on a monitor has a presence, easing toward 1
+  for the active one and 0 for the rest over the switch's length (about 450
+  ms), the way a window's fade eases. A switch only changes targets, so a
+  switch during a switch starts from what is on screen and nothing jumps,
+  with any number of workspaces in flight.
+- **What is drawn.** While any workspace on the monitor has a presence
+  between 0 and 1, the plugin draws one opaque layer at
+  `RENDER_POST_WINDOWS`: above the wallpaper, the bottom layers and the
+  windows, below the top and overlay layers, where Omarchy's bar, dock and
+  notifications are (`hyprctl layers`: levels 2 and 3). In it: the backdrop
+  as the camera moves (`switchProgress`, `switchDirection`), then each
+  workspace in flight as a panel placed by its presence along the film's
+  path, rendered **live every frame** from its windows alone
+  (`WORKSPACE_WINDOWS`, popups included) and composited over the moving
+  backdrop, so its glass shows the film's world, and a menu opened or a
+  window changed during the switch shows at once. When only the active
+  workspace is left, at presence 1, its panel is exactly where its windows
+  are, the layer stops, and the live windows show. How a plugin renders a
+  workspace scene into its own buffer (screen capture's isolated scene
+  resources and render session) is verified before building; its cost (one
+  scene per workspace in flight, for under half a second) is measured.
+- **Input** goes where Hyprland sends it: to the active workspace from the
+  start, which is the panel arriving and live on screen, exactly as during
+  Hyprland's own workspace animations.
 - **When no 3D plays** (the switch is instant, as today): a special
   workspace is open on that monitor, a pinned window is on it, either
   workspace has a fullscreen window, a workspace gesture is in progress or
@@ -245,15 +261,12 @@ Jurassic Park (another lane) adopts each part as it lands.
 
 ## To verify before building (against Hyprland v0.57.0, scratch/ref/hyprland-057)
 
-- Where InputManager delivers a key to a client after bindings, input
-  methods and lock surfaces (for `KEY`; dropped if none).
 - An OVER decoration can run the film's program in the pass's GL state.
-- The transformed path blurs behind a window through its buffer's alpha, so
-  a glass transformer first in the chain carries glass through wobble,
-  motion blur and tilt.
 - How a plugin renders a workspace scene into its own buffer from a render
-  stage (screen capture's isolated scene resources), and what its glass looks
-  like composited over the moving backdrop.
+  stage (screen capture's isolated scene resources), every frame, and what
+  its glass looks like composited over the moving backdrop.
+- How the transformed source draw reaches the glass function (part 3), or
+  part 3's stated fallback.
 
 ## Acceptance
 
