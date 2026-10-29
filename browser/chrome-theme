@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""Writes the applied Omarchy theme as Google Chrome's theme: the frame, tabs,
+toolbar, address bar and new tab page take the theme's colours, and the tab
+strip is lit from below by its accent, under a fine grain.
+
+Chrome follows a look only from a theme extension, and branded Chrome loads
+one only from its store, from its unpacked-extension page in developer mode,
+or from its external extension directory. This signs the theme as a package
+and lists it in ~/.local/share/omarchy-cinema/chrome, which Chrome's external
+extension directory links to (one root command, which this prints until it
+is there). Chrome reads that directory when it starts and installs the newer
+package through its own install path, so a theme switch reaches Chrome at its
+next start; a running Chrome keeps the look it started with.
+
+    browser/chrome-theme
+
+Omarchy runs it after every theme switch (install adds the theme-set hook).
+The header is drawn from five roles of the applied theme's colors.toml, read
+through omarchy-theme-color, so every theme gets its own, films and stock
+themes alike. A theme without all five takes the package away, and Chrome
+goes back to its own look.
+"""
+
+import fcntl
+import hashlib
+import io
+import json
+import os
+import random
+import re
+import struct
+import subprocess
+import tempfile
+import time
+import zipfile
+import zlib
+from pathlib import Path
+
+THEME = Path.home() / ".local/state/omarchy/current/theme"
+OUT = Path.home() / ".local/share/omarchy-cinema/chrome"
+# Chrome's external extension directory for this install (DIR_MODULE/extensions).
+CHROME_EXTERNAL = Path("/opt/google/chrome/extensions")
+# Omarchy's browser policy: a managed theme colour blocks every theme package.
+CHROME_POLICY = Path("/etc/opt/chrome/policies/managed/color.json")
+ROLES = ("background", "foreground", "accent", "lighter_background", "darker_background")
+
+
+def colors():
+    """The header's roles as [r, g, b] (Omarchy fills in the shades a theme
+    leaves out), and whether the theme is light; None when it lacks one."""
+    toml = THEME / "colors.toml"
+    if not toml.is_file():
+        return None
+    out = subprocess.run(["omarchy-theme-color", "--file", str(toml), "--all"],
+                         capture_output=True, text=True, check=True).stdout
+    c = dict(line.split("\t", 1) for line in out.splitlines() if "\t" in line)
+    if not all(re.fullmatch(r"#[0-9A-Fa-f]{6}", c.get(role, "")) for role in ROLES):
+        return None
+    roles = {role: [int(c[role][i:i + 2], 16) for i in (1, 3, 5)] for role in ROLES}
+    return roles, c.get("mode") == "light"
+
+
+def mix(a, b, t):
+    return [round(x + (y - x) * t) for x, y in zip(a, b)]
+
+
+def png(width, height, rows):
+    """An RGB PNG from rows of [r, g, b] pixels."""
+    raw = b"".join(b"\0" + bytes(c for px in row for c in px) for row in rows)
+    chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+def frame_image(base, glow, strength, scale):
+    """The tab strip's backing: the frame colour, lit from below by the accent
+    as if the toolbar glowed, under a fine grain. Chrome tiles it from the top
+    left, so it varies only down the strip and the grain is per pixel."""
+    width, height = 128 * scale, 64 * scale
+    grain = random.Random(f"{base}{glow}{scale}")
+    rows = []
+    for y in range(height):
+        t = min(1.0, y / (42 * scale))
+        lit = mix(base, glow, strength * t * t)
+        rows.append([[min(255, max(0, c + n)) for c in lit]
+                     for n in (grain.choice((-2, -1, 0, 0, 1, 2)) for _ in range(width))])
+    return png(width, height, rows)
+
+
+def theme(roles, light, version):
+    """The extension's files: a manifest of the theme's roles and the frame images."""
+    bg, fg, accent = roles["background"], roles["foreground"], roles["accent"]
+    lighter, darker = roles["lighter_background"], roles["darker_background"]
+    manifest = {
+        "manifest_version": 3,
+        "name": "Omarchy",
+        "description": "The applied Omarchy theme, written by omarchy-cinema's browser/chrome-theme.",
+        "version": version,
+        "theme": {
+            "images": {
+                "theme_frame": {"100": "frame.png", "200": "frame@2x.png"},
+                "theme_frame_inactive": {"100": "frame-inactive.png", "200": "frame-inactive@2x.png"},
+            },
+            "colors": {
+                "frame": bg,
+                "frame_inactive": darker,
+                "toolbar": lighter,
+                "tab_text": fg,
+                "tab_background_text": mix(fg, bg, 0.3),
+                "tab_background_text_inactive": mix(fg, bg, 0.45),
+                "bookmark_text": fg,
+                "toolbar_text": fg,
+                "toolbar_button_icon": accent,
+                "omnibox_background": bg,
+                "omnibox_text": fg,
+                "ntp_background": bg,
+                "ntp_text": fg,
+                "ntp_link": accent,
+                "ntp_header": lighter,
+            },
+            "properties": {"ntp_logo_alternate": 0 if light else 1},
+        },
+    }
+    files = {"manifest.json": json.dumps(manifest, indent=2).encode()}
+    for name, base, strength in (("frame", bg, 0.14), ("frame-inactive", darker, 0.06)):
+        files[f"{name}.png"] = frame_image(base, accent, strength, 1)
+        files[f"{name}@2x.png"] = frame_image(base, accent, strength, 2)
+    return files
+
+
+def zipped(files):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in sorted(files.items()):
+            z.writestr(zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0)), data)
+    return buf.getvalue()
+
+
+def field(number, data):
+    """One length-delimited protobuf field."""
+    def varint(n):
+        out = b""
+        while n > 0x7F:
+            out += bytes([n & 0x7F | 0x80])
+            n >>= 7
+        return out + bytes([n])
+    return varint(number << 3 | 2) + varint(len(data)) + data
+
+
+def crx(zip_bytes, key):
+    """A CRX3 package: the zip behind a header that signs it with the key, whose
+    hash is the extension's id."""
+    public = subprocess.run(["openssl", "pkey", "-in", key, "-pubout", "-outform", "DER"],
+                            capture_output=True, check=True).stdout
+    crx_id = hashlib.sha256(public).digest()[:16]
+    signed = field(1, crx_id)
+    message = b"CRX3 SignedData\x00" + struct.pack("<I", len(signed)) + signed + zip_bytes
+    signature = subprocess.run(["openssl", "dgst", "-sha256", "-sign", key],
+                               input=message, capture_output=True, check=True).stdout
+    header = field(2, field(1, public) + field(2, signature)) + field(10000, signed)
+    ext_id = "".join("abcdefghijklmnop"[int(h, 16)] for h in crx_id.hex())
+    return ext_id, b"Cr24" + struct.pack("<II", 3, len(header)) + header + zip_bytes
+
+
+def write(path, data):
+    """Replace a file whole, so Chrome never reads half of one."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, path)
+
+
+def main():
+    OUT.mkdir(parents=True, exist_ok=True)
+    # Quick switches run this from several batches at once: one at a time,
+    # each reading the theme applied when it starts, so the last one wins.
+    with open(OUT / ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        # The key is the extension's identity: Chrome updates the theme it
+        # installed only from a package signed by the same key.
+        key = OUT / "key.pem"
+        if not key.exists():
+            os.umask(0o077)
+            subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048",
+                            "-out", str(key)], capture_output=True, check=True)
+        found = colors()
+        listing = None
+        if found is not None:
+            # Chrome installs the package only when its version is newer than
+            # the one it has. The clock's seconds always are, even after the
+            # listing was taken away or this directory was lost.
+            now = int(time.time())
+            version = f"1.{now >> 16}.{now & 0xFFFF}"
+            ext_id, package = crx(zipped(theme(*found, version)), str(key))
+            write(OUT / "theme.crx", package)
+            listing = OUT / f"{ext_id}.json"
+            write(listing, json.dumps({"external_crx": str(OUT / "theme.crx"), "external_version": version}).encode())
+        # Chrome removes a theme its directory no longer lists.
+        for stale in OUT.glob("*.json"):
+            if stale != listing:
+                stale.unlink()
+        if listing is None:
+            (OUT / "theme.crx").unlink(missing_ok=True)
+
+    # What Chrome still needs, for whoever ran this by hand (the hook's output goes nowhere).
+    if CHROME_EXTERNAL.parent.is_dir() and CHROME_EXTERNAL.resolve() != OUT.resolve():
+        print(f"Chrome follows the theme once its extension directory links here (root, once):\n"
+              f"  sudo ln -sfn {OUT} {CHROME_EXTERNAL}")
+    if CHROME_POLICY.exists():
+        print(f"Omarchy's browser policy sets Chrome's theme colour ({CHROME_POLICY}), which blocks every theme\n"
+              f"package; it writes the colour again on each theme switch while that directory exists:\n"
+              f"  sudo rm -r {CHROME_POLICY.parent}")
+
+
+if __name__ == "__main__":
+    main()

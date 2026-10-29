@@ -154,3 +154,13 @@ hook=~/.config/omarchy/hooks/post-update.d/omarchy-cinema-rebuild
 mkdir -p "${hook%/*}"
 printf '#!/bin/bash\n# Rebuilds the backdrop plugin for the Hyprland just installed.\nexec %q\n' "$here/install" >"$hook"
 chmod 755 "$hook"
+
+# Google Chrome's header follows the applied theme too (browser/chrome-theme):
+# Omarchy runs it after every theme switch, and Chrome takes the theme it
+# writes at its next start. This first run writes the applied theme and says
+# what Chrome still needs once.
+hook=~/.config/omarchy/hooks/theme-set.d/omarchy-cinema-chrome
+mkdir -p "${hook%/*}"
+printf '#!/bin/bash\n# Writes the applied theme as Google Chrome'"'"'s.\nexec %q\n' "$here/browser/chrome-theme" >"$hook"
+chmod 755 "$hook"
+"$here/browser/chrome-theme" || echo "browser/chrome-theme failed: Chrome keeps the look it has" >&2
