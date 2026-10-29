@@ -163,7 +163,7 @@ float windows(vec2 px, out float edge, out int closest, out float near) {
         near += exp(-max(d, 0.0) / 110.0);
         vec4 r = windowRect(i);
         float lift = windowLift(i);
-        vec2 away = normalize(r.xy + r.zw * 0.5 - light);
+        vec2 away = normalize(r.xy + r.zw * 0.5 - light + vec2(0.0, -1e-3));
         s = max(s, windowShadow(px, i, away * (36.0 + 56.0 * lift), 22.0 + 40.0 * lift));
     }
     near = min(near, 1.0);
@@ -481,7 +481,7 @@ vec4 frame(vec2 px, int i) {
     float a = 0.0;
     if (d < 12.0) {
         vec2 n = edgeNormal(px, r, rounding);
-        float toward = 0.55 + 0.45 * max(dot(n, normalize(reactor() - r.xy - r.zw * 0.5)), 0.0);
+        float toward = 0.55 + 0.45 * max(dot(n, normalize(reactor() - r.xy - r.zw * 0.5 + vec2(0.0, 1e-3))), 0.0);
         // One look at the world 12 px in behind the glass: what the edge
         // bends into view, and what light is passing there.
         vec3 behind = backdrop(px - n * 12.0).rgb;
