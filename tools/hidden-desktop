@@ -90,7 +90,21 @@ if [[ ${1:-} == --inside ]]; then
   # the sandbox does not have. It is what first asks D-Bus for the portals,
   # and a portal started before the update cannot open the desktop and stays
   # down: Files then draws in GTK's defaults.
-  hyprctl eval 'hl.exec_cmd([[OMARCHY_STARTUP_BACKGROUND=$(readlink -f ~/.local/state/omarchy/current/background) QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 quickshell -n -p "$OMARCHY_PATH/shell"]])' >/dev/null
+  hyprctl eval 'hl.exec_cmd([[echo $$ >"$XDG_RUNTIME_DIR/shell.pid"; exec env OMARCHY_STARTUP_BACKGROUND=$(readlink -f ~/.local/state/omarchy/current/background) QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 quickshell -n -p "$OMARCHY_PATH/shell"]])' >/dev/null
+  # The desktop is the command's once the bar is up. A hidden bar stays
+  # mapped (parked past the screen's edge), and a top bar maps within two
+  # seconds whatever the screen.
+  bar() {
+    hyprctl -j layers 2>/dev/null | jq -e 'any(.. | objects; .namespace? == "omarchy-bar")' >/dev/null
+  }
+  until bar; do
+    shell=$(cat "$run/shell.pid" 2>/dev/null || true)
+    if ! kill -0 "$hyprland" 2>/dev/null || { [[ -n $shell ]] && ! kill -0 "$shell" 2>/dev/null; }; then
+      echo "hidden-desktop: the shell ended before its bar was up" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
   # Hyprland's notices about how it was launched (no start-hyprland, options
   # Omarchy's config still uses) are not part of the desktop. A config error
   # is not a notice: its bar stays.
