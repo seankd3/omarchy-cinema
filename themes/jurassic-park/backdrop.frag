@@ -8,6 +8,22 @@
 // item: fsn's spotlight stands on it, a pale cone from above and a white pool
 // round its foot. Behind the glass the landscape keeps its shape but not its
 // glare.
+//
+// The windows are objects standing in the landscape (specs/depth.md), calm
+// while you work and shining when they move (Sean, 2026-10-29: "nice and
+// elegant and give depth to the window"; "Unless like I'm moving windows round
+// or whatever, then you can really make things shine"). Lit from behind and
+// above, each throws its shadow on the ground in front of its foot, further
+// and softer as focus lifts it, and the spotlight spills onto the platforms
+// round the focused one's foot. Each is framed in IRIX's grey bevel, the
+// landscape bent through it. The green horizon lies on the upper glass with a
+// soft streak that slides as the window does. The eye leans a little with the
+// pointer, so the near landscape shifts a few pixels against the far. A
+// dragged window pulls the camera along a little and its wake lights the wires
+// and platforms it crosses; when it lands, the blocks round its foot pop up and
+// settle in a wave, as fsn opens a directory. Opening a window raises them
+// softly; focus glides the spotlight; the horizon brightens a little with your
+// voice. Typing has no answer.
 
 // The film's colours, from its frames and the O2 recreation of the scene.
 const vec3 SKY = vec3(0.004, 0.008, 0.024);
@@ -56,6 +72,34 @@ const int STEPS = 24;         // slots a ray crosses at most within SIGHT
 // channel goes over GLASS_CAP, so secondary text over it keeps 4.5:1.
 const float UNDER_GLASS = 0.3;
 const float GLASS_CAP = 0.2;
+// The horizon's sheen on the glass rides on that cap, at most this much a
+// channel, so muted text keeps 4.5:1 with it.
+const float SHEEN = 0.05;
+
+// Where the light comes from: the green horizon behind the windows and the
+// lamp over the focused one, above and a little to the left, as IRIX lights
+// its bevels. Shadows fall away from it, in front of each window's foot, and
+// the bevels are bright where they face it.
+const vec2 LIGHT = vec2(-0.45, -0.89);
+// IRIX's bevel: its lit and shaded faces on the focused window (the theme's
+// old active border), and the frame of the others (its inactive one).
+const vec3 BEVEL_LIT = vec3(0.894, 0.894, 0.910);
+const vec3 BEVEL_SHADED = vec3(0.541, 0.541, 0.580);
+const vec3 BEVEL_IDLE = vec3(0.353, 0.369, 0.424);
+const float RIM = 6.0; // the bevel's width outside the window, in pixels
+
+// How the blocks round a window's foot answer what happens to it: landing
+// pops them up and lets them settle, as fsn opens a directory, harder the
+// faster the window came; opening raises them softly; nothing else moves
+// them. The wave runs out over the ground at POP_SPEED world units a second
+// and fades over POP_REACH, and is over within POP_LIFE seconds. A popping
+// block still stands no higher than SLAB.
+float popOf(int kind) {
+    return kind == LAND ? 1.0 : kind == OPEN ? 0.3 : 0.0;
+}
+const float POP_SPEED = 40.0;
+const float POP_REACH = 30.0;
+const float POP_LIFE = 1.2;
 
 float rowKey(float k) {
     return mod(k, ROWS);
@@ -205,13 +249,43 @@ float dirLabel(vec2 p, float sine, float t) {
     return writing(n, p, vec2((d.lo.x + d.hi.x - cw * len) * 0.5, d.lo.y - 0.4), cell) * legible(cell.y, sine, t);
 }
 
-// What a ray meets first: how far along it, the face's normal, and what it is.
+// Distance from p to the segment a-b.
+float segment(vec2 p, vec2 a, vec2 b) {
+    vec2 ab = b - a, ap = p - a;
+    return length(ap - ab * clamp(dot(ap, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0));
+}
+
+// The events the blocks are answering (popOf), the newest POP_COUNT of them:
+// the foot of the window each happened to, on the ground (from xy to zw), its
+// age and how hard. backdrop() fills them once a pixel, before it casts the ray.
+const int POP_COUNT = 4;
+vec4 popFoot[POP_COUNT];
+vec2 popWhen[POP_COUNT];
+int pops = 0;
+
+// How much the blocks of a directory standing at c grow from the events
+// round it: a wave out from each window's foot that pops them up and lets
+// them settle; 0 at rest.
+float popAt(vec2 c) {
+    float grow = 0.0;
+    for (int k = 0; k < POP_COUNT; k++) {
+        if (k >= pops) break;
+        float far = segment(c, popFoot[k].xy, popFoot[k].zw);
+        float u = popWhen[k].x - far / POP_SPEED;
+        if (u > 0.0) grow += popWhen[k].y * exp(-far / POP_REACH - u * 5.0) * sin(u * 14.0);
+    }
+    return grow;
+}
+
+// What a ray meets first: how far along it, the face's normal, what it is,
+// and how much its directory's blocks have grown (popAt).
 struct Hit {
     float t;
     vec3 n;
     int kind;   // 0 ground, 1 platform, 2 block
     Dir dir;    // the platform's directory, or the block's
     int block;
+    float grow;
 };
 
 // Ray against a box: (in, out), and the face it enters by.
@@ -230,8 +304,10 @@ bool directory(vec3 ro, vec3 rd, vec3 inv, vec2 slot, inout Hit hit) {
     if (!present(slot)) return false;
     Dir d = dirAt(slot);
     vec3 n;
-    vec2 span = box(ro, inv, vec3(d.lo.x, 0.0, d.lo.y), vec3(d.hi.x, d.top + TALLEST, d.hi.y), n);
+    // While blocks pop, any of them may stand as high as anything can.
+    vec2 span = box(ro, inv, vec3(d.lo.x, 0.0, d.lo.y), vec3(d.hi.x, pops > 0 ? SLAB : d.top + TALLEST, d.hi.y), n);
     if (span.x > span.y || span.y < 0.0) return false;
+    float grow = pops > 0 ? popAt((d.lo + d.hi) * 0.5) : 0.0;
     vec3 pn;
     vec2 base = box(ro, inv, vec3(d.lo.x, 0.0, d.lo.y), vec3(d.hi.x, d.top, d.hi.y), pn);
     float best = base.x <= base.y ? base.x : FAR;
@@ -250,7 +326,7 @@ bool directory(vec3 ro, vec3 rd, vec3 inv, vec2 slot, inout Hit hit) {
         if (b < d.files) {
             vec2 lo = origin + vec2(c) * PITCH + vec2((PITCH.x - BLOCK.x) * 0.5, PITCH.y - BLOCK.y - 0.15);
             vec3 bn;
-            vec2 t = box(ro, inv, vec3(lo.x, d.top, lo.y), vec3(lo.x + BLOCK.x, d.top + blockHeight(d.key, b), lo.y + BLOCK.y), bn);
+            vec2 t = box(ro, inv, vec3(lo.x, d.top, lo.y), vec3(lo.x + BLOCK.x, min(d.top + blockHeight(d.key, b) * (1.0 + grow), SLAB), lo.y + BLOCK.y), bn);
             if (t.x <= t.y && t.x < best) {
                 best = t.x;
                 bestN = bn;
@@ -276,6 +352,7 @@ bool directory(vec3 ro, vec3 rd, vec3 inv, vec2 slot, inout Hit hit) {
     hit.kind = kind;
     hit.dir = d;
     hit.block = block;
+    hit.grow = grow;
     return true;
 }
 
@@ -287,6 +364,7 @@ Hit trace(vec3 ro, vec3 rd, float ground) {
     hit.n = vec3(0.0, 1.0, 0.0);
     hit.kind = 0;
     hit.block = -1;
+    hit.grow = 0.0;
     float start = max((ro.y - SLAB) / -rd.y, 0.0);
     float end = min(ground, SIGHT);
     if (start >= end) return hit;
@@ -309,12 +387,6 @@ Hit trace(vec3 ro, vec3 rd, float ground) {
         }
     }
     return hit;
-}
-
-// Distance from p to the segment a-b.
-float segment(vec2 p, vec2 a, vec2 b) {
-    vec2 ab = b - a, ap = p - a;
-    return length(ap - ab * clamp(dot(ap, ab) / dot(ab, ab), 0.0, 1.0));
 }
 
 // The wires lying on the ground at g, as coverage: each runs from a
@@ -341,10 +413,17 @@ float wires(vec2 g, vec2 pixel) {
 
 // The camera, gliding a row every ROW_SECONDS and swaying across the slots,
 // turned a little into the sway; pitched down so the horizon sits DOWN
-// screen heights above the middle.
+// screen heights above the middle. The eye leans a little toward the pointer
+// and is pulled along by a dragged window, so the near landscape shifts a few
+// pixels against them and the far hardly at all: perspective is the parallax.
+// However fast the window goes, the pull stays within about 20 pixels, and a
+// pointer on another screen leans it no further than this screen's edge.
 void camera(out vec3 ro, out vec3 forward, out vec3 right, out vec3 up) {
     float sway = cycle(240.0) * TAU;
-    ro = vec3(CELL.x * 0.5 + 5.0 * sin(sway), EYE, cycle(ROWS * ROW_SECONDS) * ROWS * CELL.y);
+    vec2 drag = focusedIndex >= 0 ? clamp(windowVelocity(focusedIndex), -3000.0, 3000.0) : vec2(0.0);
+    vec2 lean = (clamp(pointer.xy / resolution, 0.0, 1.0) - 0.5) * vec2(0.15, -0.1);
+    ro = vec3(CELL.x * 0.5 + 5.0 * sin(sway) + lean.x + drag.x * 6e-5, EYE + lean.y,
+              cycle(ROWS * ROW_SECONDS) * ROWS * CELL.y - drag.y * 6e-5);
     float yaw = 0.05 * cos(sway);
     float pitch = atan(DOWN / FOCAL);
     forward = vec3(sin(yaw) * cos(pitch), -sin(pitch), cos(yaw) * cos(pitch));
@@ -375,6 +454,60 @@ float glowLine(float d, float w) {
     return (1.0 - smoothstep(0.0, w, d)) + 0.25 * exp(-d / (w * 6.0));
 }
 
+// The window an event happened to: the one holding its point whose middle is
+// nearest it (an event is at a window's middle), or the point itself once the
+// window has gone.
+vec4 eventWindow(vec2 at) {
+    vec4 found = vec4(at, 0.0, 0.0);
+    float best = FAR;
+    for (int i = 0; i < windowCount; i++) {
+        vec4 r = windowRect(i);
+        float d = length(at - r.xy - r.zw * 0.5);
+        if (rectDistance(at, r, 0.0) < 1.0 && d < best) {
+            best = d;
+            found = r;
+        }
+    }
+    return found;
+}
+
+// Window i's shadow at px: lit from behind and above, a window standing in
+// the landscape throws its shadow forward, onto whatever lies in front of its
+// foot and a little to the right, away from the light, further and softer as
+// focus lifts it; what stands behind it, seen through the glass, stays lit.
+// 1 in full shadow.
+float shadowOf(vec2 px, int i) {
+    vec4 r = windowRect(i);
+    float lift = windowLift(i);
+    float reach = 30.0 + 50.0 * lift;
+    float below = px.y - (r.y + r.w);
+    if (below < -2.0 || below > reach * 4.0) return 0.0;
+    float slide = max(below, 0.0) * LIGHT.x / LIGHT.y;
+    float across = max(r.x + slide - px.x, px.x - (r.x + r.z + slide));
+    float side = 1.0 - smoothstep(-8.0 - 12.0 * lift, 8.0 + 24.0 * lift, across);
+    return side * exp(-max(below, 0.0) / reach) * smoothstep(-2.0, 2.0, below) * windowAlpha(i);
+}
+
+// How much window i's wake lights px, `d` from its edge: the ground it
+// crossed in the last tenth of a second or so, at most 400 pixels of it,
+// outside the window itself, brightest just behind it; 0 while it stands
+// still.
+float wakeOf(vec2 px, int i, float d) {
+    vec2 v = windowVelocity(i);
+    float speed = length(v);
+    if (speed < 40.0 || d < 0.0) return 0.0;
+    vec4 r = windowRect(i);
+    float pace = min(speed / 1500.0, 1.0) * windowAlpha(i);
+    vec2 back = v * min(0.03, 80.0 / speed);
+    float wake = 0.0;
+    for (int k = 1; k <= 5; k++) {
+        vec4 ghost = r;
+        ghost.xy -= back * float(k);
+        wake = max(wake, pace * (1.0 - 0.17 * float(k)) * (1.0 - smoothstep(-30.0, 30.0, rectDistance(px, ghost, 0.0))));
+    }
+    return wake;
+}
+
 vec4 backdrop(vec2 px) {
     vec3 ro, forward, right, up;
     camera(ro, forward, right, up);
@@ -385,9 +518,17 @@ vec4 backdrop(vec2 px) {
     vec2 g = (ro + rd * min(ground, 4.0 * SIGHT)).xz;
     vec2 pixel = fwidth(g);
 
-    // The window nearest this point.
-    float nearest = FAR;
-    for (int i = 0; i < windowCount; i++) nearest = min(nearest, windowDistance(px, i));
+    // The windows at this point: the nearest one's distance, the topmost
+    // whose glass it is behind, the shadows they throw on it and their wakes.
+    float nearest = FAR, shadow = 0.0, wake = 0.0;
+    int pane = -1;
+    for (int i = 0; i < windowCount; i++) {
+        float d = windowDistance(px, i);
+        nearest = min(nearest, d);
+        if (d < 0.0) pane = i;
+        shadow = max(shadow, shadowOf(px, i));
+        wake = max(wake, wakeOf(px, i, d));
+    }
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
 
     // fsn's spotlight: the focused window is the selected item, so a pool of
@@ -403,23 +544,43 @@ vec4 backdrop(vec2 px) {
     float radius = length(g1 - g0) * 0.15 + 0.6;
     vec3 over = rayAt(vec2(focused.x + focused.z * 0.5, focused.y - 30.0), forward, right, up);
     float lampY = max(ro.y + over.y * length(pool - ro.xz) / length(over.xz), 3.0);
-    vec3 lamp = vec3(pool.x, lampY, pool.y);
+    float spill = focusedIndex >= 0 ? windowLift(focusedIndex) * focusAlpha : 0.0;
+
+    // The events the blocks answer, newest first, each at its window's foot.
+    // Each slot is filled in turn (its index known when the loop unrolls, so
+    // the slots stay in registers).
+    int next = impulseCount - 1;
+    pops = 0;
+    for (int s = 0; s < POP_COUNT; s++) {
+        while (next >= 0 && impulses[next].z <= POP_LIFE && popOf(impulseKinds[next]) == 0.0) next--;
+        if (next < 0 || impulses[next].z > POP_LIFE) break;
+        vec4 e = impulses[next];
+        int kind = impulseKinds[next];
+        vec4 r = eventWindow(e.xy);
+        popFoot[s] = vec4(groundAt(r.xy + vec2(0.0, r.w), ro, forward, right, up), groundAt(r.xy + r.zw, ro, forward, right, up));
+        popWhen[s] = vec2(e.z, popOf(kind) * (kind == LAND ? 0.4 + 0.6 * e.w : 1.0));
+        pops = s + 1;
+        next--;
+    }
 
     vec3 col;
     float t = FAR;
     if (rd.y >= 0.0) {
-        // The sky, black overhead and green at the horizon, as fsn's is.
+        // The sky, black overhead and green at the horizon, as fsn's is; the
+        // horizon brightens a little with your voice.
         col = mix(HORIZON, SKY, smoothstep(0.0, 0.09, rd.y));
-        col += HORIZON * 0.5 * exp(-rd.y / 0.004);
+        col += HORIZON * 0.5 * (1.0 + 0.6 * voice) * exp(-rd.y / 0.004);
     } else {
         Hit hit = trace(ro, rd, ground);
         t = hit.t;
         vec3 p = ro + rd * t;
+        float wire = 0.0;
         if (hit.kind == 0) {
             // The void, hazier toward the horizon, and its wires.
             col = mix(GROUND, FAR_GROUND, smoothstep(20.0, SIGHT * 1.6, t));
             if (inside < 1.0) {
-                col = mix(col, WIRE * 0.75, wires(p.xz, pixel) * (1.0 - smoothstep(SIGHT * 0.5, SIGHT, t)));
+                wire = wires(p.xz, pixel) * (1.0 - smoothstep(SIGHT * 0.5, SIGHT, t));
+                col = mix(col, WIRE * 0.75, wire);
                 if (LABELS) col = mix(col, DIR_LABEL, dirLabel(p.xz, -rd.y, t) * 0.8);
             }
         } else {
@@ -431,15 +592,35 @@ vec4 backdrop(vec2 px) {
             col = base * shade;
             if (LABELS && hit.kind == 1 && hit.n.y > 0.5 && inside < 1.0)
                 col = mix(col, FILE_LABEL, fileLabel(hit.dir, p.xz, -rd.y, t) * 0.9);
+            // Blocks popping up catch the light as they rise.
+            col *= 1.0 + 1.5 * max(hit.grow, 0.0);
         }
         // fsn draws the selected directory in full colour and the rest a
         // shade darker: here the landscape round the focused window.
         float fd = max(rectDistance(px, focused, 0.0), 0.0);
         col *= mix(1.0, mix(0.72, 1.0, exp(-fd / 360.0)), focusAlpha);
-        // The pool of light, on whatever stands inside the cone.
+        // The windows' shadows lie on the landscape in front of them.
+        col *= 1.0 - 0.7 * shadow;
+        // The pool of light, on whatever stands inside the cone, and its
+        // spill on the platforms and blocks just outside it; the window's own
+        // shadow lies across the pool too, fainter than on the dark.
         float r = length(p.xz - pool) - radius * (1.0 - p.y / lampY);
         float lit = (1.0 - smoothstep(-pixel.x * 1.5, pixel.x * 1.5, r)) * focusAlpha;
-        col = mix(col, hit.kind == 2 ? min(col * 1.6 + 0.15, vec3(1.0)) : SPOT, lit * (hit.kind == 2 ? 0.8 : 0.9));
+        col = mix(col, hit.kind == 2 ? min(col * 1.6 + 0.15, vec3(1.0)) : SPOT * (1.0 - 0.35 * shadow), lit * (hit.kind == 2 ? 0.8 : 0.9));
+        if (hit.kind > 0) col += SPOT * col * 0.9 * spill * exp(-max(r, 0.0) / radius) * (1.0 - lit);
+        // A moving window's wake lights what it crossed, as if the spotlight
+        // had swept over it: the wires glow, and the platforms and blocks
+        // stand in its light.
+        if (hit.kind == 0) col += WIRE * (0.07 + 0.9 * wire) * wake;
+        else col = mix(col, min(col * 1.4 + SPOT * 0.3, vec3(1.0)), wake * 0.85);
+        // The wave from an event runs out over the ground as a ring of light,
+        // bright enough to carry through the glass.
+        for (int k = 0; k < POP_COUNT; k++) {
+            if (k >= pops) break;
+            float far = segment(p.xz, popFoot[k].xy, popFoot[k].zw);
+            float u = popWhen[k].x - far / POP_SPEED;
+            col += WIRE * 1.2 * popWhen[k].y * exp(-abs(u) * 12.0 - popWhen[k].x * 3.0 - far / POP_REACH);
+        }
         // Far things sink into the void.
         col = mix(col, FAR_GROUND, smoothstep(SIGHT * 0.55, SIGHT, t));
     }
@@ -464,6 +645,20 @@ vec4 backdrop(vec2 px) {
     float peak = max(col.r, max(col.g, col.b));
     col = mix(col, col * min(UNDER_GLASS, GLASS_CAP / max(peak, 1e-4)), inside);
 
+    // The glass catches the green horizon: a soft band along its upper edge,
+    // and a faint diagonal streak whose place follows the window across the
+    // screen, as a reflection slides when the pane moves. Only the glass
+    // shows it; the window's text stays over it, opaque.
+    if (pane >= 0) {
+        vec4 r = windowRect(pane);
+        vec2 at = px - r.xy;
+        float band = exp(-at.y / 80.0);
+        float across = dot(at, vec2(0.62, 0.78)) / (r.z + r.w) * 1.4 + r.x / resolution.x * 0.7 + r.y / resolution.y * 0.3;
+        float off = (fract(across + 0.3) - 0.5) * 8.0;
+        float streak = exp(-off * off);
+        col += mix(HORIZON / 0.5, SPOT, 0.4 * streak) * SHEEN * (band + 0.6 * streak) * inside * windowAlpha(pane);
+    }
+
     // The bar's lower edge is a wire, with a warp flash travelling along it,
     // and the landscape is dimmed under the bar so its text reads. The flash
     // runs on 2000 pixels past the right edge before it starts again, so its
@@ -477,4 +672,66 @@ vec4 backdrop(vec2 px) {
     }
 
     return vec4(col, 1.0);
+}
+
+// How far px is outside window i's edge, as its frame measures it: IRIX
+// mitres a square corner, and a rounded window's frame follows its corner.
+float edgeDistance(vec2 px, vec4 r, float rounding) {
+    vec2 q = abs(px - r.xy - r.zw * 0.5) - r.zw * 0.5;
+    return rounding > 0.0 ? rectDistance(px, r, rounding) : max(q.x, q.y);
+}
+
+// `colour` at coverage `a` over a premultiplied layer.
+vec4 over(vec4 under, vec3 colour, float a) {
+    return vec4(colour * a, a) + under * (1.0 - a);
+}
+
+// Each window's edge (specs/depth.md, part 2): IRIX's grey bevel, made of the
+// glass's own thickness. Its faces are lit where they turn toward the light
+// (the top and left, as IRIX's are) and shaded where they turn away, a thin
+// highlight runs along its outer rim, and a crease sinks the glass into it,
+// lit the other way round, as IRIX draws a sunken edge. Through the bevel the
+// landscape beside the window shows, bent and squeezed, as through the edge
+// of a thick pane. The focused window's bevel is IRIX's bright one; the
+// others are its dim grey. The bevel catches the light for a moment when its
+// window opens or takes focus, and flares when it lands.
+vec4 frame(vec2 px, int i) {
+    vec4 r = windowRect(i);
+    float rounding = windowRounding(i);
+    float d = edgeDistance(px, r, rounding);
+    if (d < -2.0 || d > RIM + 1.0) return vec4(0.0);
+    vec2 e = vec2(1.0, 0.0);
+    vec2 n = normalize(vec2(edgeDistance(px + e.xy, r, rounding) - edgeDistance(px - e.xy, r, rounding),
+                            edgeDistance(px + e.yx, r, rounding) - edgeDistance(px - e.yx, r, rounding)) + 1e-6);
+    float lift = windowLift(i);
+
+    // What just happened to this window, newest first; over within a second.
+    float glint = 0.0;
+    vec2 middle = r.xy + r.zw * 0.5;
+    for (int k = impulseCount - 1; k >= 0; k--) {
+        vec4 ev = impulses[k];
+        int kind = impulseKinds[k];
+        if (ev.z > 1.0) break;
+        if ((kind != FOCUS && kind != OPEN && kind != LAND) || length(ev.xy - middle) > 2.0 + length(r.zw) * 0.02) continue;
+        glint += kind == LAND ? 1.5 * ev.w * exp(-ev.z * 4.0) : 0.4 * smoothstep(0.0, 0.1, ev.z) * exp(-ev.z * 4.0);
+    }
+
+    float facing = dot(n, LIGHT);
+    float toward = 0.5 + 0.5 * facing;
+    vec3 grey = mix(mix(BEVEL_IDLE * 0.45, BEVEL_SHADED, lift), mix(BEVEL_IDLE * 1.2, BEVEL_LIT, lift), toward);
+    vec4 edge = vec4(0.0);
+    float bevel = smoothstep(-0.5, 0.5, d) * (1.0 - smoothstep(RIM - 0.5, RIM + 0.5, d));
+    if (bevel > 0.0) {
+        // The landscape beside the window, squeezed into the bevel: at the
+        // rim it meets the world beside it, at the glass it shows the world
+        // a few bevels further out.
+        vec3 bent = backdrop(px + n * (RIM - d) * 3.0).rgb;
+        edge = over(edge, mix(bent * (1.0 + 0.5 * toward), grey, 0.55 + 0.15 * lift) + SPOT * 0.35 * glint, bevel);
+    }
+    float rim = (1.0 - smoothstep(0.0, 1.0, abs(d - RIM + 0.5))) * (0.35 + 0.65 * abs(facing));
+    vec3 highlight = facing > 0.0 ? mix(BEVEL_LIT * (0.65 + 0.35 * lift), SPOT, min(glint, 1.0)) : BEVEL_IDLE * 0.25;
+    edge = over(edge, highlight, rim);
+    float crease = (1.0 - smoothstep(0.0, 1.0, abs(d + 0.5))) * 0.7 * abs(facing);
+    edge = over(edge, facing > 0.0 ? vec3(0.02) : mix(BEVEL_IDLE, BEVEL_SHADED, lift), crease);
+    return edge * windowAlpha(i);
 }
