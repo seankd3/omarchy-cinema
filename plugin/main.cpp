@@ -1170,18 +1170,27 @@ vec4 cinemaGlass(vec4 c) {{
     // A pass is a guest in Hyprland's GL context. Hyprland skips binding a
     // program or texture unit it believes is still current, so a pass holds
     // one of these from its first GL call to its last, uploads included, and
-    // leaves the program, vertex array and active unit as it found them.
-    // Hyprland samples units 0 to 3 and 8, so the films' 5 to 7 stay bound.
+    // leaves all it changes as it found it: the program, the vertex array,
+    // the textures on the films' units 5 to 7 and the active unit.
     struct SGuest {
-        GLint program = 0, vao = 0, unit = 0;
+        GLint                program = 0, vao = 0, unit = 0;
+        std::array<GLint, 3> textures{};
         SGuest() {
             glGetIntegerv(GL_CURRENT_PROGRAM, &program);
             glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
             glGetIntegerv(GL_ACTIVE_TEXTURE, &unit);
+            for (int i = 0; i < 3; i++) {
+                glActiveTexture(GL_TEXTURE5 + i);
+                glGetIntegerv(GL_TEXTURE_BINDING_2D, &textures[i]);
+            }
         }
         ~SGuest() {
             glBindVertexArray(vao);
             glUseProgram(program);
+            for (int i = 0; i < 3; i++) {
+                glActiveTexture(GL_TEXTURE5 + i);
+                glBindTexture(GL_TEXTURE_2D, textures[i]);
+            }
             glActiveTexture(unit);
         }
     };
