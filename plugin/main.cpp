@@ -1167,20 +1167,36 @@ vec4 cinemaGlass(vec4 c) {{
         glUniform1i(p.impulseCount, count);
     }
 
-    // Draws the square with program state already set, once per damaged rect,
-    // with everything Hyprland relies on put back as it was found: it skips
-    // binding a program it believes is still bound, and binds its own vertex
-    // arrays and textures by unit.
-    void drawSquare(Render::CRenderContext& ctx, const std::function<void()>& set) {
-        GLint program = 0, vao = 0, activeTexture = 0;
-        glGetIntegerv(GL_CURRENT_PROGRAM, &program);
-        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
-        glGetIntegerv(GL_ACTIVE_TEXTURE, &activeTexture);
+    // A pass is a guest in Hyprland's GL context. Hyprland skips binding a
+    // program or texture unit it believes is still current, so a pass holds
+    // one of these from its first GL call to its last, uploads included, and
+    // leaves all it changes as it found it: the program, the vertex array,
+    // the textures on the films' units 5 to 7 and the active unit.
+    struct SGuest {
+        GLint                program = 0, vao = 0, unit = 0;
         std::array<GLint, 3> textures{};
-        for (int unit = 0; unit < 3; unit++) {
-            glActiveTexture(GL_TEXTURE5 + unit);
-            glGetIntegerv(GL_TEXTURE_BINDING_2D, &textures[unit]);
+        SGuest() {
+            glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+            glGetIntegerv(GL_ACTIVE_TEXTURE, &unit);
+            for (int i = 0; i < 3; i++) {
+                glActiveTexture(GL_TEXTURE5 + i);
+                glGetIntegerv(GL_TEXTURE_BINDING_2D, &textures[i]);
+            }
         }
+        ~SGuest() {
+            glBindVertexArray(vao);
+            glUseProgram(program);
+            for (int i = 0; i < 3; i++) {
+                glActiveTexture(GL_TEXTURE5 + i);
+                glBindTexture(GL_TEXTURE_2D, textures[i]);
+            }
+            glActiveTexture(unit);
+        }
+    };
+
+    // Draws the square with program state already set, once per damaged rect.
+    void drawSquare(Render::CRenderContext& ctx, const std::function<void()>& set) {
         auto& gpu = g->gpu;
         for (int unit = 0; unit < 3; unit++) {
             glActiveTexture(GL_TEXTURE5 + unit);
@@ -1193,13 +1209,6 @@ vec4 cinemaGlass(vec4 c) {{
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         });
         g_pHyprOpenGL->disableScissor();
-        glBindVertexArray(vao);
-        glUseProgram(program);
-        for (int unit = 0; unit < 3; unit++) {
-            glActiveTexture(GL_TEXTURE5 + unit);
-            glBindTexture(GL_TEXTURE_2D, textures[unit]);
-        }
-        glActiveTexture(activeTexture);
     }
 
     class CBackdropPass : public IPassElement {
@@ -1212,7 +1221,8 @@ vec4 cinemaGlass(vec4 c) {{
                 return {};
             // The textures for this frame, filled here, where the render
             // context is current; every frame drawn after reads them.
-            auto& gpu = g->gpu;
+            const SGuest guest;
+            auto&        gpu = g->gpu;
             glActiveTexture(GL_TEXTURE7);
             glBindTexture(GL_TEXTURE_2D, gpu.data);
             uploadShapes(m_scene.shapes);
@@ -1286,8 +1296,9 @@ vec4 cinemaGlass(vec4 c) {{
             const CBox area  = band(*found);
             CBox       box   = area.copy().scale(monitor->m_scale);
             ctx.m_data.renderModif.applyToBox(box);
-            const auto proj = g_pHyprRenderer->projectBoxToTarget(ctx, box);
-            const auto now  = std::chrono::steady_clock::now();
+            const auto   proj = g_pHyprRenderer->projectBoxToTarget(ctx, box);
+            const auto   now  = std::chrono::steady_clock::now();
+            const SGuest guest;
             g_pHyprRenderer->blend(true);
             drawSquare(ctx, [&] {
                 setUniforms(g->gpu.frame, monitor, state.drawn, state.answered, proj, area, now);
