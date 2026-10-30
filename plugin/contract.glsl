@@ -209,9 +209,9 @@ int windowAt(vec2 at) {
     for (int i = 0; i < windowCount; i++) {
         vec4 r = windowRect(i);
         vec2 off = at - r.xy - r.zw * 0.5;
-        if (all(lessThan(abs(off), r.zw * 0.5 + 1.0)) && dot(off, off) < best) {
+        if (all(lessThan(abs(off), r.zw * 0.5 + 1.0)) && length(off) < best) {
             found = i;
-            best = dot(off, off);
+            best = length(off);
         }
     }
     return found;
