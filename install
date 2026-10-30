@@ -145,8 +145,10 @@ StandardOutput=null
 [Install]
 WantedBy=graphical-session.target
 EOF
-systemctl --user daemon-reload
-systemctl --user enable --now omarchy-cinema-feed.service >/dev/null 2>&1 || echo "omarchy-cinema-feed did not start: systemctl --user status omarchy-cinema-feed" >&2
+# With no user manager to reach (a console, a sandbox) the feed is not
+# enabled, and the update hook below is still put in place.
+{ systemctl --user daemon-reload && systemctl --user enable --now omarchy-cinema-feed.service; } >/dev/null 2>&1 ||
+  echo "omarchy-cinema-feed did not start: systemctl --user status omarchy-cinema-feed" >&2
 
 # Omarchy runs this after `omarchy update`: the plugin is rebuilt for the
 # Hyprland just installed (Sean, 2026-10-28). It loads at the next login.

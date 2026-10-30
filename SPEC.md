@@ -61,7 +61,7 @@ login and nothing unloads it while Hyprland runs; a theme without
 `backdrop.frag` leaves it idle (no draw, no timer). Native code is never
 swapped in a running Hyprland: on 2026-10-28 an unload, load and theme switch
 hung the desktop and it took a forced power-off. A new build takes effect at
-the next login, and is tried first in a nested Hyprland.
+the next login, and is tried first in the hidden desktop.
 
 **Glass: the background turns to glass, text stays opaque.** Sean: "the
 transparency should effect the background but not the text, all text should
@@ -109,6 +109,19 @@ name because the OSD reloads its QML only when the path changes. The popups
 are canvas, not shader effects, so `tools/osd-preview` renders them off screen
 exactly as they draw live. No HUD text.
 
+**Previews and visual tests.** `tools/hidden-desktop` logs a real Hyprland in
+where it is never on screen: Sean's desktop with the checkout's `./install`
+and a chosen film applied (Omarchy's own headless theme switch), drawing into
+`tools/frameclock`, a Wayland compositor with no screen that takes each frame
+and asks for the next. It runs in a sandbox with Sean's configuration and the
+checkout as throwaway copies, none of his other files and no route to his
+session (no compositor, Hyprland socket, bus, `/run` or network of his), and
+every process ends with it. A Hyprland nested in his session drew only while
+its window was on his screen, and Hyprland's own headless outputs ask NVIDIA
+for linear buffers it cannot render to. `tools/theme-previews` opens the
+stock previews' four windows there and writes `themes/<slug>/preview.png` at
+their 2560x1440.
+
 ## Layout and install
 
 ```
@@ -145,6 +158,6 @@ for `omarchy theme install` (a git-installed theme loses its `hyprland.lua`).
 3. Workspace 1 before and after screenshots, read for legibility.
 4. Idle cost measured against a stock theme (plugin idle), interleaved.
 5. Missing and broken shader, and switching between film and stock themes:
-   Hyprland survives, in a nested instance.
+   Hyprland survives, in the hidden desktop.
 6. Dictating in each film shows its popup, and in a stock theme Voxtype's own;
    switching theme while Voxtype runs switches the popup.

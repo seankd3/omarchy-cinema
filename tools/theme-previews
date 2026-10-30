@@ -1,0 +1,89 @@
+#!/bin/bash
+# Captures each film theme's preview for Omarchy's theme picker from a real
+# desktop that is never on screen (tools/hidden-desktop, logged in with the
+# film applied): the stock previews' four windows (nvim, btop, a file listing
+# and Files, two by two) at their 2560x1440, under the bar.
+#
+#   tools/theme-previews [slug ...]
+#
+# Writes themes/<slug>/preview.png, for every film theme unless slugs are given.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+
+if [[ ${1:-} == --inside ]]; then
+  slug=$2 out=$3
+  hyprctl plugin list | grep -q '^Plugin backdrop ' || { echo "theme-previews: the backdrop plugin did not load" >&2; exit 1; }
+
+  # Apps start the way Omarchy starts them, from Hyprland, so they have its
+  # environment.
+  launch() {
+    hyprctl eval "hl.exec_cmd([[$1]])" >/dev/null
+  }
+  open() {
+    launch "$2"
+    until hyprctl -j clients | jq -e --arg class "$1" 'any(.class == $class)' >/dev/null; do sleep 0.1; done
+  }
+  focus() {
+    hyprctl dispatch "hl.dsp.focus({ window = 'class:^$1\$' })" >/dev/null
+  }
+
+  # A home with Files' own folders, and only them.
+  mkdir -p ~/{Documents,Downloads,Music,Pictures,Videos}
+  # An agent at work, writing this checkout's spec, for the backdrops that
+  # rain the agents' text; the feed is the one ./install runs, and it idles
+  # under the other films.
+  mkdir -p ~/.claude/projects/preview
+  jq -nc --rawfile text "$here/SPEC.md" \
+    '{type: "assistant", timestamp: (now | todate), message: {content: [{type: "text", text: $text}]}}' \
+    >~/.claude/projects/preview/session.jsonl
+  launch "python3 '$here/feed/cinema-feed.py'"
+
+  # The stock previews tile, whatever layout the hidden screen's workspace has
+  # saved (Omarchy gives each screen its own block of ten). Each new window
+  # splits the focused one along its longer side, so the second goes right of
+  # the first, and each column then splits in two.
+  workspace=$(hyprctl -j activeworkspace | jq -r .id)
+  hyprctl eval "o.workspace_mode({ workspace = '$workspace', mode = 'dwindle' })" >/dev/null
+  open cinema-nvim "foot --app-id=cinema-nvim -D '$here' nvim +40 -c 'set splitkeep=cursor' -c 'Neotree show' install"
+  open cinema-btop "foot --app-id=cinema-btop btop"
+  focus cinema-nvim
+  open cinema-ls "foot --app-id=cinema-ls -D '$here' bash -ic 'eza -lh --group-directories-first --icons=auto; exec bash -i'"
+  focus cinema-btop
+  open org.gnome.Nautilus "nautilus --new-window '$HOME'"
+  focus cinema-nvim
+
+  # Long enough for Files to draw its folders, btop to graph a few seconds
+  # and the rain to fill.
+  sleep 6
+  grim "$out/$slug.png"
+  exit
+fi
+
+if (($#)); then
+  slugs=("$@")
+else
+  slugs=()
+  for theme in "$here"/themes/*/backdrop.frag; do
+    slugs+=("$(basename "$(dirname "$theme")")")
+  done
+fi
+
+out=$(mktemp -d)
+trap 'rm -rf "$out"' EXIT
+for slug in "${slugs[@]}"; do
+  [[ -f $here/themes/$slug/backdrop.frag ]] || { echo "theme-previews: $slug is not a film theme" >&2; exit 1; }
+  # 1920x1080 a point, the density of the stock previews' text. A film takes
+  # about 20 s; one that stalls (a shader that hangs the renderer, a window or
+  # a capture that never comes) ends its whole sandbox at two minutes and
+  # writes nothing.
+  mkdir "$out/$slug"
+  if ! timeout 120 "$here/tools/hidden-desktop" --size 2560x1440 --scale 1.333333 --theme "$slug" --out "$out/$slug" \
+    "$here/tools/theme-previews" --inside "$slug" "$out/$slug"; then
+    echo "theme-previews: $slug failed; $out/$slug/hypr.*/*/hyprland.log and desktop.log say what the desktop did" >&2
+    trap - EXIT
+    exit 1
+  fi
+  mv "$out/$slug/$slug.png" "$here/themes/$slug/preview.png"
+  echo "$here/themes/$slug/preview.png"
+done
