@@ -86,6 +86,11 @@ if [[ ${1:-} == --inside ]]; then
     echo "hidden-desktop: D-Bus did not take the desktop's environment: ${activated#*$'\n'}" >&2
     exit 1
   fi
+  # Then the shell, as omarchy-launch-shell starts it without the journal
+  # the sandbox does not have. It is what first asks D-Bus for the portals,
+  # and a portal started before the update cannot open the desktop and stays
+  # down: Files then draws in GTK's defaults.
+  hyprctl eval 'hl.exec_cmd([[OMARCHY_STARTUP_BACKGROUND=$(readlink -f ~/.local/state/omarchy/current/background) QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 quickshell -n -p "$OMARCHY_PATH/shell"]])' >/dev/null
   # Hyprland's notices about how it was launched (no start-hyprland, options
   # Omarchy's config still uses) are not part of the desktop. A config error
   # is not a notice: its bar stays.
