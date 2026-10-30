@@ -398,11 +398,12 @@ vec4 backdrop(vec2 px) {
     // moves, and the sun's warm glow along the side facing it. Only the glass
     // shows it, the text stays over it, and it is never darker than the
     // background (colors.toml's), so it cannot lower the text's contrast.
-    if (closest >= 0 && nearest < 0.0) {
-        vec4 r = windowRect(closest);
+    int over = windowOver(px);
+    if (over >= 0) {
+        vec4 r = windowRect(over);
         vec2 toSun = normalize(sun - r.xy - r.zw * 0.5 + vec2(0.0, -1e-3));
         float facing = exp(-(dot(r.zw * 0.5, abs(toSun)) - dot(px - r.xy - r.zw * 0.5, toSun)) / 90.0);
-        float a = windowAlpha(closest) * inside;
+        float a = windowAlpha(over) * inside;
         col = mix(col, vec3(1.0), 0.8 * glassStreak(px, r) * a);
         col = max(mix(col, mix(vec3(1.0), GOLD, 0.35), 0.35 * facing * a), background);
     }

@@ -217,11 +217,12 @@ vec4 backdrop(vec2 px) {
     // the window across the screen, as a real reflection slides when the pane
     // moves, and the horizon's glow along its upper glass. Only the glass
     // shows it; the window's text stays over it, opaque.
-    if (closest >= 0 && nearest < 0.0) {
-        vec4 r = windowRect(closest);
+    int over = windowOver(px);
+    if (over >= 0) {
+        vec4 r = windowRect(over);
         float streak = glassStreak(px, r);
         float top = exp(-(px.y - r.y) / 90.0);
-        light += mix(cyan, vec3(1.0), 0.5) * (0.045 * streak + 0.05 * top) * windowAlpha(closest);
+        light += mix(cyan, vec3(1.0), 0.5) * (0.045 * streak + 0.05 * top) * windowAlpha(over);
     }
 
     // Light pools in the seams between windows.

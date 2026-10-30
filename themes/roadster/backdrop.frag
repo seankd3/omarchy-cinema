@@ -350,10 +350,11 @@ vec4 backdrop(vec2 px) {
     // The glass catches the cockpit's light: behind each window the world
     // draws the sheen on it, the streak and the horizon's glow along its
     // upper glass. Only the glass shows it; the window's text stays over it.
-    if (closest >= 0 && nearest < 0.0) {
-        vec4 r = windowRect(closest);
+    int over = windowOver(px);
+    if (over >= 0) {
+        vec4 r = windowRect(over);
         float top = exp(-(px.y - r.y) / 90.0);
-        light += mix(red, WHITE, 0.5) * (0.07 * glassStreak(px, r) + 0.09 * top) * windowAlpha(closest);
+        light += mix(red, WHITE, 0.5) * (0.07 * glassStreak(px, r) + 0.09 * top) * windowAlpha(over);
     }
 
     // The bar's lower edge: a red line with a white marker sweeping along it,

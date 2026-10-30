@@ -172,7 +172,6 @@ vec4 backdrop(vec2 px) {
         vec4 r = windowRect(i);
         float d = windowDistance(px, i);
         near += exp(-max(d, 0.0) / 60.0);
-        if (d < 0.0) pane = i;
         if (d < nearest) {
             nearest = d;
             closest = i;
@@ -289,6 +288,7 @@ vec4 backdrop(vec2 px) {
     // The rain's light on the glass: a glow along the upper glass, where the
     // rain comes from, and a soft diagonal streak that slides across the pane
     // as the window moves, as a reflection does. Only the glass shows it.
+    pane = windowOver(px);
     if (pane >= 0) {
         vec4 r = windowRect(pane);
         vec2 at = px - r.xy;

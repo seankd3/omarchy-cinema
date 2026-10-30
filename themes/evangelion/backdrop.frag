@@ -156,7 +156,6 @@ vec4 backdrop(vec2 px) {
         vec4 r = windowRect(i);
         float d = windowDistance(px, i);
         nearest = min(nearest, d);
-        if (d < 0.0) pane = i;
         float beyond = max(d, 0.0);
         float grip = exp(-beyond / 70.0);
         held += vec3(edgeNormal(px, r, windowRounding(i)) * 0.7 * beyond, 1.0) * grip;
@@ -279,6 +278,7 @@ vec4 backdrop(vec2 px) {
         light += orange * 0.05 * step(px.y, reserved.x);
     }
 
+    pane = windowOver(px);
     if (pane >= 0) light += sheen(px, pane);
 
     // Behind the glass no channel goes over UNDER_GLASS, so the field passing

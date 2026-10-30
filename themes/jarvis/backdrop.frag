@@ -337,10 +337,11 @@ vec4 backdrop(vec2 px) {
     // draws the sheen on it, the streak and the reactor's glow along its
     // lower glass. Only the glass shows it; the window's text stays over it,
     // opaque.
-    if (closest >= 0 && edge < 0.0) {
-        vec4 r = windowRect(closest);
+    int over = windowOver(px);
+    if (over >= 0) {
+        vec4 r = windowRect(over);
         float low = exp(-(r.y + r.w - px.y) / 90.0);
-        light += mix(cyan, HOT, 0.5) * (0.22 * glassStreak(px, r) + 0.3 * low) * windowAlpha(closest);
+        light += mix(cyan, HOT, 0.5) * (0.22 * glassStreak(px, r) + 0.3 * low) * windowAlpha(over);
     }
 
     // The bar's lower edge: a thin holographic line, a tick every 40 pixels

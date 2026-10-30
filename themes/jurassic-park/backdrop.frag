@@ -454,23 +454,6 @@ float glowLine(float d, float w) {
     return (1.0 - smoothstep(0.0, w, d)) + 0.25 * exp(-d / (w * 6.0));
 }
 
-// The window an event happened to: the one holding its point whose middle is
-// nearest it (an event is at a window's middle), or the point itself once the
-// window has gone.
-vec4 eventWindow(vec2 at) {
-    vec4 found = vec4(at, 0.0, 0.0);
-    float best = FAR;
-    for (int i = 0; i < windowCount; i++) {
-        vec4 r = windowRect(i);
-        float d = length(at - r.xy - r.zw * 0.5);
-        if (rectDistance(at, r, 0.0) < 1.0 && d < best) {
-            best = d;
-            found = r;
-        }
-    }
-    return found;
-}
-
 // Window i's shadow at px: lit from behind and above, a window standing in
 // the landscape throws its shadow forward, onto whatever lies in front of its
 // foot and a little to the right, away from the light, further and softer as
@@ -525,7 +508,6 @@ vec4 backdrop(vec2 px) {
     for (int i = 0; i < windowCount; i++) {
         float d = windowDistance(px, i);
         nearest = min(nearest, d);
-        if (d < 0.0) pane = i;
         shadow = max(shadow, shadowOf(px, i));
         wake = max(wake, wakeOf(px, i, d));
     }
@@ -556,7 +538,7 @@ vec4 backdrop(vec2 px) {
         if (next < 0 || impulses[next].z > POP_LIFE) break;
         vec4 e = impulses[next];
         int kind = impulseKinds[next];
-        vec4 r = eventWindow(e.xy);
+        vec4 r = windowRectAt(e.xy);
         popFoot[s] = vec4(groundAt(r.xy + vec2(0.0, r.w), ro, forward, right, up), groundAt(r.xy + r.zw, ro, forward, right, up));
         popWhen[s] = vec2(e.z, popOf(kind) * (kind == LAND ? 0.4 + 0.6 * e.w : 1.0));
         pops = s + 1;
@@ -649,6 +631,7 @@ vec4 backdrop(vec2 px) {
     // and a faint diagonal streak whose place follows the window across the
     // screen, as a reflection slides when the pane moves. Only the glass
     // shows it; the window's text stays over it, opaque.
+    pane = windowOver(px);
     if (pane >= 0) {
         vec4 r = windowRect(pane);
         vec2 at = px - r.xy;
@@ -706,15 +689,7 @@ vec4 frame(vec2 px, int i) {
     float lift = windowLift(i);
 
     // What just happened to this window, newest first; over within a second.
-    float glint = 0.0;
-    vec2 middle = r.xy + r.zw * 0.5;
-    for (int k = impulseCount - 1; k >= 0; k--) {
-        vec4 ev = impulses[k];
-        int kind = impulseKinds[k];
-        if (ev.z > 1.0) break;
-        if ((kind != FOCUS && kind != OPEN && kind != LAND) || length(ev.xy - middle) > 2.0 + length(r.zw) * 0.02) continue;
-        glint += kind == LAND ? 1.5 * ev.w * exp(-ev.z * 4.0) : 0.4 * smoothstep(0.0, 0.1, ev.z) * exp(-ev.z * 4.0);
-    }
+    float glint = windowFlare(i, 1.5);
 
     float facing = dot(n, LIGHT);
     float toward = 0.5 + 0.5 * facing;

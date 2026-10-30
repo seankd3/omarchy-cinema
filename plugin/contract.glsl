@@ -217,6 +217,20 @@ int windowAt(vec2 at) {
     return found;
 }
 
+// The window seen at px: of the windows containing it, the one on top (a
+// window's depth is 0 on top), whose glass px is behind; -1 for none.
+int windowOver(vec2 px) {
+    int found = -1;
+    float top = FAR;
+    for (int i = 0; i < windowCount; i++) {
+        if (windowDistance(px, i) < 0.0 && windowDepth(i) < top) {
+            found = i;
+            top = windowDepth(i);
+        }
+    }
+    return found;
+}
+
 // windowAt's rect, or an empty rect at the point when it is in no window.
 vec4 windowRectAt(vec2 at) {
     int i = windowAt(at);
