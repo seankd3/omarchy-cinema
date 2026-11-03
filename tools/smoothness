@@ -10,13 +10,14 @@
 # this checkout's desktop, themes and tools, round by round, interleaved;
 # without one, this checkout as it stands. The desktop is Sean's screen unless
 # --size says otherwise (at scale 1); a smaller one keeps the GPU from
-# saturating when only the timing is measured. One line per run. Per vblank of
-# frameclock's 60 Hz display, the backdrop's time on screen should move by
-# exactly one frame (16.67 ms):
-#   fps     vblanks a second whose backdrop moved (60 is every one)
-#   judder  RMS of each vblank's step minus 16.67 ms
-#   held    vblanks whose backdrop did not move
-#   jumps   vblanks whose backdrop moved over 1.5 frames
+# saturating when only the timing is measured. One line per run. On
+# frameclock's 60 Hz display a new frame should come every vblank, and the
+# backdrop's time in it should be one frame (16.67 ms) on from the last:
+#   missed  vblanks with no new frame (it was late, or nothing asked for it)
+#   judder  RMS of the step minus 16.67 ms, between frames on consecutive
+#           vblanks, so the clock alone and not the missed frames
+#   held    of those, frames whose backdrop did not move
+#   jumps   of those, frames whose backdrop moved over 1.5 frames
 #   speed   the backdrop's time against the display's (1 is right)
 #   gpu     the hidden Hyprland's SM share (nvidia-smi pmon) and its GPU ms a
 #           frame rendered
@@ -122,22 +123,21 @@ for c in commits:
     if drawn is not None:
         shown[-(-(c - epoch) // period)] = drawn
 first, last = -(-(start - epoch) // period), (end - epoch) // period
-on = prev = None
-steps = []
-for k in range(min(shown, default=first), last + 1):
-    on = shown.get(k, on)
-    if k > first and on is not None and prev is not None:
-        steps.append(on - prev)
-    prev = on
-# Every vblank of the window must have shown a traced backdrop.
-if period is None or len(steps) < last - first or not any(start <= at <= end for at, _ in times):
+# Every vblank of the window must show a traced backdrop.
+if period is None or not shown or min(shown) >= first or not any(start <= at <= end for at, _ in times):
     sys.exit(1)
-p, n = period / 1e9, len(steps)
+p = period / 1e9
+vblanks = range(first + 1, last + 1)
+on = {}
+for k in range(min(shown), last + 1):
+    on[k] = shown.get(k, on.get(k - 1))
+steps = [shown[k] - shown[k - 1] for k in vblanks if k in shown and k - 1 in shown]
+n = len(steps) or 1
+missed = 100 * sum(k not in shown for k in vblanks) / len(vblanks)
 judder = math.sqrt(sum((s - p) ** 2 for s in steps) / n) * 1000
 held = 100 * sum(s == 0 for s in steps) / n
 jumps = 100 * sum(s > 1.5 * p for s in steps) / n
-speed = sum(steps) / (n * p)
-fps = sum(s != 0 for s in steps) / (n * p)
+speed = (on[last] - on[first]) / (len(vblanks) * p)
 rendered = sum(end <= c <= gpuEnd for c in commits) / ((gpuEnd - end) / 1e9)
 gpu = wait = float("nan")
 try:
@@ -147,7 +147,7 @@ try:
     gpu = sum(sm) / len(sm) if sm else float("nan")
 except FileNotFoundError:
     pass
-print(f"round {round_} {label:<12} fps {fps:5.1f}  judder {judder:5.2f} ms  held {held:4.1f}%  jumps {jumps:4.1f}%  "
+print(f"round {round_} {label:<12} missed {missed:4.1f}%  judder {judder:5.2f} ms  held {held:4.1f}%  jumps {jumps:4.1f}%  "
       f"speed {speed:5.3f}  gpu {gpu:4.1f}% {gpu / 100 * 1000 / rendered if rendered else float('nan'):5.2f} ms/frame ({rendered:.0f} rendered/s)  wait {wait:5.1f} ms/s")
 EOF
   done
