@@ -88,7 +88,7 @@ the worktree's scratch/.
    Install's icon loop stays until one exists.
 7. **Docs.** contract.glsl said Hyprland's border and shadow are off for a
    film with `frame()`; since 70ce3d6 both stay on. Done: `perf/window-pass`.
-8. **Taste.** Jurassic Park's labels, Jarvis's glass: specs/taste-sheet.md.
+8. **Taste.** Jurassic Park's labels, Jarvis's glass: answered, specs/taste-sheet.md.
 9. **Elegance, next.** The seven `gtk.css` share 22 selectors but each
    film's rules differ (Roadster's brackets, Oblivion's soft frames), so they
    are not copies; only the `:root` roles could come from `colors.toml`

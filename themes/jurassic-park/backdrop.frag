@@ -37,17 +37,9 @@ const vec3 SPOT = vec3(1.0, 0.98, 0.91);
 const vec3 AGES[6] = vec3[](vec3(0.25, 0.72, 0.93), vec3(0.13, 0.66, 0.60), vec3(0.29, 0.45, 0.94),
                             vec3(0.72, 0.64, 0.96), vec3(0.94, 0.74, 0.31), vec3(0.91, 0.32, 0.29));
 
-// Whether each block carries its file's name, and each directory its name
-// on the ground before it, as the film's do; false draws the landscape with
-// no text (Sean, 2026-10-29: "lets try lots of stuff").
-const bool LABELS = true;
-const vec3 FILE_LABEL = vec3(0.97, 0.87, 0.95);
-const vec3 DIR_LABEL = vec3(0.66, 0.94, 0.90);
-
 // The landscape, in world units (a block is about one across). Directories
 // stand one to a slot in rows, slots CELL.x across and rows CELL.y deep; a
-// directory's files stand on it in a grid PITCH apart, each with its name in
-// front of it.
+// directory's files stand on it in a grid PITCH apart.
 const vec2 CELL = vec2(14.0, 20.0);
 const vec2 PITCH = vec2(1.8, 2.0);
 const vec2 BLOCK = vec2(1.15, 0.9);
@@ -167,87 +159,6 @@ float blockHeight(vec2 key, int b) {
 vec3 blockColour(vec2 key, int b) {
     float a = hash(key + vec2(float(b) * 2.11, 9.0));
     return AGES[a < 0.62 ? 0 : a < 0.74 ? 1 : a < 0.82 ? 2 : a < 0.89 ? 3 : a < 0.95 ? 4 : 5];
-}
-
-// The names the landscape's files and directories carry: the park's own.
-const int FILE_NAMES = 32;
-const int DIR_NAMES = 16;
-const int NAME_START[49] = int[](
-    0, 6, 11, 20, 34, 42, 56, 63, 68, 77, 91, 96, 104, 109, 124, 133, 143, 153, 162, 168,
-    177, 187, 198, 209, 220, 230, 242, 253, 263, 274, 286, 295, 302, 309, 326, 334, 343, 351, 360, 372,
-    386, 394, 409, 416, 430, 444, 453, 461, 469);
-const int NAME_CHARS[469] = int[](
-    65, 114, 109, 111, 114, 121, 70, 101, 110, 99, 101, 77, 97, 105, 110, 46, 71, 97, 116, 101,
-    72, 97, 109, 109, 111, 110, 100, 115, 46, 76, 111, 100, 103, 101, 67, 104, 101, 109, 105, 99,
-    97, 108, 80, 104, 97, 114, 109, 97, 99, 101, 117, 116, 105, 99, 97, 108, 72, 101, 108, 105,
-    112, 97, 100, 72, 111, 116, 101, 108, 68, 105, 108, 111, 46, 68, 111, 99, 107, 69, 109, 98,
-    114, 121, 111, 46, 83, 116, 111, 114, 97, 103, 101, 84, 45, 82, 101, 120, 86, 101, 104, 105,
-    99, 108, 101, 115, 86, 105, 100, 101, 111, 86, 105, 115, 105, 116, 111, 114, 115, 46, 67, 101,
-    110, 116, 101, 114, 80, 101, 114, 105, 109, 101, 116, 101, 114, 82, 97, 112, 116, 111, 114, 46,
-    80, 101, 110, 80, 111, 119, 101, 114, 46, 71, 114, 105, 100, 84, 111, 117, 114, 46, 67, 97,
-    114, 115, 65, 118, 105, 97, 114, 121, 80, 97, 100, 100, 111, 99, 107, 46, 55, 71, 97, 108,
-    108, 105, 109, 105, 109, 117, 115, 66, 114, 97, 99, 104, 105, 111, 115, 97, 117, 114, 84, 114,
-    105, 99, 101, 114, 97, 116, 111, 112, 115, 70, 101, 101, 100, 105, 110, 103, 46, 76, 111, 103,
-    115, 99, 104, 101, 100, 117, 108, 101, 46, 55, 112, 101, 114, 115, 111, 110, 110, 101, 108, 46,
-    53, 50, 97, 118, 105, 97, 116, 105, 111, 110, 46, 51, 51, 100, 111, 111, 114, 46, 108, 111,
-    99, 107, 115, 73, 115, 108, 97, 46, 78, 117, 98, 108, 97, 114, 67, 111, 110, 116, 114, 111,
-    108, 46, 82, 111, 111, 109, 71, 101, 110, 101, 114, 97, 116, 111, 114, 68, 111, 100, 103, 115,
-    111, 110, 90, 111, 111, 108, 111, 103, 121, 80, 104, 121, 115, 105, 99, 97, 108, 46, 83, 101,
-    99, 117, 114, 105, 116, 121, 65, 118, 105, 97, 116, 105, 111, 110, 80, 101, 114, 115, 111, 110,
-    110, 101, 108, 83, 99, 104, 101, 100, 117, 108, 101, 84, 101, 108, 101, 112, 104, 111, 110, 101,
-    84, 111, 117, 114, 46, 67, 111, 110, 116, 114, 111, 108, 65, 110, 105, 109, 97, 108, 46, 70,
-    101, 101, 100, 105, 110, 103, 82, 101, 115, 101, 97, 114, 99, 104, 65, 105, 114, 112, 111, 114,
-    116, 46, 70, 108, 105, 103, 104, 116, 115, 65, 110, 105, 109, 97, 108, 115, 80, 104, 121, 115,
-    105, 99, 97, 108, 46, 80, 108, 97, 110, 116, 86, 105, 115, 105, 116, 111, 114, 46, 67, 101,
-    110, 116, 101, 114, 78, 101, 100, 114, 121, 108, 97, 110, 100, 72, 97, 116, 99, 104, 101, 114,
-    121, 71, 101, 110, 101, 116, 105, 99, 115);
-
-int nameLength(int n) {
-    return NAME_START[n + 1] - NAME_START[n];
-}
-
-// How much of name `n` inks the ground or platform point q: written along x
-// from at.x, the tops of its letters at at.y and their feet toward the
-// viewer, each letter `cell` (across, deep) in world units.
-float writing(int n, vec2 q, vec2 at, vec2 cell) {
-    vec2 uv = vec2(q.x - at.x, at.y - q.y) / cell;
-    if (uv.y < 0.0 || uv.y >= 1.0 || uv.x < 0.0 || uv.x >= float(nameLength(n))) return 0.0;
-    return glyph(NAME_CHARS[NAME_START[n] + int(uv.x)], vec2(fract(uv.x), uv.y));
-}
-
-// A name only shows while its letters stand at least a few pixels tall: `deep`
-// is their depth on the ground, seen `t` away at a grazing `sine`.
-float legible(float deep, float sine, float t) {
-    return smoothstep(4.0, 8.0, deep * sine / t * resolution.y);
-}
-
-// The name on the platform in front of the file under p, if any.
-float fileLabel(Dir d, vec2 p, float sine, float t) {
-    vec2 q = p - d.lo - MARGIN;
-    ivec2 c = ivec2(floor(q / PITCH));
-    int b = c.y * d.nx + c.x;
-    if (c.x < 0 || c.x >= d.nx || c.y < 0 || b >= d.files) return 0.0;
-    int n = int(hash(d.key + vec2(float(b) * 3.7, 13.0)) * float(FILE_NAMES));
-    float len = float(nameLength(n));
-    // Letters lie on the platform, so they are drawn deep to read upright
-    // from the camera's slant.
-    float cw = min(0.2, (PITCH.x - 0.1) / len);
-    vec2 cell = vec2(cw, min(cw * 3.3, 0.66));
-    // The name sits in the strip before its block, half a unit into the pitch.
-    vec2 mid = d.lo + MARGIN + vec2((float(c.x) + 0.5) * PITCH.x, float(c.y) * PITCH.y + 0.5);
-    return writing(n, p, vec2(mid.x - cw * len * 0.5, mid.y + cell.y * 0.5), cell) * legible(cell.y, sine, t);
-}
-
-// The directory's name on the ground before it, if p is there.
-float dirLabel(vec2 p, float sine, float t) {
-    vec2 slot = floor(p / CELL);
-    if (!present(slot)) return 0.0;
-    Dir d = dirAt(slot);
-    int n = FILE_NAMES + int(hash(d.key + 19.1) * float(DIR_NAMES));
-    float len = float(nameLength(n));
-    float cw = min(0.75, (d.hi.x - d.lo.x) / len);
-    vec2 cell = vec2(cw, min(cw * 1.6, 2.0));
-    return writing(n, p, vec2((d.lo.x + d.hi.x - cw * len) * 0.5, d.lo.y - 0.4), cell) * legible(cell.y, sine, t);
 }
 
 // The events the blocks are answering (popOf), the newest POP_COUNT of them:
@@ -554,7 +465,6 @@ vec4 backdrop(vec2 px) {
             if (inside < 1.0) {
                 wire = wires(p.xz, pixel) * (1.0 - smoothstep(SIGHT * 0.5, SIGHT, t));
                 col = mix(col, WIRE * 0.75, wire);
-                if (LABELS) col = mix(col, DIR_LABEL, dirLabel(p.xz, -rd.y, t) * 0.8);
             }
         } else {
             vec3 base = hit.kind == 1 ? PLATFORM : blockColour(hit.dir.key, hit.block);
@@ -563,8 +473,6 @@ vec4 backdrop(vec2 px) {
             float shade = hit.n.y > 0.5 ? 0.86 : hit.n.z < -0.5 ? 1.0 : 0.6;
             if (hit.kind == 1) shade = hit.n.y > 0.5 ? 1.0 : hit.n.z < -0.5 ? 0.72 : 0.55;
             col = base * shade;
-            if (LABELS && hit.kind == 1 && hit.n.y > 0.5 && inside < 1.0)
-                col = mix(col, FILE_LABEL, fileLabel(hit.dir, p.xz, -rd.y, t) * 0.9);
             // Blocks popping up catch the light as they rise.
             col *= 1.0 + 1.5 * max(hit.grow, 0.0);
         }
