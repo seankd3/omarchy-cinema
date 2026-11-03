@@ -1,10 +1,13 @@
 #!/bin/bash
 # How smoothly a film's backdrop moves and what it costs the GPU, measured in
 # the hidden desktop: the film (Tron Legacy unless --theme says) with two
-# glass terminals, nothing else moving, for 12 s after 4 s to settle.
+# glass terminals, nothing else moving: 12 s of motion after 4 s to settle,
+# then 6 s of GPU (sampling it makes the motion less smooth, so not at once).
 #
-#   tools/smoothness [--rounds N] [--theme SLUG] CHECKOUT...
+#   tools/smoothness [--rounds N] [--theme SLUG] [--size WxH] CHECKOUT...
 #
+# The desktop is Sean's screen unless --size says otherwise (at scale 1); a
+# smaller one keeps the GPU from saturating when only the timing is measured.
 # Runs each checkout's own tools/hidden-desktop, one at a time, interleaved
 # round by round, and prints one line per run. Per vblank of frameclock's
 # 60 Hz display, the backdrop's time on screen should move by exactly one
@@ -36,19 +39,22 @@ if [[ ${1:-} == --inside ]]; then
   now >"$out/start"
   sleep 12
   now >"$out/end"
+  sleep 6
+  now >"$out/gpu"
   exit
 fi
 
-rounds=3 theme=tron-legacy
+rounds=3 theme=tron-legacy size=()
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --rounds) rounds=$2 ;;
     --theme) theme=$2 ;;
+    --size) size=(--size "$2" --scale 1) ;;
     *) echo "smoothness: unknown option $1" >&2; exit 2 ;;
   esac
   shift 2
 done
-(($#)) || { echo "usage: tools/smoothness [--rounds N] [--theme SLUG] CHECKOUT..." >&2; exit 2; }
+(($#)) || { echo "usage: tools/smoothness [--rounds N] [--theme SLUG] [--size WxH] CHECKOUT..." >&2; exit 2; }
 
 runs=$(mktemp -d)
 trap 'rm -rf "$runs"' EXIT
@@ -58,24 +64,22 @@ for ((round = 1; round <= rounds; round++)); do
     out=$runs/$round-$(basename "$checkout")
     mkdir "$out"
     nice -n 19 ionice -c 3 flock /tmp/omarchy-cinema-hidden.lock timeout 150 \
-      "$checkout/tools/hidden-desktop" --theme "$theme" --out "$out" "$checkout/tools/smoothness" --inside "$out" &
+      "$checkout/tools/hidden-desktop" "${size[@]}" --theme "$theme" --out "$out" "$checkout/tools/smoothness" --inside "$out" &
     desktop=$!
     until [[ -s $out/start ]] || ! kill -0 "$desktop" 2>/dev/null; do sleep 0.2; done
     pid=$(pgrep -f -- "-c $checkout/tools/hidden-desktop.lua" | head -1 || true)
     if [[ -n $pid ]]; then
       read -r _ wait0 _ <"/proc/$pid/schedstat"
-      timeout 12 nvidia-smi pmon -s u -d 1 >"$out/pmon" 2>/dev/null &
-      pmon=$!
       until [[ -s $out/end ]] || ! kill -0 "$desktop" 2>/dev/null; do sleep 0.2; done
       read -r _ wait1 _ <"/proc/$pid/schedstat" || wait1=$wait0
-      wait "$pmon" || true
       echo "$pid $(((wait1 - wait0) / 1000000))" >"$out/hyprland"
+      timeout 6 nvidia-smi pmon -s u -d 1 >"$out/pmon" 2>/dev/null || true
     fi
     wait "$desktop" || { echo "smoothness: $checkout round $round failed; see $out" >&2; trap - EXIT; exit 1; }
     python3 - "$out" "$round" "$checkout" <<'EOF'
 import math, sys
 out, round_, checkout = sys.argv[1:]
-start, end = (int(open(f"{out}/{n}").read()) for n in ("start", "end"))
+start, end, gpuEnd = (int(open(f"{out}/{n}").read()) for n in ("start", "end", "gpu"))
 period = epoch = None
 commits, times = [], []
 for line in open(f"{out}/frames.log"):
@@ -111,7 +115,7 @@ held = 100 * sum(s < p / 2 for s in steps) / n
 jumps = 100 * sum(s > 1.5 * p for s in steps) / n
 speed = sum(steps) / (n * p)
 fps = sum(s >= p / 2 for s in steps) / (n * p)
-rendered = sum(start <= c <= end for c in commits) / ((end - start) / 1e9)
+rendered = sum(end <= c <= gpuEnd for c in commits) / ((gpuEnd - end) / 1e9)
 gpu = wait = float("nan")
 try:
     pid, waited = open(f"{out}/hyprland").read().split()
