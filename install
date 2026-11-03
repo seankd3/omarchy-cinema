@@ -32,7 +32,6 @@ if grep -v '^[[:space:]]*--' "$hypr" | grep -qF "$other"; then
   echo "$hypr loads the engine in $other; switch it to this one logged out (RELEASE.md, \"Packaging\"), then run install again" >&2
   exit 1
 fi
-[[ $other == /usr/lib/omarchy-cinema/ ]] && make -s -C "$here/plugin" install
 if ! grep -qx 'require("default.hypr.omarchy")' "$hypr"; then
   echo "$hypr does not load Omarchy's defaults as require(\"default.hypr.omarchy\"); add these lines after them, then run install again: $plugin $film" >&2
   exit 1
@@ -45,6 +44,7 @@ if ! grep -qxF "$plugin" "$hypr" && compgen -G "${XDG_RUNTIME_DIR:-/run/user/$UI
   echo "$hypr does not load the engine yet; while Hyprland runs it would load at once. Log out, add this line after require(\"default.hypr.omarchy\") from a TTY (or run install there), then log in: $plugin" >&2
   exit 1
 fi
+[[ $other == /usr/lib/omarchy-cinema/ ]] && make -s -C "$here/plugin" install
 for line in "$film" "$plugin"; do
   grep -qxF "$line" "$hypr" || sed -i "/^require(\"default.hypr.omarchy\")\$/a $line" "$hypr"
 done
