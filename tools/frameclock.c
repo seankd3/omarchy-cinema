@@ -1,10 +1,15 @@
 // A Wayland compositor without a screen, for one nested compositor (a hidden
 // Hyprland): it names the GPU's render node and the formats it renders to
-// through linux-dmabuf feedback, takes each frame and asks for the next at 60
-// a second. Nothing is shown and nothing is read back; the nested compositor's
-// own screencopy (grim) is how its output is seen.
+// through linux-dmabuf feedback, takes each frame and asks for the next on a
+// fixed 60 Hz vblank, as a display does: a frame committed between two vblanks
+// is shown from the second. Nothing is shown and nothing is read back; the
+// nested compositor's own screencopy (grim) is how its output is seen.
 //
-//   frameclock <socket-name> <width>x<height>
+//   frameclock <socket-name> <width>x<height> [log]
+//
+// With a log, it writes the vblank grid ("p <period ns> <epoch ns>") and each
+// commit of a buffer ("c <ns>"), on CLOCK_MONOTONIC, appending a line at a time
+// so other writers can share the file (tools/smoothness reads it).
 //
 // Every object a client makes is accepted through one dispatcher that reads
 // the protocol's own message tables: a request creates the objects its
@@ -25,12 +30,14 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/timerfd.h>
 #include <time.h>
 #include <unistd.h>
 #include <wayland-server.h>
 #include "linux-dmabuf-v1-server-protocol.h"
 #include "xdg-shell-server-protocol.h"
 
+// The rate the nested Hyprland believes its Wayland output has.
 #define HZ 60
 
 static struct {
@@ -39,10 +46,11 @@ static struct {
     int table;      // the format table: { u32 format, u32 pad, u64 modifier } rows
     size_t entries;
     uint32_t serial;
-    struct wl_list due;       // frame callbacks committed, answered at the next tick
+    struct wl_list due;       // frame callbacks committed, answered at the next vblank
     struct wl_list shells;    // xdg_wm_base objects, pinged every beat
     struct wl_list toplevels; // xdg_toplevel objects (their xdg_surface as user data), configured every beat
-    struct wl_event_source *tick, *beat;
+    struct wl_event_source *beat;
+    int log;                  // -1 without a log
 } fc;
 
 // A surface's state between commits: its frame callbacks and attached buffer.
@@ -98,7 +106,22 @@ static struct wl_resource *make(struct wl_client *client, const struct wl_interf
     return r;
 }
 
-static int answer(void *unused) {
+static long long monotonic(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return now.tv_sec * 1000000000LL + now.tv_nsec;
+}
+
+static void note(const char *line) {
+    if (fc.log >= 0 && write(fc.log, line, strlen(line)) < 0)
+        fc.log = -1;
+}
+
+// A vblank: the frames committed since the last one are on screen now.
+static int answer(int fd, uint32_t mask, void *unused) {
+    uint64_t expirations;
+    if (read(fd, &expirations, sizeof expirations) < 0)
+        return 0;
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     uint32_t ms = now.tv_sec * 1000 + now.tv_nsec / 1000000;
@@ -163,17 +186,18 @@ static void act(struct wl_resource *r, const char *request, union wl_argument *a
     } else if (!strcmp(request, "wl_surface.frame")) {
         move(made, &s->frames);
     } else if (!strcmp(request, "wl_surface.commit")) {
-        // Nothing reads the buffer, so it is free again at once.
+        // A buffer is a new frame. Nothing reads it, so it is free again at once.
+        if (!wl_list_empty(&s->attached)) {
+            char line[64];
+            snprintf(line, sizeof line, "c %lld\n", monotonic());
+            note(line);
+        }
         struct wl_resource *x, *next;
         wl_resource_for_each_safe(x, next, &s->attached) {
             detach(x);
             wl_buffer_send_release(x);
         }
-        // The tick is armed while callbacks wait, so a commit never delays it.
-        bool armed = !wl_list_empty(&fc.due);
         wl_resource_for_each_safe(x, next, &s->frames) move(x, &fc.due);
-        if (!armed && !wl_list_empty(&fc.due))
-            wl_event_source_timer_update(fc.tick, 1000 / HZ);
     } else if (!strcmp(request, "xdg_surface.get_toplevel")) {
         wl_resource_set_user_data(made, r);
         move(made, &fc.toplevels);
@@ -278,10 +302,11 @@ static int formats(int node) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3 || sscanf(argv[2], "%dx%d", &fc.width, &fc.height) != 2) {
-        fprintf(stderr, "usage: frameclock <socket-name> <width>x<height>\n");
+    if ((argc != 3 && argc != 4) || sscanf(argv[2], "%dx%d", &fc.width, &fc.height) != 2) {
+        fprintf(stderr, "usage: frameclock <socket-name> <width>x<height> [log]\n");
         return 2;
     }
+    fc.log = argc == 4 ? open(argv[3], O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644) : -1;
 
     glob_t nodes;
     if (glob("/dev/dri/renderD*", 0, NULL, &nodes) || !nodes.gl_pathc) {
@@ -307,7 +332,18 @@ int main(int argc, char **argv) {
     wl_list_init(&fc.shells);
     wl_list_init(&fc.toplevels);
     struct wl_event_loop *loop = wl_display_get_event_loop(display);
-    fc.tick = wl_event_loop_add_timer(loop, answer, NULL);
+    // The vblanks: every period from now, however late a wakeup is.
+    const long long period = 1000000000LL / HZ, epoch = monotonic() + period;
+    int vblank = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
+    struct itimerspec grid = {.it_interval = {0, period}, .it_value = {epoch / 1000000000LL, epoch % 1000000000LL}};
+    if (vblank < 0 || timerfd_settime(vblank, TFD_TIMER_ABSTIME, &grid, NULL)) {
+        fprintf(stderr, "frameclock: no vblank timer\n");
+        return 1;
+    }
+    wl_event_loop_add_fd(loop, vblank, WL_EVENT_READABLE, answer, NULL);
+    char line[64];
+    snprintf(line, sizeof line, "p %lld %lld\n", period, epoch);
+    note(line);
     fc.beat = wl_event_loop_add_timer(loop, beat, NULL);
     // The versions the nested compositor binds (Aquamarine's Wayland backend).
     static const struct { const struct wl_interface *iface; int version; } globals[] = {

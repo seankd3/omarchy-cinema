@@ -19,8 +19,10 @@
 # that asks for each next frame. The command then runs against that Hyprland
 # (WAYLAND_DISPLAY and HYPRLAND_INSTANCE_SIGNATURE are its) on a private
 # session bus. --out DIR is the one directory it can write that outlives it,
-# and gets one hypr.* directory per run (Hyprland's sockets and log) and
-# desktop.log (what the desktop's own processes said). The desktop is Sean's
+# and gets one hypr.* directory per run (Hyprland's sockets and log),
+# desktop.log (what the desktop's own processes said) and frames.log (when
+# each frame was shown, on frameclock's 60 Hz vblanks, and the backdrop's time
+# in it; tools/smoothness reads it). The desktop is Sean's
 # screen, 2880x1800 at 1.25, unless --size and --scale say otherwise.
 #
 # Each wait lasts as long as what it waits for is alive, however loaded the
@@ -50,14 +52,23 @@ if [[ ${1:-} == --inside ]]; then
     omarchy-theme-set-gnome
   fi
 
-  "$here/tools/build/frameclock" frameclock "$size" &
+  # With --out, frames.log has each frame shown and the backdrop's time in
+  # it: frameclock's vblanks and commits, and frametrace's reading of the
+  # time the plugin draws with.
+  frames=() trace=()
+  if [[ -n $out ]]; then
+    : >"$out/frames.log"
+    frames=("$out/frames.log")
+    trace=(LD_PRELOAD="$here/tools/build/frametrace.so" FRAMETRACE="$out/frames.log")
+  fi
+  "$here/tools/build/frameclock" frameclock "$size" "${frames[@]}" &
   frameclock=$!
   while [[ ! -S $run/frameclock ]] && kill -0 "$frameclock" 2>/dev/null; do sleep 0.1; done
   # Hyprland's instance directory (its sockets and hyprland.log) is a new
   # directory in --out, so this run's log is there however the desktop ends,
   # and a run before it in the same --out is never taken for this one.
   [[ -n $out ]] && ln -s "$(mktemp -d "$out/hypr.XXXXXX")" "$run/hypr"
-  WAYLAND_DISPLAY=frameclock Hyprland -c "$here/tools/hidden-desktop.lua" >"$run/hyprland.out" 2>&1 &
+  env "${trace[@]}" WAYLAND_DISPLAY=frameclock Hyprland -c "$here/tools/hidden-desktop.lua" >"$run/hyprland.out" 2>&1 &
   hyprland=$!
 
   # Hyprland's socket comes first; its screen, once frameclock has sized it.
@@ -126,9 +137,9 @@ while [[ ${1:-} == --* ]]; do
 done
 (($#)) || { echo "usage: tools/hidden-desktop [--size WxH] [--scale S] [--theme SLUG] [--out DIR] <command> [args...]" >&2; exit 2; }
 
-frameclock=$here/tools/build/frameclock
+build=$here/tools/build
+frameclock=$build/frameclock
 if [[ ! $frameclock -nt $here/tools/frameclock.c ]]; then
-  build=$here/tools/build
   mkdir -p "$build"
   for xml in stable/xdg-shell/xdg-shell stable/linux-dmabuf/linux-dmabuf-v1; do
     name=${xml##*/}
@@ -137,6 +148,9 @@ if [[ ! $frameclock -nt $here/tools/frameclock.c ]]; then
   done
   gcc -O2 -I"$build" -o "$frameclock" "$here/tools/frameclock.c" "$build/xdg-shell-protocol.c" \
     "$build/linux-dmabuf-v1-protocol.c" $(pkg-config --cflags --libs wayland-server egl gbm)
+fi
+if [[ ! $build/frametrace.so -nt $here/tools/frametrace.c ]]; then
+  gcc -O2 -shared -fPIC -o "$build/frametrace.so" "$here/tools/frametrace.c" -ldl
 fi
 
 sandbox=(

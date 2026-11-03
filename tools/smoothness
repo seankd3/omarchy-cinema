@@ -1,0 +1,127 @@
+#!/bin/bash
+# How smoothly a film's backdrop moves and what it costs the GPU, measured in
+# the hidden desktop: the film (Tron Legacy unless --theme says) with two
+# glass terminals, nothing else moving, for 12 s after 4 s to settle.
+#
+#   tools/smoothness [--rounds N] [--theme SLUG] CHECKOUT...
+#
+# Runs each checkout's own tools/hidden-desktop, one at a time, interleaved
+# round by round, and prints one line per run. Per vblank of frameclock's
+# 60 Hz display, the backdrop's time on screen should move by exactly one
+# frame (16.67 ms):
+#   fps     new backdrop frames shown a second (60 is every vblank)
+#   judder  RMS of each vblank's step minus 16.67 ms
+#   held    vblanks whose backdrop did not move
+#   jumps   vblanks whose backdrop moved over 1.5 frames
+#   speed   the backdrop's time against the display's (1 is right)
+#   gpu     the hidden Hyprland's SM share (nvidia-smi pmon) and its GPU ms a
+#           frame rendered
+#   wait    ms a second the hidden Hyprland waited for a CPU (schedstat)
+# Each desktop runs at the lowest CPU and disk priority, under a two and a half
+# minute deadline, and holds /tmp/omarchy-cinema-hidden.lock, so only one
+# hidden desktop runs on the machine at a time.
+set -euo pipefail
+
+if [[ ${1:-} == --inside ]]; then
+  out=$2
+  hyprctl plugin list | grep -q '^Plugin backdrop ' || { echo "smoothness: the backdrop plugin did not load" >&2; exit 1; }
+  open() {
+    hyprctl eval "hl.exec_cmd([[foot --app-id=$1]])" >/dev/null
+    until hyprctl -j clients | jq -e --arg class "$1" 'any(.class == $class)' >/dev/null; do sleep 0.1; done
+  }
+  open glass-a
+  open glass-b
+  now() { python3 -c 'import time; print(time.monotonic_ns())'; }
+  sleep 4
+  now >"$out/start"
+  sleep 12
+  now >"$out/end"
+  exit
+fi
+
+rounds=3 theme=tron-legacy
+while [[ ${1:-} == --* ]]; do
+  case $1 in
+    --rounds) rounds=$2 ;;
+    --theme) theme=$2 ;;
+    *) echo "smoothness: unknown option $1" >&2; exit 2 ;;
+  esac
+  shift 2
+done
+(($#)) || { echo "usage: tools/smoothness [--rounds N] [--theme SLUG] CHECKOUT..." >&2; exit 2; }
+
+runs=$(mktemp -d)
+trap 'rm -rf "$runs"' EXIT
+for ((round = 1; round <= rounds; round++)); do
+  for checkout in "$@"; do
+    checkout=$(cd "$checkout" && pwd)
+    out=$runs/$round-$(basename "$checkout")
+    mkdir "$out"
+    nice -n 19 ionice -c 3 flock /tmp/omarchy-cinema-hidden.lock timeout 150 \
+      "$checkout/tools/hidden-desktop" --theme "$theme" --out "$out" "$checkout/tools/smoothness" --inside "$out" &
+    desktop=$!
+    until [[ -s $out/start ]] || ! kill -0 "$desktop" 2>/dev/null; do sleep 0.2; done
+    pid=$(pgrep -f -- "-c $checkout/tools/hidden-desktop.lua" | head -1 || true)
+    if [[ -n $pid ]]; then
+      read -r _ wait0 _ <"/proc/$pid/schedstat"
+      timeout 12 nvidia-smi pmon -s u -d 1 >"$out/pmon" 2>/dev/null &
+      pmon=$!
+      until [[ -s $out/end ]] || ! kill -0 "$desktop" 2>/dev/null; do sleep 0.2; done
+      read -r _ wait1 _ <"/proc/$pid/schedstat" || wait1=$wait0
+      wait "$pmon" || true
+      echo "$pid $(((wait1 - wait0) / 1000000))" >"$out/hyprland"
+    fi
+    wait "$desktop" || { echo "smoothness: $checkout round $round failed; see $out" >&2; trap - EXIT; exit 1; }
+    python3 - "$out" "$round" "$checkout" <<'EOF'
+import math, sys
+out, round_, checkout = sys.argv[1:]
+start, end = (int(open(f"{out}/{n}").read()) for n in ("start", "end"))
+period = epoch = None
+commits, times = [], []
+for line in open(f"{out}/frames.log"):
+    kind, *rest = line.split()
+    if kind == "p":
+        period, epoch = int(rest[0]), int(rest[1])
+    elif kind == "c":
+        commits.append(int(rest[0]))
+    elif kind == "t":
+        times.append((int(rest[0]), float(rest[1])))
+# What each commit shows: the backdrop time drawn last before it. It is on
+# screen from the first vblank after it.
+shown, t = {}, 0
+drawn = None
+for c in commits:
+    while t < len(times) and times[t][0] <= c:
+        drawn = times[t][1]
+        t += 1
+    if drawn is not None:
+        shown[-(-(c - epoch) // period)] = drawn
+first, last = -(-(start - epoch) // period), (end - epoch) // period
+on = prev = None
+steps = []
+for k in range(min(shown, default=first), last + 1):
+    on = shown.get(k, on)
+    if k > first and on is not None and prev is not None:
+        steps.append(on - prev)
+    prev = on
+p = period / 1e9
+n = len(steps) or 1
+judder = math.sqrt(sum((s - p) ** 2 for s in steps) / n) * 1000
+held = 100 * sum(s < p / 2 for s in steps) / n
+jumps = 100 * sum(s > 1.5 * p for s in steps) / n
+speed = sum(steps) / (n * p)
+fps = sum(s >= p / 2 for s in steps) / (n * p)
+rendered = sum(start <= c <= end for c in commits) / ((end - start) / 1e9)
+gpu = wait = float("nan")
+try:
+    pid, waited = open(f"{out}/hyprland").read().split()
+    wait = int(waited) / ((end - start) / 1e9)
+    sm = [int(f[3]) for f in (l.split() for l in open(f"{out}/pmon") if not l.startswith("#")) if f[1] == pid and f[3].isdigit()]
+    gpu = sum(sm) / len(sm) if sm else float("nan")
+except FileNotFoundError:
+    pass
+print(f"round {round_} {checkout.rsplit('/', 1)[-1]:<24} fps {fps:5.1f}  judder {judder:5.2f} ms  held {held:4.1f}%  jumps {jumps:4.1f}%  "
+      f"speed {speed:5.3f}  gpu {gpu:4.1f}% {gpu / 100 * 1000 / rendered if rendered else float('nan'):5.2f} ms/frame ({rendered:.0f} rendered/s)  wait {wait:5.1f} ms/s")
+EOF
+  done
+done
