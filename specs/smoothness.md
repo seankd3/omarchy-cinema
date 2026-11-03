@@ -93,11 +93,78 @@ the wait, read at Sean's 11 ms/s. At Sean's 2880x1800 the hidden Hyprland took
    remaining roughness in the hidden desktop is CPU starvation. GPU per frame
    equal (4.1 to 4.7 ms).
 
-## Not changed: causes outside this branch
+## GPU per draw (2026-11-03, perf/gpu-2)
 
-GPU per frame: one backdrop draw at 2880x1800 costs 4.5 to 9 ms per film
-(specs/polish.md) against an 8.33 ms frame at 120 Hz, and Sean's Hyprland runs
-at about 70% GPU with the clock at 734 of 3003 MHz. A shared window pass in
-the contract is the next branch. CPU: Sean's Hyprland waited 0.04 ms a slice
-on average, so starvation is not a cause there; the hidden desktop's is its
-nice 19.
+**Sentence:** the backdrop draws each pixel only as finely as its look needs:
+behind a window whose glass shows the world only as a veil, at half
+resolution, which the frost hides.
+
+Where the time goes, at 2880x1800 (tools/gpu-bench and ablations, five
+rounds interleaved). The GPU is shared with Sean's session and sits in one of
+two states, about 25% apart (Jarvis 5.29 or 6.63 ms), so every comparison is
+within one run.
+- Every pixel is costly, and the windows' answers as much as the world:
+  without windows, Jarvis 3.55 against 6.61 ms with workspace 1's three,
+  Tron 1.60 and 3.10, Oblivion 3.34 and 5.17, Evangelion 4.03 and 6.63,
+  Roadster 2.00 and 5.58, the Matrix 3.79 and 5.52; Jurassic Park's trace
+  7.49 either way.
+- 82% of workspace 1 is behind glass. Even a pixel there returning at once
+  (a bound, not a look) leaves Jarvis 1.97, Tron 1.28, Oblivion 2.11,
+  Evangelion 2.05, Roadster 1.61, the Matrix 2.33, Jurassic Park 3.79 ms:
+  the 1.5 ms budget is out of reach at this GPU's clock without less work
+  everywhere.
+- The clock: during the bench the GPU ran at 734 to 760 of 3003 MHz at 96%
+  use, 3.3 W and 39 C, nvidia-smi giving "Reliability" as its clock reason.
+  There, 64 multiply-adds of a vec4 a pixel cost 0.66 ms over the 0.35 ms
+  empty pass: the budget is about 170 of them.
+
+**Shape.** Hyprland's frost (blur size 3, two passes) blurs what is behind a
+glass window over about a dozen pixels, so a world drawn there at half
+resolution and filtered back up looks the same, where the film lets only a
+veil of its world through. That is the film's own fact, so it is data:
+`behind_glass = "veil"` in colors.toml, for Jarvis, Oblivion, Evangelion,
+Roadster and Jurassic Park. The plugin marks each fully present window that
+Hyprland blurs at size 3 or more, two passes or more; with any marked, the
+backdrop program draws the world inside them into a half-size texture first,
+then the screen, reading that texture more than 8 px inside them
+(main-backdrop.glsl). Frames, the bar, every other point and every point of
+Tron and the Matrix stay full resolution.
+
+Judged (scratch/prof/judge.py): every film over the seven scenes of
+scratch/bench/same.py, main against this, through Hyprland 0.57's own Kawase
+blur (blur1/blur2.glsl) at the film's frost, its brightness and its glass, in
+levels of 255 on screen. Outside the windows every pixel is identical, and
+so is every frame. Inside, the worst pixel and the pixels at 2 levels or
+more, of about 4 million: Jarvis 4.8 and at most 2344, Jurassic Park 2.25 and
+8, Evangelion 2.25 and 22, Roadster 1.7 and none, Oblivion under 1. At 1:1,
+the worst spot of each beside main's cannot be told apart (stills in
+scratch/stills/), nor can Jarvis's glass in the hidden desktop.
+
+Not kept: Tron's grid at half resolution differs by up to 15 levels at the
+horizon, where its far rows are finer than a half-size pixel, and blending
+those rows into their average changed Tron's own horizon by up to 103 levels
+and still left 8; the Matrix's frost is 1. Oblivion skipping its clouds under
+the glass, which its daylight wash replaces, came to 8% and was not exact: 3
+levels along the panes' edges, from the clouds' screen derivatives. Scaling
+the half-size pass's derivatives back to screen pixels changed nothing
+measurable.
+
+| ms a draw, main and this | rest | drag |
+|---|---|---|
+| Jarvis | 5.29 3.39 | 5.47 3.67 |
+| Oblivion | 4.13 3.21 | 4.41 3.54 |
+| Evangelion | 5.30 3.47 | 5.69 3.77 |
+| Roadster | 4.44 2.96 | 4.24 2.99 |
+| Jurassic Park | 5.80 5.38 | 6.20 5.59 |
+| Tron Legacy | 2.45 2.50 | 3.29 3.38 |
+| The Matrix | 4.37 4.44 | 4.72 4.80 |
+
+Jurassic Park gains least: at half resolution neighbouring rays cross
+different directories, so its trace runs as long as before for a quarter of
+the pixels. Tron and the Matrix pay about 0.06 ms for the shared main.
+tools/smoothness at 1440x900, three rounds each, GPU a frame rendered: Jarvis
+3.60 to 3.72 ms on main, 3.43 to 3.47 here; Tron 3.22 to 3.32 and 3.12 to
+3.28. Missed frames and judder follow the CPU wait, as before.
+
+CPU: Sean's Hyprland waited 0.04 ms a slice on average, so starvation is not
+a cause there; the hidden desktop's is its nice 19.

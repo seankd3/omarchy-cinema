@@ -72,9 +72,8 @@ the worktree's scratch/.
 
    Frames are the three windows' frame passes, each drawn over the whole
    screen (about 1.3 ms of that is the early-out floor). Still over the
-   1.5 ms budget; measured next: windows past 400 px skipped (Roadster -0.9,
-   Evangelion -0.4, not pixel-exact), Jurassic Park's trace (7.0 ms with no
-   windows at all).
+   1.5 ms budget; next, `perf/gpu-2` (specs/smoothness.md, "GPU per draw"):
+   the world behind veiled glass at half resolution, a third off five films.
 5. **Elegance.** `glowLine` (six films, its halo a film's own), `segment`
    (three) and `around` (two): contract helpers. Done: `perf/window-pass`.
 6. **Packaging, waits for plugin/. The engine package.** PKGBUILD for x86_64

@@ -29,7 +29,9 @@ shader over the monitor, with the windows' real geometry for that frame
 window, the palette and a clock. The windows are the ones Hyprland itself
 draws on that monitor in that frame (`shouldRenderWindow`), so the backdrop
 cannot trail them. Shapes are exact rounded rectangles (signed distance), not
-textures.
+textures. Behind a window whose glass shows the world only as a veil (the
+film's `behind_glass = "veil"`, frosted by Hyprland), the world is drawn at
+half resolution, which the frost hides (specs/smoothness.md).
 
 **Same frame, no polling.** Hyprland advances its animations and layout,
 emits `render.pre`, then reads the frame's damage. The plugin reads the scene
