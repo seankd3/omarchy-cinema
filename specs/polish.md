@@ -16,14 +16,16 @@ Legacy 3.17 4.26 3.52 2.97, Oblivion 3.96 4.35 4.32 4.42, The Matrix 5.59 6.03
 top of that each window's frame, which tools/gpu-bench --frames times over
 the whole screen.
 
-Worst muted-text contrast over the glass, modelled (scratch/batch1/contrast.py:
-the glass amount of background kept, the rest the world frosted and dimmed
-as film.lua and Omarchy's glass set it), over the storyboard's four moments
-at three times, at the edge, 4 px and 16 px in: Jarvis 4.50 4.55 4.55, Tron
-Legacy 4.12 at every depth but only while a landing wave passes (0.07% of the
-glass for about half a second; 6.3 at rest), Oblivion 4.17 4.42 4.66, The
-Matrix 2.11 4.69 4.70 (the outer 4 px, under its side streams), Evangelion
-4.69 5.05 5.26, Roadster 5.38 5.60 5.60.
+Worst muted-text contrast over the glass, estimated (scratch/batch1/contrast.py:
+the glass amount of background kept, the rest the world under a Gaussian in
+place of Hyprland's Kawase frost, without Omarchy's noise and vibrancy, dimmed
+by its blur brightness), over the storyboard's four moments at three times
+each, at the edge, 4 px and 16 px in: Jarvis 4.50 4.55 4.55, Tron Legacy
+4.12 at every depth, only in the landing moment (0.02 to 0.07% of the glass,
+under the landing's wave; 6.3 or more in the other moments), Oblivion 4.17
+4.42 4.66, The Matrix 2.11 4.69 4.70 (the outer 4 px, under its side
+streams), Evangelion 4.69 5.05 5.26, Roadster 5.38 5.60 5.60. Near 4.5 the
+model is not enough; a judge through Hyprland's own blur is the next step.
 
 ## Ranked
 
@@ -46,27 +48,37 @@ Matrix 2.11 4.69 4.70 (the outer 4 px, under its side streams), Evangelion
 4. **Practicality. Gaps on a small screen** (taste sheet 1): 64 px round and
    between the windows leave nine windows at 1920x1080 too small for a
    terminal.
-5. **Robustness, next contract version. The glass's contrast limit is one
-   fact written three times.** The Matrix (0.19), Evangelion (0.36) and
-   Roadster (0.6, 0.3, 0.3) each derive by hand the brightest world behind
-   the glass that keeps muted text at 4.5:1, from colors.toml's muted,
-   background and glass and Omarchy's blur brightness. A copied film with a
-   new palette keeps the old number. Shape: the plugin derives it from the
-   theme it reads and the contract gives it; deletes the three constants and
-   their derivations. Contrast today: Evidence.
+5. **Robustness, next contract version. The glass's contrast condition is
+   derived by hand three times.** The Matrix (0.19 a channel, on its light
+   before the film's curve), Evangelion (0.36, the same way) and Roadster
+   (0.6, 0.3, 0.3 on the finished colour, a red bias that turns a white
+   flash red behind text) each work out from colors.toml's muted,
+   background and glass and Omarchy's blur brightness how bright the world
+   behind the glass may be for muted text to keep 4.5:1. A copied film with
+   a new palette keeps the old numbers. Shape: the condition has one home,
+   the luminance the finished colour behind the glass may reach, which the
+   plugin derives from the theme it reads and the contract gives; each film
+   keeps its own way of holding to it (scaling its light, or Roadster's red
+   bias). Deletes the three derivations; the Matrix's outer 4 px (Evidence)
+   is its own question.
 6. **Elegance, next contract version. The contract's per-field readers repeat
    window().** `windowDepth` has no caller; `windowDistance` only the
-   backdrop main's. Jarvis, Oblivion and Roadster answer closing, opening and
-   focus with the same geometry (a ring from 40 px at 240 px a second, a
-   settle from 60 px over 0.7 s, a 30 px warm swell), each in its own ink:
-   helpers once two films share them. Each is a contract change, so they go
-   together, with 5.
-7. **Robustness, AMD and Intel.** Derivatives in branches that differ within
-   a 2x2 quad are undefined in GLSL: Oblivion's `dFdy` in the cloud deck
-   (below the horizon, and on either side of the veil's 8 px inset), Tron's
-   `fwidth` under `if (ground)`. NVIDIA runs the quad together; elsewhere a
-   one-pixel line can flicker there. Shape: take the derivatives before the
-   branch.
+   backdrop main's. The films share answers' geometry, each in its own ink:
+   closing as a ring from 40 px out at 240 px a second (Jarvis, Oblivion,
+   Roadster), opening as a ring settling from 60 px over 0.7 s (Jarvis,
+   Oblivion; Roadster's brackets close from 60 to 12 px over 0.6 s, their
+   own), focus as a 30 px warm swell over 0.9 s (all three). Helpers for what
+   is shared. Each is a contract change, so they go together, with 5.
+7. **Robustness, other drivers.** Derivatives in control flow that differs
+   within a 2x2 quad are undefined in GLSL: Oblivion's `dFdy` in the cloud
+   deck (under the horizon branch, and the whole backdrop() under the veil's
+   branch in main-backdrop.glsl), Tron's `fwidth` under `if (ground)` and in
+   the backdrop() its frame calls. It shows nothing on this NVIDIA; another
+   driver may draw a wrong pixel along those lines. Shape: derivatives that
+   do not depend on the branch: Tron's cell size is a function of the screen
+   point and can be computed; Oblivion's slope of its noise cannot, so it
+   takes a second sample of the deck a pixel down, or the derivative moves
+   out of every branch.
 8. **Performance, measured not yet acted on.** Every film loops over the
    windows at every pixel, Evangelion and Oblivion twice; nine windows cost
    about three times what three do. Evangelion's second loop, at the

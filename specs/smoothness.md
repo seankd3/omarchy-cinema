@@ -113,15 +113,14 @@ within one run.
   Evangelion 2.05, Roadster 1.61, the Matrix 2.33, Jurassic Park 3.79 ms:
   the 1.5 ms budget is out of reach at this GPU's clock without less work
   everywhere.
-- The clock (measured again 2026-11-03, films/batch-1): the GPU holds
-  754 MHz of 3003 in every state seen, idle at 1.6 W and under the bench at
+- The clock (measured again 2026-11-03, films/batch-1, nothing changed to
+  look): the GPU held 754 MHz of 3003 idle at 1.6 W and under the bench at
   95% use, 2.6 to 3.3 W and 41 to 44 C, in P0, on mains with the
-  "performance" platform profile. nvidia-smi gives "Reliability" as the
-  active clock reason throughout, and no power cap or thermal slowdown is
-  active. So it is a fixed cap of this driver (615.78) on the N1X, not the
-  driver idling down under a light load: more load does not raise it, and
-  no setting here was changed to look. Every ms in these specs is at a
-  quarter of the rated clock. There 64 vec4 multiply-adds a pixel cost
+  "performance" platform profile, with "Reliability" the active clock reason
+  and no power cap or thermal slowdown active (driver 615.78). Load did not
+  raise it, so it is not the driver idling down under a light load; what
+  sets the limit is not known. The timings seen in these specs ran at 734 to
+  760 MHz, about a quarter of the rated clock. There 64 vec4 multiply-adds a pixel cost
   0.66 ms over the 0.35 ms empty pass, so the budget is about 110 of them.
 - The bench shares the GPU with Sean's session, whose Hyprland drew at 65
   to 72% of the GPU at moments of the same morning; a time query counts the
