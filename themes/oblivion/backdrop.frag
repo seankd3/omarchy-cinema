@@ -193,7 +193,7 @@ vec3 answers(vec2 px) {
             a.z += ink(front, 1.8) * 0.45 * glow;
             continue;
         }
-        int i = windowAt(e.xy);
+        int i = impulseWindows[k];
         vec4 rect = i < 0 ? vec4(e.xy, 0.0, 0.0) : windowRect(i);
         float d = rectDistance(px, rect, i < 0 ? 0.0 : windowRounding(i));
         if (d < 0.0 || d > 320.0) continue;

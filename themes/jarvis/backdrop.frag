@@ -187,7 +187,7 @@ vec3 answers(vec2 px, vec3 cyan, out float lattice) {
             light += cyan * (glowLine(front, 1.2, HALO) * dashes(atan(q.y, q.x), r, 40.0, 0.5, 0.0) * 0.5 + 0.1 * exp(-front / 24.0)) * glow;
             continue;
         }
-        int i = windowAt(e.xy);
+        int i = impulseWindows[k];
         vec4 rect = i < 0 ? vec4(e.xy, 0.0, 0.0) : windowRect(i);
         float d = rectDistance(px, rect, i < 0 ? 0.0 : windowRounding(i));
         if (d < 0.0 || d > 320.0) continue;

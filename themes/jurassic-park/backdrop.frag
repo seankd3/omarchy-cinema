@@ -529,7 +529,7 @@ vec4 backdrop(vec2 px) {
         if (next < 0 || impulses[next].z > POP_LIFE) break;
         vec4 e = impulses[next];
         int kind = impulseKinds[next];
-        vec4 r = windowRectAt(e.xy);
+        vec4 r = impulseRect(next);
         popFoot[s] = vec4(groundAt(r.xy + vec2(0.0, r.w), ro, forward, right, up), groundAt(r.xy + r.zw, ro, forward, right, up));
         popWhen[s] = vec2(e.z, popOf(kind) * (kind == LAND ? 0.4 + 0.6 * e.w : 1.0));
         pops = s + 1;

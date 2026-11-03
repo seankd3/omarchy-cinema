@@ -192,6 +192,7 @@ void main() {
         std::chrono::steady_clock::time_point start;
         float                                 strength = 1;
         int                                   kind     = 0;
+        uint64_t                              window   = 0; // the stable id of the window it happened to, 0 for none
     };
 
     struct SMonitor {
@@ -225,7 +226,7 @@ void main() {
         GLuint id = 0;
         GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
         GLint  feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
-        GLint  pointer, impulses, impulseKinds, impulseCount, voice, frameWindow, frameAlpha, frameBorder;
+        GLint  pointer, impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder;
     };
 
     // What the film's programs draw with: the unit square and the textures,
@@ -493,6 +494,7 @@ void main() {
         p.pointer       = at("pointer");
         p.impulses      = at("impulses");
         p.impulseKinds  = at("impulseKinds");
+        p.impulseWindows = at("impulseWindows");
         p.impulseCount  = at("impulseCount");
         p.voice         = at("voice");
         p.frameWindow   = at("frameWindow");
@@ -610,10 +612,11 @@ void main() {
         g->impulseGeneration++;
     }
 
-    void addImpulse(const Vector2D& at, float strength, int kind) {
+    void addImpulse(const Vector2D& at, float strength, int kind, const PHLWINDOW& window) {
         if (!answering())
             return;
-        g->impulses.push_back({.at = at, .start = std::chrono::steady_clock::now(), .strength = strength, .kind = kind});
+        g->impulses.push_back(
+            {.at = at, .start = std::chrono::steady_clock::now(), .strength = strength, .kind = kind, .window = window ? window->metadata().stableID() : 0});
         if (g->impulses.size() > IMPULSES)
             g->impulses.pop_front();
         g->impulseGeneration++;
@@ -626,7 +629,7 @@ void main() {
     void windowImpulse(const PHLWINDOW& w, Desktop::View::IGeometric::eGeometricValueType state, float strength, int kind) {
         if (!w || !w->m_workspace || !w->m_workspace->visible())
             return;
-        addImpulse(w->position(state) + w->size(state) / 2.0, strength, kind);
+        addImpulse(w->position(state) + w->size(state) / 2.0, strength, kind, w);
     }
 
     bool isWindowFadeout(const SP<Desktop::IFadeout>& fadeout) {
@@ -724,7 +727,7 @@ void main() {
             auto& motion = g->motion[w->metadata().stableID()];
             if (step(motion, position + monitor->m_position, w == focused, now))
                 addImpulse(position + monitor->m_position + size / 2.0, std::clamp(float(std::hypot(motion.velocity[0], motion.velocity[1]) / 3000.0), 0.25F, 1.F),
-                           IMPULSE_LAND);
+                           IMPULSE_LAND, w);
             const bool still = g->depth->value() == 0;
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(),
                                     still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, w->metadata().stableID()});
@@ -909,7 +912,7 @@ void main() {
             if (const auto window = Desktop::focusState()->window(); window && window->m_workspace && window->m_workspace->visible()) {
                 const auto at   = window->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
                 const auto size = window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-                addImpulse({at.x + size.x / 2.0, at.y + size.y}, 1.F, IMPULSE_VOICE);
+                addImpulse({at.x + size.x / 2.0, at.y + size.y}, 1.F, IMPULSE_VOICE, window);
             }
         }
         g->speaking = speaking != 0;
@@ -1139,11 +1142,13 @@ vec4 cinemaGlass(vec4 c) {{
         glUniform1f(p.voice, answer.voice);
         // The impulses with their ages now, on this monitor's coordinates:
         // ages from the monotonic clock, so the hourly wrap of `time` never
-        // reaches them.
+        // reaches them. Each names its window by its place in this scene.
         std::array<float, 4 * IMPULSES> impulses{};
-        std::array<int, IMPULSES>       kinds{};
+        std::array<int, IMPULSES>       kinds{}, windows{};
         int                             count = 0;
         for (const auto& impulse : g->impulses) {
+            const auto found        = impulse.window ? std::ranges::find(scene.shapes, impulse.window, &SShape::id) : scene.shapes.end();
+            windows[count]          = found == scene.shapes.end() ? -1 : int(found - scene.shapes.begin());
             const auto at           = impulse.at - monitor->m_position;
             impulses[4 * count + 0] = float(at.x);
             impulses[4 * count + 1] = float(at.y);
@@ -1153,6 +1158,7 @@ vec4 cinemaGlass(vec4 c) {{
         }
         glUniform4fv(p.impulses, IMPULSES, impulses.data());
         glUniform1iv(p.impulseKinds, IMPULSES, kinds.data());
+        glUniform1iv(p.impulseWindows, IMPULSES, windows.data());
         glUniform1i(p.impulseCount, count);
     }
 
@@ -1582,7 +1588,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         const auto   size  = window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
         const double along = std::fmod(0.5 + double(g->typed++) * 0.6180339887, 1.0);
         if (window->m_workspace && window->m_workspace->visible())
-            addImpulse({at.x + size.x * along, at.y + size.y}, 0.5F, IMPULSE_TYPE);
+            addImpulse({at.x + size.x * along, at.y + size.y}, 0.5F, IMPULSE_TYPE, window);
     });
     static auto RELOADED = Event::bus()->m_events.config.reloaded.listen([] {
         if (!g)

@@ -131,7 +131,7 @@ vec4 answers(vec2 px, vec2 cell) {
             // Glyphs burst out from the window's edge in a ring, white-hot at
             // its front, harder the faster it came, with a broad wave of light
             // under it that carries through the glass; brief, then calm.
-            vec4 r = windowRectAt(e.xy);
+            vec4 r = impulseRect(k);
             float d = rectDistance(px, r, 0.0);
             float reach = age * 1000.0;
             if (d < -2.0 || abs(d - reach) > 200.0) continue;
@@ -142,7 +142,7 @@ vec4 answers(vec2 px, vec2 cell) {
         } else if (kind == OPEN || kind == FOCUS) {
             // The rain round the window brightens for a moment.
             if (age > 1.0) continue;
-            float d = rectDistance(px, windowRectAt(e.xy), 0.0);
+            float d = rectDistance(px, impulseRect(k), 0.0);
             if (d < -2.0 || d > 200.0) continue;
             float near = exp(-max(d, 0.0) / 50.0) * smoothstep(0.0, 0.15, age) * exp(-age * 3.0) * (kind == OPEN ? 1.0 : e.w);
             a.xy += vec2(0.08, 0.6) * near;

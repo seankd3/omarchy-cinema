@@ -51,11 +51,11 @@ float wave(vec2 px, vec2 at, float age, float speed, float width) {
     return exp(-abs(r - age * speed) / width) * exp(-age * 1.6);
 }
 
-// Where a window event touches the floor: the foot of the window it happened
-// in (windows stand on the Grid), or the point itself.
-vec2 foot(vec2 at) {
-    int i = windowAt(at);
-    return i < 0 ? at : vec2(at.x, windowRect(i).y + windowRect(i).w);
+// Where impulse k touches the floor: the foot of the window it happened to
+// (windows stand on the Grid), or its point itself.
+vec2 foot(int k) {
+    vec4 r = impulseRect(k);
+    return vec2(impulses[k].x, r.y + r.w);
 }
 
 // How much the grid lights up at px, from everything that happened lately and
@@ -69,11 +69,11 @@ float gridLit(vec2 px) {
         // too flashy ... Unless like I'm moving windows round ... then you can
         // really make things shine"): landing rings out bright, closing is a
         // gentle ring, typing and speech make none.
-        if (kind == LAND) lit += 3.2 * e.w * wave(px, foot(e.xy), e.z, 900.0, 45.0);
-        else if (kind == CLOSE) lit += 1.0 * wave(px, foot(e.xy), e.z, 900.0, 60.0);
+        if (kind == LAND) lit += 3.2 * e.w * wave(px, foot(i), e.z, 900.0, 45.0);
+        else if (kind == CLOSE) lit += 1.0 * wave(px, foot(i), e.z, 900.0, 60.0);
         else if (kind == OPEN && e.z < 0.6) {
             // Drawn in: the ring closes on the window's foot as it opens.
-            float r = length((px - foot(e.xy)) * vec2(1.0, 2.4));
+            float r = length((px - foot(i)) * vec2(1.0, 2.4));
             lit += 1.0 * exp(-abs(r - (1.0 - e.z / 0.6) * 900.0) / 50.0);
         }
     }
@@ -180,7 +180,7 @@ vec4 backdrop(vec2 px) {
         }
         // Focus taken: the circuit flashes.
         for (int i = 0; i < impulseCount; i++)
-            if (impulseKinds[i] == FOCUS && rectDistance(impulses[i].xy, windowRect(closest), 0.0) < 0.0)
+            if (impulseKinds[i] == FOCUS && impulseWindows[i] == closest)
                 pulse += 1.2 * exp(-impulses[i].z * 3.0);
         light += tint * circuit * (0.45 + pulse) * windowAlpha(closest);
     }

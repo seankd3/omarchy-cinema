@@ -106,7 +106,7 @@ vec4 answers(vec2 px, vec2 cell) {
             // with a flash where it leaves the window and a wash behind its
             // front that carries through the glass. The cells it crosses
             // burn and stay lit behind it, fading.
-            vec4 r = windowRectAt(e.xy);
+            vec4 r = impulseRect(k);
             float f = fieldDistance(px, r);
             float reach = age * 1100.0;
             if (f < -2.0 || f > reach + 120.0) continue;
@@ -121,7 +121,7 @@ vec4 answers(vec2 px, vec2 cell) {
         } else if (kind == OPEN || kind == FOCUS) {
             // The cells along the window's edge glow up and settle.
             if (age > 1.0) continue;
-            float fc = fieldDistance(cell, windowRectAt(e.xy));
+            float fc = fieldDistance(cell, impulseRect(k));
             if (fc < -30.0 || fc > 160.0) continue;
             float fade = smoothstep(0.0, 0.15, age) * exp(-age * 3.0) * (kind == OPEN ? 1.0 : e.w);
             lit += fade * exp(-abs(fc) / 45.0);

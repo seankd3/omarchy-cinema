@@ -65,6 +65,10 @@ const int TYPE = 5;   // a key typed into the focused window
 const int VOICE = 6;  // speech began (Voxtype)
 uniform vec4 impulses[32]; // x, y, age, strength
 uniform int impulseKinds[32];
+// The window each happened to (typing and speech: the one typed or spoken
+// into), as its index this frame; -1 for none, a window closed or not drawn
+// here.
+uniform int impulseWindows[32];
 uniform int impulseCount;
 
 // How loud speech is while Voxtype records, 0 to 1 (0 when it does not). Only
@@ -256,27 +260,11 @@ float around(vec2 px, vec4 rect) {
     return s / (2.0 * (w + h));
 }
 
-// The window an event at `at` belongs to: of the windows the point falls in
-// (within a pixel), the one whose middle is nearest, since a floating window
-// can cover another's; -1 for none.
-int windowAt(vec2 at) {
-    int found = -1;
-    float best = FAR;
-    for (int i = 0; i < windowCount; i++) {
-        vec4 r = windowRect(i);
-        vec2 off = at - r.xy - r.zw * 0.5;
-        if (all(lessThan(abs(off), r.zw * 0.5 + 1.0)) && length(off) < best) {
-            found = i;
-            best = length(off);
-        }
-    }
-    return found;
-}
-
-// windowAt's rect, or an empty rect at the point when it is in no window.
-vec4 windowRectAt(vec2 at) {
-    int i = windowAt(at);
-    return i < 0 ? vec4(at, 0.0, 0.0) : windowRect(i);
+// The rect of the window impulse k happened to, or an empty rect at its point
+// when there is none.
+vec4 impulseRect(int k) {
+    int i = impulseWindows[k];
+    return i < 0 ? vec4(impulses[k].xy, 0.0, 0.0) : windowRect(i);
 }
 
 // The outward normal of a rounded rect's edge nearest px.
@@ -306,14 +294,12 @@ float glassStreak(vec2 px, vec4 r) {
 // How much window i flares from what just happened to it, within a second:
 // focus and opening as a soft swell, landing as `landing` times its strength.
 float windowFlare(int i, float landing) {
-    vec4 r = windowRect(i);
-    vec2 middle = r.xy + r.zw * 0.5;
     float flare = 0.0;
     for (int k = impulseCount - 1; k >= 0; k--) {
         int kind = impulseKinds[k];
         vec4 ev = impulses[k];
         if (ev.z > 1.0) break;
-        if ((kind != FOCUS && kind != OPEN && kind != LAND) || length(ev.xy - middle) > 2.0 + length(r.zw) * 0.02) continue;
+        if ((kind != FOCUS && kind != OPEN && kind != LAND) || impulseWindows[k] != i) continue;
         flare += kind == LAND ? landing * ev.w * exp(-ev.z * 4.0)
             : 0.6 * smoothstep(0.0, 0.12, ev.z) * exp(-ev.z * 3.5) * (kind == OPEN ? 1.0 : ev.w);
     }

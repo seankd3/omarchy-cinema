@@ -120,7 +120,7 @@ vec3 answers(vec2 px, vec3 red, float horizon, out float lit) {
             light += red * (glowLine(front, 1.2) * 0.5 + 0.08 * exp(-front / 30.0)) * swell(age, 0.1, 0.9);
             continue;
         }
-        int i = windowAt(e.xy);
+        int i = impulseWindows[k];
         vec4 rect = i < 0 ? vec4(e.xy, 0.0, 0.0) : windowRect(i);
         if (kind == LAND) {
             // Touchdown, the end of a move, which may shine: the seams round

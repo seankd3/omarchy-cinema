@@ -80,9 +80,10 @@ def framed(theme):
 def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses=(), frame=None, voice=0.0):
     """The film's program in `ctx` with everything the plugin would give it,
     as a function that draws it over the bound framebuffer. velocity: (vx, vy)
-    per window; pointer: (x, y, vx, vy); impulses: (x, y, age, strength,
-    kind), newest last. With `frame` set to a window's index, it draws that
-    window's frame (premultiplied) instead of the backdrop."""
+    per window; pointer: (x, y, vx, vy); impulses: (x, y, age, strength, kind,
+    window), newest last, window -1 for none. With `frame` set to a window's
+    index, it draws that window's frame (premultiplied) instead of the
+    backdrop."""
     contract = (ROOT / "plugin/contract.glsl").read_text().replace("#version 300 es", "#version 330 core")
     source = contract + "\n#line 1\n" + (theme / "backdrop.frag").read_text() + (BACKDROP_MAIN if frame is None else FRAME_MAIN)
     program = ctx.program(vertex_shader=VERTEX, fragment_shader=source)
@@ -118,6 +119,8 @@ def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses
         program["impulses"].write(np.array(rows, dtype="f4").tobytes())
         kinds = [int(i[4]) for i in impulses] + [0] * (32 - len(impulses))
         program["impulseKinds"].write(np.array(kinds, dtype="i4").tobytes())
+        owners = [int(i[5]) for i in impulses] + [-1] * (32 - len(impulses))
+        program["impulseWindows"].write(np.array(owners, dtype="i4").tobytes())
 
     data = np.zeros((max(3 * len(windows), 1), 4), dtype="f4")
     for i, rect in enumerate(windows):
@@ -224,10 +227,10 @@ def storyboard():
         ("rest", windows, 0, {}),
         ("drag", moved, 1, dict(velocity=[(0, 0), (-1800, 600), (0, 0)], pointer=(moved[1][0] + 200, moved[1][1] + 18, -1800, 600))),
         ("land", windows, 0, dict(pointer=(lx + lw * 0.6, ly + lh * 0.4, 0, 0), voice=0.7,
-                                  impulses=[(lx + lw / 2, ly + lh, 0.6, 1.0, VOICE), (rx + rw / 2, ry + rh / 2, 0.25, 0.8, LAND)]
-                                  + [(lx + lw * f, ly + lh, a, 0.5, TYPE) for f, a in ((0.2, 0.9), (0.42, 0.6), (0.64, 0.3), (0.86, 0.08))])),
-        ("open", windows[:2], 1, dict(impulses=[(rx + rw / 2, ry + rh * 1.5 + GAP, 0.3, 1.0, CLOSE), (lx + lw / 2, ly + lh / 2, 0.5, 1.0, OPEN),
-                                                (rx + rw / 2, ry + rh / 2, 0.15, 0.6, FOCUS)])),
+                                  impulses=[(lx + lw / 2, ly + lh, 0.6, 1.0, VOICE, 0), (rx + rw / 2, ry + rh / 2, 0.25, 0.8, LAND, 1)]
+                                  + [(lx + lw * f, ly + lh, a, 0.5, TYPE, 0) for f, a in ((0.2, 0.9), (0.42, 0.6), (0.64, 0.3), (0.86, 0.08))])),
+        ("open", windows[:2], 1, dict(impulses=[(rx + rw / 2, ry + rh * 1.5 + GAP, 0.3, 1.0, CLOSE, -1), (lx + lw / 2, ly + lh / 2, 0.5, 1.0, OPEN, 0),
+                                                (rx + rw / 2, ry + rh / 2, 0.15, 0.6, FOCUS, 1)])),
     ]
 
 
