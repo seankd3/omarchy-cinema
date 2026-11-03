@@ -1,4 +1,4 @@
-// omarchy-cinema contract 4
+// omarchy-cinema contract 5
 // Roadster: the 2026 Roadster's cockpit, drawn like a fighter jet's display.
 // A floor of red dots runs out to a thin white horizon and rushes toward the
 // viewer, with streaks of speed along it. A wireframe wedge turns slowly on
@@ -377,7 +377,7 @@ vec4 frame(vec2 px, int i) {
         float toward = 0.55 + 0.45 * max(dot(n, vec2(0.0, r.y + r.w * 0.5 > horizon ? -1.0 : 1.0)), 0.0);
         // One look at the world 12 px in behind the glass: what the edge
         // bends into view, and what light is passing there.
-        vec3 behind = backdrop(px - n * 12.0).rgb;
+        vec3 behind = worldAt(px - n * 12.0).rgb;
         float passing = smoothstep(0.05, 0.25, dot(behind, vec3(0.3, 0.5, 0.2)));
         float line = glowLine(abs(d - 0.5), 0.9) * toward * (focus ? 0.55 : 0.5) * (1.0 + 0.6 * w.lift);
         float edge = (1.0 - smoothstep(0.0, 4.0, d)) * smoothstep(-2.0, 0.0, d);

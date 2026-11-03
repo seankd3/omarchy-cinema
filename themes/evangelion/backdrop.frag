@@ -1,4 +1,4 @@
-// omarchy-cinema contract 4
+// omarchy-cinema contract 5
 // Evangelion: NERV's displays. A honeycomb of hexagonal cells lies across
 // the dark and wakes like an AT field around the windows: cells light orange
 // along every window's edge and in the seams between windows, brightest at
@@ -307,7 +307,7 @@ vec4 frame(vec2 px, int i) {
     // The field just behind the glass's edge, seen bent through its outer
     // pixels and caught by the wall.
     float edge = (1.0 - smoothstep(0.0, 6.0, d)) * smoothstep(-2.0, 0.0, d);
-    vec3 behind = d < 10.0 ? backdrop(px - n * (max(d, 0.0) + 12.0)).rgb - background : vec3(0.0);
+    vec3 behind = d < 10.0 ? worldAt(px - n * (max(d, 0.0) + 12.0)).rgb - background : vec3(0.0);
     vec3 glow = tint * (wall + hairline + wash) + behind * 3.0 * (wall + hairline) / max(strength, 0.3);
     float a = clamp(max(edge * 0.9, max(wall, hairline)), 0.0, 1.0);
     return vec4((background + behind) * 1.1 * edge * 0.9 + glow, a) * w.alpha;

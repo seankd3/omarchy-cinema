@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 4
+// omarchy-cinema contract 5
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -40,8 +40,7 @@ uniform vec3 foreground;
 uniform vec4 focused;
 uniform vec4 reserved;
 // Three texels a window, 256 to a row: (x, y, w, h), (alpha, rounding,
-// lift, depth) and (velocity x, y, veiled). Read them through the window
-// functions; `veiled` is the plugin's own (main-backdrop.glsl).
+// lift, depth) and (velocity x, y). Read them through the window functions.
 uniform sampler2D windowData;
 uniform int windowCount;
 uniform int focusedIndex;
@@ -317,12 +316,22 @@ float focusWarmth(float d, vec4 e) {
     return exp(-d / 30.0) * swell(e.z, 0.2, 0.9) * e.w;
 }
 
+// The world as the backdrop drew it in this frame, at half the screen's size
+// and filtered, at px: what a frame shows bent through the glass's edge, for
+// a texture read instead of drawing the world again. Only frame() reads it.
+uniform sampler2D drawnWorld;
+uniform mat3 worldProj;
+vec4 worldAt(vec2 px) {
+    vec3 at = worldProj * vec3(px / resolution, 1.0);
+    return textureLod(drawnWorld, at.xy * 0.5 + 0.5, 0.0);
+}
+
 // What a film defines. backdrop(px): the colour of the world at px. And,
 // optionally, frame(px, i): window i's edge in that world (specs/depth.md,
 // part 2), a premultiplied colour over a band reaching 48 px outside the
 // window and at most 2 px inside it, drawn above the window in its own pass,
-// so it moves, tilts and fades with it. A frame can call backdrop() at a bent
-// point to show the world through the glass's thickness. Hyprland's border
+// so it moves, tilts and fades with it. A frame shows the world through the
+// glass's thickness with worldAt() at a bent point. Hyprland's border
 // and shadow stay on under a frame: the frame program's main colours the
 // border ring with the film's edge.
 vec4 backdrop(vec2 px);

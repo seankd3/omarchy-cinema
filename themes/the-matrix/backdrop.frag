@@ -1,4 +1,4 @@
-// omarchy-cinema contract 4
+// omarchy-cinema contract 5
 // The Matrix: the code, and the code is what the agents on this machine are
 // writing (specs/agent-rain.md). Their text rains down the black screen in
 // mirrored glyphs, each stream led by a white-hot head carrying the newest
@@ -336,7 +336,7 @@ vec4 frame(vec2 px, int i) {
     // The rain just behind the glass's edge, seen bent through its outer
     // pixels and caught by the line.
     float edge = (1.0 - smoothstep(0.0, 6.0, d)) * smoothstep(-2.0, 0.0, d);
-    vec3 behind = d < 10.0 ? backdrop(px - n * (max(d, 0.0) + 8.0)).rgb - background : vec3(0.0);
+    vec3 behind = d < 10.0 ? worldAt(px - n * (max(d, 0.0) + 8.0)).rgb - background : vec3(0.0);
     vec3 glow = (tint * strength + behind * 4.0) * line;
     float a = clamp(max(edge * 0.85, (1.0 - smoothstep(0.0, 1.0, x)) * min(strength, 1.0)), 0.0, 1.0);
     return vec4((background + behind) * edge * 0.85 + glow, a) * w.alpha;

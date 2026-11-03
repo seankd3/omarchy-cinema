@@ -133,10 +133,11 @@ own edge. Because it is drawn in the
 window's pass it tilts, wobbles and fades with the window; fullscreen windows
 have no decorations and so no frame, as today.
 
-The glass's **thickness** is the frame band too: `frame()` is compiled in
-the same program as `backdrop()`, so it draws the world bent through the
-glass's edge by calling `backdrop()` at a coordinate pushed along the edge
-normal, plus a specular line from the light. No window-shader change, so no
+The glass's **thickness** is the frame band too: `frame()` draws the world
+bent through the glass's edge by reading it at a coordinate pushed along the
+edge normal, plus a specular line from the light. It reads the world as the
+backdrop drew it this frame, at half size (contract 5's `worldAt()`; it
+called `backdrop()` again until 2026-11-03, specs/smoothness.md). No window-shader change, so no
 need for the window's edge or surface identity inside Hyprland's surface
 shader, and popups and subsurfaces cannot pick it up.
 
@@ -265,7 +266,7 @@ measured on its own and is not held to the budget above.
 - `film.lua`'s border gradient and shadow glow, for every film that defines
   `frame()` (the edge is the film's).
 - The plan's own earlier window-shader refraction: thickness is the frame
-  calling `backdrop()`.
+  reading the world drawn this frame.
 - Motion composes Hyprland's transformer list, wobble and motion blur; the 3D
   switch is new, built on Hyprland's scene renderer. The eased `focused` rect
   and its interpolation stay as they are; `lift` is a new, per-window fact.

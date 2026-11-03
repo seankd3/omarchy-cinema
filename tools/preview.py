@@ -79,13 +79,14 @@ def framed(theme):
     return re.search(r"\bvec4\s+frame\s*\(", (theme / "backdrop.frag").read_text()) is not None
 
 
-def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses=(), frame=None, voice=0.0):
+def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses=(), frame=None, voice=0.0, world=None):
     """The film's program in `ctx` with everything the plugin would give it,
     as a function that draws it over the bound framebuffer. velocity: (vx, vy)
     per window; pointer: (x, y, vx, vy); impulses: (x, y, age, strength, kind,
     window), newest last, window -1 for none. With `frame` set to a window's
     index, it draws that window's frame (premultiplied) instead of the
-    backdrop."""
+    backdrop, reading `world`, the backdrop drawn at half size, as the
+    plugin's frames do."""
     contract = (ROOT / "plugin/contract.glsl").read_text().replace("#version 300 es", "#version 330 core")
     source = contract + "\n#line 1\n" + (theme / "backdrop.frag").read_text() + (BACKDROP_MAIN if frame is None else FRAME_MAIN)
     program = ctx.program(vertex_shader=VERTEX, fragment_shader=source)
@@ -150,6 +151,12 @@ def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses
             if name in program:
                 program[name].value = value
 
+    if world is not None and "drawnWorld" in program:
+        textures.append(world)
+        program["drawnWorld"].value = len(textures) - 1
+        # The plugin's projection of the screen in this VERTEX's terms.
+        program["worldProj"].write(np.array([2, 0, 0, 0, -2, 0, -1, 1, 1], dtype="f4").tobytes())
+
     quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
     vao = ctx.vertex_array(program, [(quad, "2f", "pos")])
 
@@ -164,7 +171,14 @@ def render(theme, t, windows, focused, frame=None, **answers):
     """One scene() drawn off screen: the backdrop as RGB, or a frame as
     premultiplied RGBA."""
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
-    draw = scene(ctx, theme, t, windows, focused, frame=frame, **answers)
+    world = None
+    if frame is not None:
+        world = ctx.texture((PIXELS[0] // 2, PIXELS[1] // 2), 4)
+        world.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        world.repeat_x = world.repeat_y = False
+        ctx.framebuffer([world]).use()
+        scene(ctx, theme, t, windows, focused, **answers)()
+    draw = scene(ctx, theme, t, windows, focused, frame=frame, world=world, **answers)
     target = ctx.simple_framebuffer(PIXELS, components=4)
     target.use()
     target.clear(0.0, 0.0, 0.0, 0.0)

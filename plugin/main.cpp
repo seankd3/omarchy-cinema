@@ -150,8 +150,7 @@ void main() {
 
     // A window as the backdrop sees it: where it is drawn, how faded, how round,
     // how it moves, how far it is lifted toward the viewer, how deep in the
-    // stack it sits (0 on top) and whether the world shows through it only as
-    // a veil (main-backdrop.glsl).
+    // stack it sits (0 on top).
     struct SShape {
         Rect                 rect{};
         float                alpha    = 1;
@@ -159,7 +158,6 @@ void main() {
         std::array<float, 2> velocity{};
         float                lift  = 0;
         float                depth = 0;
-        bool                 veiled = false;
         uint64_t             id    = 0; // the window's stable id, kept by its fadeout; 0 for none
         bool                 operator==(const SShape&) const = default;
     };
@@ -238,14 +236,16 @@ void main() {
         GLuint id = 0;
         GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
         GLint  feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
-        GLint  pointer, impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder;
+        GLint  pointer, impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder, drawnWorld, worldProj;
     };
 
     // A monitor's world at half its size, and its mipmap down to the level
-    // as soft as the film's frost (soft, a framebuffer on that level).
+    // as soft as the film's frost (soft, a framebuffer on that level); `proj`
+    // places the monitor in it, for the frames that read it (worldAt()).
     struct SCoarse {
-        GLuint texture = 0, fbo = 0, soft = 0;
-        int    width = 0, height = 0, levels = 0;
+        GLuint  texture = 0, fbo = 0, soft = 0;
+        int     width = 0, height = 0, levels = 0;
+        Mat3x3  proj;
     };
 
     // What the film's programs draw with: the unit square and the textures,
@@ -577,6 +577,8 @@ void main() {
         p.frameWindow   = at("frameWindow");
         p.frameAlpha    = at("frameAlpha");
         p.frameBorder   = at("frameBorder");
+        p.drawnWorld    = at("drawnWorld");
+        p.worldProj     = at("worldProj");
         return true;
     }
 
@@ -739,19 +741,16 @@ void main() {
         std::erase_if(g->closed, [&](const auto& entry) { return !alive.contains(entry.first); });
     }
 
-    // The windows Hyprland draws on this monitor in this frame, and those
-    // fading out after closing, where they are drawn; and where attention is.
-    // Whether the world behind window w reaches the screen only through
-    // Hyprland's frost, as it was measured to hide a half-resolution world
-    // (specs/smoothness.md). A film session blends the frost in the window's
-    // own shader (render:use_shader_blur_blend, which film.lua sets and the
-    // glass runs in), where every pixel of a blurred surface comes out opaque,
-    // its colour and alpha plus the frost under the rest, whatever its
-    // opacity or fade (0.57.0 surface.frag, OpenGL.cpp:1488). What is left
-    // is whether Hyprland draws w that way over all of its rect (blurred, not
-    // transformed, not proportional, the client's visible region, if any,
-    // all of it) and whether the frost is the one measured: Kawase at size 3
-    // or more, two passes or more, contrast 1, brightness at most 1.
+    // Whether Hyprland covers what is under window w opaque, its own pixels
+    // plus the frost under the rest. A film session blends the frost in the
+    // window's own shader (render:use_shader_blur_blend, which film.lua sets
+    // and the glass runs in), where every pixel of a blurred surface comes out
+    // opaque, its colour and alpha plus the frost under the rest, whatever its
+    // opacity or fade (0.57.0 surface.frag, OpenGL.cpp:1488). What is left is
+    // whether Hyprland draws w that way over all of its rect: blurred with its
+    // plain blur (variant 0; another may blur live or move on its own),
+    // not transformed, not proportional, and the client's visible region, if
+    // any, all of it.
     bool frosted(const PHLWINDOW& w, const Render::SWindowRenderPresentation& drawn) {
         static auto BLEND        = CConfigValue<Config::INTEGER>("render:use_shader_blur_blend");
         static auto VARIANT      = CConfigValue<Config::INTEGER>("decoration:blur:variant");
@@ -762,6 +761,16 @@ void main() {
         return *BLEND && *VARIANT == 0 && !*PROPORTIONAL && w->shouldBlur(drawn) && !w->effects().hasActiveTransformers() && whole;
     }
 
+    // Where renderWindow draws w on `monitor` with the presentation it draws
+    // with (workspace slides and the floating offset included): its top left
+    // and size, logical px.
+    std::pair<Vector2D, Vector2D> drawnBox(const PHLWINDOW& w, const Render::SWindowRenderPresentation& drawn, const PHLMONITOR& monitor) {
+        return {w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + drawn.workspaceOffset + drawn.floatingOffset - monitor->m_position,
+                w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
+    }
+
+    // The windows Hyprland draws on this monitor in this frame, and those
+    // fading out after closing, where they are drawn; and where attention is.
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {
         const auto now = std::chrono::steady_clock::now();
         SScene     scene;
@@ -814,8 +823,7 @@ void main() {
                     continue;
                 pass = OVER_FULLSCREEN;
             }
-            const auto position = w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + drawn.workspaceOffset + drawn.floatingOffset - monitor->m_position;
-            const auto size     = w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+            const auto [position, size] = drawnBox(w, drawn, monitor);
             if (w == focused) {
                 scene.focusedIndex = scene.shapes.size();
                 focusedHere        = w;
@@ -826,7 +834,7 @@ void main() {
                            IMPULSE_LAND, w);
             const bool still = g->depth->value() == 0;
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(),
-                                    still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, frosted(w, drawn),
+                                    still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F,
                                     w->metadata().stableID()});
             if (pinned) {
                 stacking.push_back(1e9 + order);
@@ -852,7 +860,7 @@ void main() {
                 scene.focusedIndex = scene.shapes.size();
             // Only a fadeout already running when the plugin loaded has none.
             const auto window = closed != g->closed.end() ? closed->second : SClosed{float(*ROUNDING)};
-            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(), window.rounding, {}, 0, 0, false, window.id});
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(), window.rounding, {}, 0, 0, window.id});
             const auto plane = fadeout->plane();
             stacking.push_back(drawOrder(workspace,
                                          plane == Desktop::FADEOUT_PLANE_WINDOW_TILED            ? TILED_FADEOUTS :
@@ -937,7 +945,7 @@ void main() {
     }
 
     // Uploads the shapes, three texels each: (x, y, w, h), (alpha, rounding,
-    // lift, depth) and (velocity x, y, veiled).
+    // lift, depth) and (velocity x, y).
     // Fills the texture bound on the active unit from `data`, with the
     // unpack state set plainly and put back after, since Hyprland's own
     // uploads rely on what they set.
@@ -981,7 +989,6 @@ void main() {
             at[7] = shapes[i].depth;
             at[8] = shapes[i].velocity[0];
             at[9]  = shapes[i].velocity[1];
-            at[10] = shapes[i].veiled;
         }
         upload(GL_RGBA32F, width, height, GL_RGBA, GL_FLOAT, data.data(), GL_NEAREST);
     }
@@ -1262,7 +1269,8 @@ vec4 cinemaGlass(vec4 c) {{
 
     // Everything the contract gives a film, for program `p`, drawing `area`
     // (logical px) placed by `proj` on `monitor`. The textures are on units
-    // 4 to 7: the coarse world, the lettering, the feed and the windows.
+    // 4 to 7: the world drawn at half size, the lettering, the feed and the
+    // windows.
     void setUniforms(const SProgram& p, const PHLMONITOR& monitor, const SScene& scene, const SAnswer& answer, const Mat3x3& proj, const CBox& area,
                      std::chrono::steady_clock::time_point now) {
         const bool  lettered = !g->glyphPixels.empty();
@@ -1278,6 +1286,8 @@ vec4 cinemaGlass(vec4 c) {{
         glUniform4fv(p.focused, 1, scene.focus.data());
         glUniform4fv(p.reserved, 1, scene.reserved.data());
         glUniform1i(p.windowData, 7);
+        glUniform1i(p.drawnWorld, 4);
+        glUniformMatrix3fv(p.worldProj, 1, GL_TRUE, g->gpu.coarse[monitor->m_id].proj.getMatrix().data());
         glUniform1i(p.windowCount, scene.shapes.size());
         glUniform1i(p.focusedIndex, scene.focusedIndex);
         glUniform1f(p.focusAlpha, scene.focusAlpha);
@@ -1338,21 +1348,22 @@ vec4 cinemaGlass(vec4 c) {{
         }
     };
 
-    // Binds the film's textures, sets the program's state with `set` and
-    // binds the square.
-    void prepare(const std::function<void()>& set) {
+    // Binds the film's textures, the world drawn at half size being `world`
+    // (none while it is being drawn), sets the program's state with `set`
+    // and binds the square.
+    void prepare(GLuint world, const std::function<void()>& set) {
         auto& gpu = g->gpu;
         for (int unit = 0; unit < 4; unit++) {
             glActiveTexture(GL_TEXTURE4 + unit);
-            glBindTexture(GL_TEXTURE_2D, std::array{GLuint(0), gpu.glyphs, gpu.feed, gpu.data}[unit]);
+            glBindTexture(GL_TEXTURE_2D, std::array{world, gpu.glyphs, gpu.feed, gpu.data}[unit]);
         }
         set();
         glBindVertexArray(gpu.vao);
     }
 
     // Draws the square over each rect of `where`, a part of the damage.
-    void drawSquare(Render::CRenderContext& ctx, const CRegion& where, const std::function<void()>& set) {
-        prepare(set);
+    void drawSquare(Render::CRenderContext& ctx, GLuint world, const CRegion& where, const std::function<void()>& set) {
+        prepare(world, set);
         where.forEachRect([&ctx](const auto& rect) {
             g_pHyprOpenGL->scissor(ctx, &rect, ctx.m_data.transformDamage);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -1385,7 +1396,26 @@ vec4 cinemaGlass(vec4 c) {{
         glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
     }
 
-    class CBackdropPass : public IPassElement {
+    // What the plugin's passes share: they read no blur of Hyprland's, and
+    // they are drawn as Hyprland draws any custom element.
+    class CPass : public IPassElement {
+      public:
+        bool needsLiveBlur(Render::CRenderContext&) override {
+            return false;
+        }
+        bool needsPrecomputeBlur(Render::CRenderContext&) override {
+            return false;
+        }
+        ePassElementType type() override {
+            return EK_CUSTOM;
+        }
+        static std::optional<CBox> screen(const PHLMONITORREF& ref) {
+            const auto monitor = ref.lock();
+            return monitor ? std::optional<CBox>(CBox{0, 0, monitor->m_size.x, monitor->m_size.y}) : std::nullopt;
+        }
+    };
+
+    class CBackdropPass : public CPass {
       public:
         CBackdropPass(PHLMONITOR monitor, SScene scene, SAnswer answer) : m_monitor(monitor), m_scene(std::move(scene)), m_answer(answer) {}
 
@@ -1439,6 +1469,10 @@ vec4 cinemaGlass(vec4 c) {{
                 glActiveTexture(GL_TEXTURE4);
                 glBindTexture(GL_TEXTURE_2D, coarse.texture);
                 glTexStorage2D(GL_TEXTURE_2D, levels, GL_RGB10_A2, width, height);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 GLint fb = 0;
                 glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fb);
                 glBindFramebuffer(GL_FRAMEBUFFER, coarse.soft);
@@ -1457,49 +1491,21 @@ vec4 cinemaGlass(vec4 c) {{
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.texture, 0);
             glViewport(0, 0, width, height);
             g_pHyprOpenGL->disableScissor();
-            prepare(set);
+            coarse.proj = proj;
+            prepare(0, set);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
             glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             frost(monitor, coarse);
-            // At full size where the world is seen as it is; inside a window
-            // whose glass shows it only through the frost, Hyprland composites
-            // opaque over it, so there the half-size world is enough, and it
-            // is what a live blur of anything drawn over it may sample. Each
-            // window's rounded corners and the pixel round its edge are drawn
-            // at full size.
-            CRegion inside;
-            for (const auto& shape : m_scene.shapes) {
-                if (!shape.veiled)
-                    continue;
-                CBox box = CBox{shape.rect[0], shape.rect[1], shape.rect[2], shape.rect[3]}.expand(-shape.rounding - 2.0).scale(monitor->m_scale);
-                ctx.m_data.renderModif.applyToBox(box);
-                const double left = std::ceil(box.x), top = std::ceil(box.y);
-                inside.add(CBox{left, top, std::max(std::floor(box.x + box.w) - left, 0.0), std::max(std::floor(box.y + box.h) - top, 0.0)});
-            }
-            drawSquare(ctx, ctx.m_data.damage.copy().subtract(inside), set);
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, coarse.fbo);
-            inside.intersect(ctx.m_data.damage).forEachRect([&](const auto& rect) {
-                g_pHyprOpenGL->scissor(ctx, &rect, ctx.m_data.transformDamage);
-                glBlitFramebuffer(0, 0, width, height, 0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-            });
-            g_pHyprOpenGL->disableScissor();
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
+            // At full size over the damage Hyprland leaves it: all of it but
+            // what frosted windows cover (CGlassPass).
+            drawSquare(ctx, coarse.texture, ctx.m_data.damage, set);
             return {};
         }
 
-        bool needsLiveBlur(Render::CRenderContext&) override {
-            return false;
-        }
-        bool needsPrecomputeBlur(Render::CRenderContext&) override {
-            return false;
-        }
         const char* passName() override {
             return "CBackdropPass";
-        }
-        ePassElementType type() override {
-            return EK_CUSTOM;
         }
         // It makes the glass's frost, which Hyprland no longer does, so it
         // runs even when windows hide all of it.
@@ -1509,8 +1515,7 @@ vec4 cinemaGlass(vec4 c) {{
         // The backdrop covers the whole monitor, so Hyprland can skip drawing
         // the wallpaper under it.
         std::optional<CBox> boundingBox(Render::CRenderContext&) override {
-            const auto monitor = m_monitor.lock();
-            return monitor ? std::optional<CBox>(CBox{0, 0, monitor->m_size.x, monitor->m_size.y}) : std::nullopt;
+            return screen(m_monitor);
         }
         CRegion opaqueRegion(Render::CRenderContext& ctx) override {
             const auto box = boundingBox(ctx);
@@ -1523,11 +1528,40 @@ vec4 cinemaGlass(vec4 c) {{
         SAnswer       m_answer;
     };
 
+    // A frosted window's glass, as Hyprland's own occlusion sees it: drawn
+    // in the window's pass just under its surface, it says that what is under
+    // the glass (all of it but its rounded corners and the pixel round its
+    // edge) will be covered opaque, so Hyprland leaves it out of the damage of
+    // everything drawn before, as it leaves out what any opaque surface
+    // covers: the backdrop, the window's own shadow, the windows beneath. A
+    // live blur reads the screen under it, and Hyprland draws what is under
+    // the glass wherever one will (Hyprland 0.57.0 src/render/pass/Pass.cpp:85).
+    // It draws nothing itself.
+    class CGlassPass : public CPass {
+      public:
+        CGlassPass(PHLMONITOR monitor, const CBox& glass) : m_monitor(monitor), m_glass(glass) {}
+
+        const char* passName() override {
+            return "CGlassPass";
+        }
+        // Hyprland weighs an element's opaque region only when it has a box.
+        std::optional<CBox> boundingBox(Render::CRenderContext&) override {
+            return screen(m_monitor);
+        }
+        CRegion opaqueRegion(Render::CRenderContext&) override {
+            return m_glass;
+        }
+
+      private:
+        PHLMONITORREF m_monitor;
+        CRegion       m_glass;
+    };
+
     // A window's edge in the film's world (specs/depth.md, part 2): the
     // film's frame(px, i) over a band round the window, drawn in the window's
     // own pass, so it moves, tilts and fades with it. It reads the scene and
     // textures the backdrop drew this frame.
-    class CFramePass : public IPassElement {
+    class CFramePass : public CPass {
       public:
         CFramePass(PHLMONITOR monitor, uint64_t window, float alpha, float border) : m_monitor(monitor), m_window(window), m_alpha(alpha), m_border(border) {}
 
@@ -1557,7 +1591,7 @@ vec4 cinemaGlass(vec4 c) {{
             const auto   now    = std::chrono::steady_clock::now();
             const SGuest guest;
             g_pHyprRenderer->blend(true);
-            drawSquare(ctx, ctx.m_data.damage.copy().subtract(within), [&] {
+            drawSquare(ctx, g->gpu.coarse[monitor->m_id].texture, ctx.m_data.damage.copy().subtract(within), [&] {
                 setUniforms(g->gpu.frame, monitor, state.drawn, state.answered, proj, area, now);
                 glUniform1i(g->gpu.frame.frameWindow, index);
                 glUniform1f(g->gpu.frame.frameAlpha, m_alpha);
@@ -1566,17 +1600,8 @@ vec4 cinemaGlass(vec4 c) {{
             return {};
         }
 
-        bool needsLiveBlur(Render::CRenderContext&) override {
-            return false;
-        }
-        bool needsPrecomputeBlur(Render::CRenderContext&) override {
-            return false;
-        }
         const char* passName() override {
             return "CFramePass";
-        }
-        ePassElementType type() override {
-            return EK_CUSTOM;
         }
         std::optional<CBox> boundingBox(Render::CRenderContext&) override {
             const auto monitor = m_monitor.lock();
@@ -1598,11 +1623,16 @@ vec4 cinemaGlass(vec4 c) {{
         float         m_border;
     };
 
-    // The frame's place on every window: above it, below its popups, taking
-    // no room and no input.
-    class CFrameDecoration : public IHyprWindowDecoration {
+    // The film's part of every window, drawn in the window's own pass and
+    // taking no room and no input: at DECORATION_LAYER_UNDER, under its
+    // surface and after its shadow, the glass that a frosted window makes
+    // opaque (CGlassPass); at DECORATION_LAYER_OVER, above it and below its
+    // popups, its frame (CFramePass). Neither is drawn in a workspace drawn
+    // on its own (a capture or snapshot): its scene is not the monitor's,
+    // and the backdrop is not drawn there.
+    class CFilmDecoration : public IHyprWindowDecoration {
       public:
-        CFrameDecoration(PHLWINDOW window) : IHyprWindowDecoration(window) {}
+        CFilmDecoration(PHLWINDOW window, eDecorationLayer layer) : IHyprWindowDecoration(window), m_layer(layer) {}
 
         SDecorationPositioningInfo getPositioningInfo() override {
             SDecorationPositioningInfo info;
@@ -1612,13 +1642,16 @@ vec4 cinemaGlass(vec4 c) {{
             return info;
         }
         void onPositioningReply(const SDecorationPositioningReply&) override {}
-        // Not in a workspace drawn on its own (a capture or snapshot): its
-        // scene is not the monitor's.
-        void draw(Render::CRenderContext& ctx, PHLMONITOR monitor, float const& a, const Render::SWindowRenderPresentation&) override {
+        void draw(Render::CRenderContext& ctx, PHLMONITOR monitor, float const& a, const Render::SWindowRenderPresentation& drawn) override {
             const auto window = owningWindow();
-            if (!g || !g->framed || g->depth->value() == 0 || !window || ctx.readOnlyEffects())
+            if (!g || g->source.empty() || !window || ctx.readOnlyEffects())
                 return;
-            Render::IHyprRenderer::addPassElement(ctx, makeUnique<CFramePass>(monitor, window->metadata().stableID(), a, float(window->presentation().borderSize())));
+            if (m_layer == DECORATION_LAYER_OVER && g->framed && g->depth->value() > 0)
+                Render::IHyprRenderer::addPassElement(ctx, makeUnique<CFramePass>(monitor, window->metadata().stableID(), a, float(window->presentation().borderSize())));
+            else if (m_layer == DECORATION_LAYER_UNDER && frosted(window, drawn)) {
+                const auto [position, size] = drawnBox(window, drawn, monitor);
+                Render::IHyprRenderer::addPassElement(ctx, makeUnique<CGlassPass>(monitor, CBox{position, size}.expand(-window->presentation().rounding() - 2.0)));
+            }
         }
         eDecorationType getDecorationType() override {
             return DECORATION_CUSTOM;
@@ -1629,19 +1662,23 @@ vec4 cinemaGlass(vec4 c) {{
                 g_pHyprRenderer->damageBox(window->getFullWindowBoundingBox().expand(FRAME_BAND));
         }
         eDecorationLayer getDecorationLayer() override {
-            return DECORATION_LAYER_OVER;
+            return m_layer;
         }
         uint64_t getDecorationFlags() override {
             return DECORATION_NON_SOLID;
         }
         std::string getDisplayName() override {
-            return "cinema frame";
+            return m_layer == DECORATION_LAYER_OVER ? "cinema frame" : "cinema glass";
         }
+
+      private:
+        eDecorationLayer m_layer;
     };
 
-    void addFrame(const PHLWINDOW& window) {
+    void decorate(const PHLWINDOW& window) {
         if (g && window)
-            HyprlandAPI::addWindowDecoration(g->handle, window, makeShared<CFrameDecoration>(window));
+            for (const auto layer : {DECORATION_LAYER_UNDER, DECORATION_LAYER_OVER})
+                HyprlandAPI::addWindowDecoration(g->handle, window, makeShared<CFilmDecoration>(window, layer));
     }
 
     // Plugged in: any mains or USB-C supply online.
@@ -1810,11 +1847,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         g->closing = window;
     });
     static auto OPEN = Event::bus()->m_events.window.open.listen([](PHLWINDOW window) {
-        addFrame(window);
+        decorate(window);
         windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_GOAL, 1.F, IMPULSE_OPEN);
     });
     for (const auto& window : Desktop::windowState()->windows())
-        addFrame(window);
+        decorate(window);
     static auto ACTIVE = Event::bus()->m_events.window.active.listen(
         [](PHLWINDOW window, Desktop::eFocusReason) { windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_CURRENT, 0.6F, IMPULSE_FOCUS); });
     // The pointer's light follows it in the same frame: a move draws its

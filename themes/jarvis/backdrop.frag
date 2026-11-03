@@ -1,4 +1,4 @@
-// omarchy-cinema contract 4
+// omarchy-cinema contract 5
 // Jarvis: a holographic globe in a gyroscope of rings, turning behind the
 // focused window and sized to it. It glows through the glass and past the
 // window's edges; light pools in the seams between windows and wakes the hex
@@ -367,7 +367,7 @@ vec4 frame(vec2 px, int i) {
         float toward = 0.55 + 0.45 * max(dot(n, normalize(reactor() - r.xy - r.zw * 0.5 + vec2(0.0, 1e-3))), 0.0);
         // One look at the world 12 px in behind the glass: what the edge
         // bends into view, and what light is passing there.
-        vec3 behind = backdrop(px - n * 12.0).rgb;
+        vec3 behind = worldAt(px - n * 12.0).rgb;
         float passing = smoothstep(0.12, 0.5, dot(behind, vec3(0.3, 0.5, 0.2)));
         float rim = glowLine(abs(d - 0.5), 1.0, HALO) * toward * (focus ? 0.95 : 0.6) * (1.0 + 0.6 * w.lift);
         float edge = (1.0 - smoothstep(0.0, 5.0, d)) * smoothstep(-2.0, 0.0, d);
