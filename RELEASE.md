@@ -132,8 +132,10 @@ Sean is logged out (from a TTY), never in a running session:
    switch, and the notice says so if it is missed.
 
 On a fresh config `./install` adds both engine lines after Omarchy's
-defaults, and then skips its theme refresh (a config reload) and asks for a
-login, so the plugin first loads at a login.
+defaults only while no Hyprland of the user's runs (from a TTY, before the
+first login): Hyprland reloads its config whenever the file changes, so a
+line added in a session would load the plugin at once. In a session it stops
+and says so.
 
 **The pin for other users, without blocking `omarchy update`.** An exact
 `hyprland=` dependency makes pacman stop a whole `omarchy update` when Omarchy

@@ -37,14 +37,16 @@ if ! grep -qx 'require("default.hypr.omarchy")' "$hypr"; then
   echo "$hypr does not load Omarchy's defaults as require(\"default.hypr.omarchy\"); add these lines after them, then run install again: $plugin $film" >&2
   exit 1
 fi
-# A plugin line added now loads at the next login, not at this install's
-# refresh below, which reloads the config: native code first loads at a login.
-login=false
+# Native code first loads at a login: Hyprland reloads its config whenever
+# the file changes, and loads the plugins it names, so the plugin's line is
+# added only while no Hyprland of this user's runs (from a TTY, before the
+# first login). film.lua's line is Lua, and may come at any time.
+if ! grep -qxF "$plugin" "$hypr" && compgen -G "${XDG_RUNTIME_DIR:-/run/user/$UID}/hypr/*/.socket.sock" >/dev/null; then
+  echo "$hypr does not load the engine yet; while Hyprland runs it would load at once. Log out, add this line after require(\"default.hypr.omarchy\") from a TTY (or run install there), then log in: $plugin" >&2
+  exit 1
+fi
 for line in "$film" "$plugin"; do
-  if ! grep -qxF "$line" "$hypr"; then
-    sed -i "/^require(\"default.hypr.omarchy\")\$/a $line" "$hypr"
-    [[ $line == "$plugin" ]] && login=true
-  fi
+  grep -qxF "$line" "$hypr" || sed -i "/^require(\"default.hypr.omarchy\")\$/a $line" "$hypr"
 done
 
 # A link never replaces a real directory or file: the user's own theme of the
@@ -167,8 +169,4 @@ chmod 755 "$hook"
 # The applied theme is Omarchy's copy from its last switch, made before this
 # install: refresh it, as Omarchy's own installers do, so it has what this
 # install changed (film values, popup, icons).
-if $login; then
-  echo "Log in again to start the engine, then apply a film: omarchy theme set <film>"
-else
-  omarchy-theme-refresh || echo "omarchy-theme-refresh failed: the applied theme catches up at the next switch" >&2
-fi
+omarchy-theme-refresh || echo "omarchy-theme-refresh failed: the applied theme catches up at the next switch" >&2
