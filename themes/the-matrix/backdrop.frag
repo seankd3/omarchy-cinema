@@ -3,12 +3,12 @@
 // writing (specs/agent-rain.md). Their text rains down the black screen in
 // mirrored glyphs, each stream led by a white-hot head carrying the newest
 // characters and leaving a fading phosphor tail. The rain stands at three
-// distances round the windows, nearer columns larger, brighter and faster:
-// the far rain out of focus, soft streaks whose letters are lost in the air;
-// the mid rain at the windows' own depth; the near rain in front of them, so
-// their glass shows only the rain behind it, and only that falls in their
-// shadow. When no agent is running there is no
-// rain: it drains away, leaving the black, the windows' glow and the line
+// distances, nearer columns larger, brighter and faster: the far rain out of
+// focus, soft dots whose letters are lost in the air, and the mid rain, both
+// behind the windows, so the glass shows them and the windows shade them;
+// the near rain at the windows' own depth, falling round them, so it never
+// shows through their glass and no window shades it. When no agent is
+// running there is no rain: it drains away, leaving the black, the windows' glow and the line
 // under the bar. The rain parts round the
 // windows: drops flare where they strike a
 // window's top edge, and streams run down its sides, brightest beside the
@@ -205,7 +205,7 @@ vec4 backdrop(vec2 px) {
     float shift = (focusedIndex >= 0 ? windowVelocity(focusedIndex).x * 0.003 : 0.0) + pull;
 
     // Three distances: far columns small, slow and out of focus; near ones
-    // large and fast, in front of the windows, so never behind their glass.
+    // large and fast, at the windows' depth, so never behind their glass.
     // No agents, no rain.
     vec2 far = vec2(0.0);
     vec3 mid = vec3(0.0), close = vec3(0.0);
