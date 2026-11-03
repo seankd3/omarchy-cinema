@@ -699,8 +699,8 @@ void main() {
     // (specs/smoothness.md): the window untransformed (no wobble, motion blur
     // or other transformer) and fully present, its surface drawn and blurred
     // whole (a visible or blur region of the client's own covers all of it, as
-    // foot's blur region does), blurred by Hyprland's
-    // Kawase blur (variant 0) at size 3 or more, two passes or more, at full
+    // foot's blur region does), by Hyprland's Kawase blur (variant 0) at
+    // size 3 or more, two passes or more, at full
     // strength (not proportional to alpha, nor faded with opacity), with
     // nothing amplifying it (contrast and brightness at most 1). How much of
     // the frost shows (glass, an app's own alpha) does not matter: with clear
