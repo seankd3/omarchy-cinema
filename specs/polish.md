@@ -62,14 +62,11 @@ model is not enough; a judge through Hyprland's own blur is the next step.
    palette's direction, or, where the theme's own shade is short of that, no
    less than on that shade drawn solid. Their limits, BLUR_REACH and their derivations went.
    Done: `films/contrast`.
-6. **Elegance, next contract version. The contract's per-field readers repeat
-   window().** `windowDepth` has no caller; `windowDistance` only the
-   backdrop main's. The films share answers' geometry, each in its own ink:
-   closing as a ring from 40 px out at 240 px a second (Jarvis, Oblivion,
-   Roadster), opening as a ring settling from 60 px over 0.7 s (Jarvis,
-   Oblivion; Roadster's brackets close from 60 to 12 px over 0.6 s, their
-   own), focus as a 30 px warm swell over 0.9 s (all three). Helpers for what
-   is shared. Each is a contract change, so they go together.
+6. **Elegance. Contract 4: a window is read through window() alone.** Its
+   per-field readers (windowRect, windowAlpha, windowRounding, windowLift,
+   windowDepth, windowVelocity, windowDistance) are gone, and the answers
+   the films shared get one home each: closingFront, openingFront,
+   focusWarmth and impulseDistance. Done: `films/contract`.
 7. **Robustness, other drivers.** Derivatives in control flow that differs
    within a 2x2 quad are undefined in GLSL: Oblivion's `dFdy` in the cloud
    deck (under the horizon branch, and the whole backdrop() under the veil's

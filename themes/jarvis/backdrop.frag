@@ -1,4 +1,4 @@
-// omarchy-cinema contract 3
+// omarchy-cinema contract 4
 // Jarvis: a holographic globe in a gyroscope of rings, turning behind the
 // focused window and sized to it. It glows through the glass and past the
 // window's edges; light pools in the seams between windows and wakes the hex
@@ -118,15 +118,16 @@ float gyro(vec2 p, float R, float tilt, float yaw, out float angle, out float de
 // converge on its corners, brighter toward them, to a small node at each
 // corner. They stand still.
 vec3 holdLines(vec2 px, int i, vec3 cyan) {
-    vec4 r = windowRect(i);
+    Window w = window(px, i);
+    vec4 r = w.rect;
     vec2 p = abs(px - r.xy - r.zw * 0.5) - r.zw * 0.5;
     float toCorner = max(-min(p.x, p.y), 0.0);
-    float o = abs(rectDistance(px, r, windowRounding(i)) - 10.0);
+    float o = abs(rectDistance(px, r, w.rounding) - 10.0);
     float f = fract(toCorner / 26.0);
     float dash = smoothstep(0.0, 0.1, f) * (1.0 - smoothstep(0.5, 0.6, f));
     float node = glowLine(abs(length(p - 10.0) - 4.0), 1.0, HALO);
     vec3 tint = i == focusedIndex ? mix(cyan, AMBER, 0.35) : cyan;
-    return tint * (glowLine(o, 0.9, HALO) * (0.1 + 0.3 * dash) * exp(-toCorner / 150.0) + node * 0.45) * windowAlpha(i);
+    return tint * (glowLine(o, 0.9, HALO) * (0.1 + 0.3 * dash) * exp(-toCorner / 150.0) + node * 0.45) * w.alpha;
 }
 
 // A moving window's wake, which may shine (Sean, 2026-10-29: "unless like
@@ -180,21 +181,19 @@ vec3 answers(vec2 px, vec3 cyan, out float lattice) {
             // A faint dashed ring spreads from where the window was and fades.
             vec2 q = px - e.xy;
             float r = length(q);
-            float front = abs(r - 40.0 - age * 240.0);
+            float front = closingFront(px, e);
             if (front > 120.0) continue;
             float glow = swell(age, 0.1, 0.9);
             light += cyan * (glowLine(front, 1.2, HALO) * dashes(atan(q.y, q.x), r, 40.0, 0.5, 0.0) * 0.5 + 0.1 * exp(-front / 24.0)) * glow;
             continue;
         }
-        int i = impulseWindows[k];
-        vec4 rect = i < 0 ? vec4(e.xy, 0.0, 0.0) : windowRect(i);
-        float d = rectDistance(px, rect, i < 0 ? 0.0 : windowRounding(i));
+        vec4 rect = impulseRect(k);
+        float d = impulseDistance(px, k);
         if (d < 0.0 || d > 320.0) continue;
         if (kind == OPEN) {
             // A dashed ring settles onto the window's edge from 60 px out.
             if (age > 0.7) continue;
-            float t = age / 0.7;
-            float on = abs(d - (1.0 - t) * (1.0 - t) * 60.0);
+            float on = openingFront(d, age);
             vec2 q = px - rect.xy - rect.zw * 0.5;
             float dash = dashes(atan(q.y, q.x), length(q), 72.0, 0.5, 0.0);
             light += cyan * (glowLine(on, 1.2, HALO) * dash * 0.6 + 0.12 * exp(-on / 20.0)) * swell(age, 0.15, 0.7);
@@ -209,7 +208,7 @@ vec3 answers(vec2 px, vec3 cyan, out float lattice) {
             light += mix(HOT, cyan, 0.4) * exp(-d / 60.0) * exp(-age * 5.0) * 2.0 * e.w;
         } else if (kind == FOCUS) {
             // The window's edge warms softly in the reactor's light.
-            light += mix(cyan, AMBER, 0.35) * exp(-d / 30.0) * 0.35 * swell(age, 0.2, 0.9) * e.w;
+            light += mix(cyan, AMBER, 0.35) * 0.35 * focusWarmth(d, e);
         }
     }
     return light;
@@ -250,7 +249,7 @@ vec4 backdrop(vec2 px) {
     lattice += swept;
     // The world as a dragged window pulls it: the hologram, nearest, moves
     // most; the lattice and the dust behind it less. Never the windows.
-    vec2 pulled = focusedIndex < 0 ? vec2(0.0) : windowVelocity(focusedIndex);
+    vec2 pulled = focusedIndex < 0 ? vec2(0.0) : window(px, focusedIndex).velocity;
     vec2 world = px + pulled * 0.003;
     vec2 holoAt = px + pulled * 0.01;
 
@@ -263,7 +262,7 @@ vec4 backdrop(vec2 px) {
     float Rg = reach * 0.45;
     // The rings swing with the focused window as it moves, like a carousel
     // pushed round, and settle back when it stops.
-    float swing = focusedIndex < 0 ? 0.0 : clamp(windowVelocity(focusedIndex).x * 0.00016, -0.4, 0.4);
+    float swing = focusedIndex < 0 ? 0.0 : clamp(window(px, focusedIndex).velocity.x * 0.00016, -0.4, 0.4);
     float hand = exp(-length(px - pointer.xy) / 170.0);
 
     // Deep navy, lifted around the globe and darker toward the corners.
@@ -322,9 +321,10 @@ vec4 backdrop(vec2 px) {
     // opaque.
     int over = seen.over;
     if (over >= 0) {
-        vec4 r = windowRect(over);
+        Window o = window(px, over);
+        vec4 r = o.rect;
         float low = exp(-(r.y + r.w - px.y) / 90.0);
-        light += mix(cyan, HOT, 0.5) * (0.22 * glassStreak(px, r) + 0.3 * low) * windowAlpha(over);
+        light += mix(cyan, HOT, 0.5) * (0.22 * glassStreak(px, r) + 0.3 * low) * o.alpha;
     }
 
     // The bar's lower edge: a thin holographic line, a tick every 40 pixels
@@ -352,8 +352,9 @@ vec4 backdrop(vec2 px) {
 // and the window glows a little in the reactor's light, as Hyprland's shadow
 // made it.
 vec4 frame(vec2 px, int i) {
-    vec4 r = windowRect(i);
-    float rounding = windowRounding(i);
+    Window w = window(px, i);
+    vec4 r = w.rect;
+    float rounding = w.rounding;
     float d = rectDistance(px, r, rounding);
     if (d < -2.0 || d > 24.0) return vec4(0.0);
     bool focus = i == focusedIndex;
@@ -368,10 +369,10 @@ vec4 frame(vec2 px, int i) {
         // bends into view, and what light is passing there.
         vec3 behind = backdrop(px - n * 12.0).rgb;
         float passing = smoothstep(0.12, 0.5, dot(behind, vec3(0.3, 0.5, 0.2)));
-        float rim = glowLine(abs(d - 0.5), 1.0, HALO) * toward * (focus ? 0.95 : 0.6) * (1.0 + 0.6 * windowLift(i));
+        float rim = glowLine(abs(d - 0.5), 1.0, HALO) * toward * (focus ? 0.95 : 0.6) * (1.0 + 0.6 * w.lift);
         float edge = (1.0 - smoothstep(0.0, 5.0, d)) * smoothstep(-2.0, 0.0, d);
         col += behind * 1.1 * edge * 0.9 + tint * rim + mix(tint, behind, 0.5) * rim * passing * 1.8;
         a = clamp(max(edge * 0.9, rim), 0.0, 1.0);
     }
-    return vec4(col, a) * windowAlpha(i);
+    return vec4(col, a) * w.alpha;
 }

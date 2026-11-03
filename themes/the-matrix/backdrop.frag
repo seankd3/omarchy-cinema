@@ -1,4 +1,4 @@
-// omarchy-cinema contract 3
+// omarchy-cinema contract 4
 // The Matrix: the code, and the code is what the agents on this machine are
 // writing (specs/agent-rain.md). Their text rains down the black screen in
 // mirrored glyphs, each stream led by a white-hot head carrying the newest
@@ -202,7 +202,7 @@ vec4 backdrop(vec2 px) {
 
     // A dragged window moves the viewpoint, so the near columns shift a few
     // pixels more than the far ones.
-    float shift = (focusedIndex >= 0 ? windowVelocity(focusedIndex).x * 0.003 : 0.0) + pull;
+    float shift = (focusedIndex >= 0 ? window(px, focusedIndex).velocity.x * 0.003 : 0.0) + pull;
 
     // Three distances: far columns small, slow and out of focus; near ones
     // large and fast, at the windows' depth, so never behind their glass.
@@ -235,8 +235,9 @@ vec4 backdrop(vec2 px) {
     // The rain parts round the windows: drops flare where they strike a
     // window's top edge, and streams run down its sides.
     if (closest >= 0 && nearest > 0.0 && nearest < 40.0 && feedPresence > 0.0) {
-        vec4 rect = windowRect(closest);
-        float fade = windowAlpha(closest);
+        Window c = window(px, closest);
+        vec4 rect = c.rect;
+        float fade = c.alpha;
         float focus = closest == focusedIndex ? 1.0 : 0.45;
         float side = max(rect.x - px.x, px.x - rect.x - rect.z);
         float over = rect.y - px.y;
@@ -283,10 +284,11 @@ vec4 backdrop(vec2 px) {
     // as the window moves, as a reflection does. Only the glass shows it.
     int pane = seen.over;
     if (pane >= 0) {
-        vec4 r = windowRect(pane);
+        Window o = window(px, pane);
+        vec4 r = o.rect;
         vec2 at = px - r.xy;
         float band = glassStreak(px, r);
-        light += HEAD * (0.05 * exp(-at.y / 60.0) + 0.035 * band) * windowAlpha(pane);
+        light += HEAD * (0.05 * exp(-at.y / 60.0) + 0.035 * band) * o.alpha;
     }
 
     // The bar's lower edge: a phosphor line with a drip of brighter light
@@ -313,13 +315,14 @@ vec4 backdrop(vec2 px) {
 // behind the glass lights the edge. Its light stays within a few pixels, so
 // it never lies over the text of a window beneath.
 vec4 frame(vec2 px, int i) {
-    vec4 r = windowRect(i);
-    float rounding = windowRounding(i);
+    Window w = window(px, i);
+    vec4 r = w.rect;
+    float rounding = w.rounding;
     float d = rectDistance(px, r, rounding);
     if (d < -2.0 || d > 48.0) return vec4(0.0);
     vec2 n = edgeNormal(px, r, rounding);
     bool focus = i == focusedIndex;
-    float lift = windowLift(i);
+    float lift = w.lift;
 
     // What just happened to this window, all over within a second.
     float flare = windowFlare(i, 2.0);
@@ -336,5 +339,5 @@ vec4 frame(vec2 px, int i) {
     vec3 behind = d < 10.0 ? backdrop(px - n * (max(d, 0.0) + 8.0)).rgb - background : vec3(0.0);
     vec3 glow = (tint * strength + behind * 4.0) * line;
     float a = clamp(max(edge * 0.85, (1.0 - smoothstep(0.0, 1.0, x)) * min(strength, 1.0)), 0.0, 1.0);
-    return vec4((background + behind) * edge * 0.85 + glow, a) * windowAlpha(i);
+    return vec4((background + behind) * edge * 0.85 + glow, a) * w.alpha;
 }

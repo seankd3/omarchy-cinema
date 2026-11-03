@@ -1,4 +1,4 @@
-// omarchy-cinema contract 3
+// omarchy-cinema contract 4
 // Oblivion: Tower 49 at dawn. A high pale sky over a sea of cloud that slides
 // slowly toward the tower, the sun low on the horizon and the broken moon faint
 // in the daylight. Every window is a pane of the tower's glass, traced by a fine
@@ -186,22 +186,19 @@ vec3 answers(vec2 px) {
         if (kind == TYPE || kind == VOICE) continue;
         if (kind == CLOSE) {
             // A faint ring of vapour spreads where the pane was and thins.
-            float front = abs(length(px - e.xy) - 40.0 - age * 240.0);
+            float front = closingFront(px, e);
             if (front > 120.0) continue;
             float glow = swell(age, 0.1, 0.9);
             a.x += exp(-front / 30.0) * 0.35 * glow;
             a.z += ink(front, 1.8) * 0.45 * glow;
             continue;
         }
-        int i = impulseWindows[k];
-        vec4 rect = i < 0 ? vec4(e.xy, 0.0, 0.0) : windowRect(i);
-        float d = rectDistance(px, rect, i < 0 ? 0.0 : windowRounding(i));
+        float d = impulseDistance(px, k);
         if (d < 0.0 || d > 320.0) continue;
         if (kind == OPEN) {
             // The drone's scan ring settles onto the pane from 60 px out.
             if (age > 0.7) continue;
-            float t = age / 0.7;
-            float on = abs(d - (1.0 - t) * (1.0 - t) * 60.0);
+            float on = openingFront(d, age);
             float glow = swell(age, 0.15, 0.7);
             a.z += ink(on, 1.8) * 0.6 * glow;
             a.x += exp(-on / 20.0) * 0.3 * glow;
@@ -217,7 +214,7 @@ vec3 answers(vec2 px) {
             a.y += exp(-d / 50.0) * exp(-age * 3.0) * 1.8 * e.w;
         } else if (kind == FOCUS) {
             // The pane's edge warms softly, as if the sun caught it.
-            a.y += exp(-d / 30.0) * 0.45 * swell(age, 0.2, 0.9) * e.w;
+            a.y += 0.45 * focusWarmth(d, e);
         }
     }
     return a;
@@ -279,7 +276,7 @@ vec4 backdrop(vec2 px) {
 
     // A dragged pane pulls the deck after it, near rows more than far ones;
     // the sky and the sun stay put.
-    float lean = focusedIndex < 0 ? 0.0 : windowVelocity(focusedIndex).x * 0.012;
+    float lean = focusedIndex < 0 ? 0.0 : window(px, focusedIndex).velocity.x * 0.012;
     vec3 col = px.y < horizon ? sky(px, horizon, sun) : cloudDeck(px + flow, horizon, sun, lean);
     // The sun itself: a soft white disc in a wide warm bloom, hazy at dawn.
     float ds = length(px - sun);
@@ -321,8 +318,9 @@ vec4 backdrop(vec2 px) {
         col = mix(col, mix(vec3(1.0), GOLD, 0.6), hand * 0.12);
 
         if (closest >= 0 && nearest < 60.0) {
-            float fade = windowAlpha(closest);
-            vec4 rect = windowRect(closest);
+            Window c = window(px, closest);
+            float fade = c.alpha;
+            vec4 rect = c.rect;
             // A fine blue line traced a little off each pane.
             float line = 1.0 - smoothstep(0.35, 1.05, abs(nearest - 12.0));
             col = mix(col, accent, line * 0.55 * fade);
@@ -373,10 +371,11 @@ vec4 backdrop(vec2 px) {
     // background (colors.toml's), so it cannot lower the text's contrast.
     int over = seen.over;
     if (over >= 0) {
-        vec4 r = windowRect(over);
+        Window o = window(px, over);
+        vec4 r = o.rect;
         vec2 toSun = normalize(sun - r.xy - r.zw * 0.5 + vec2(0.0, -1e-3));
         float facing = exp(-(dot(r.zw * 0.5, abs(toSun)) - dot(px - r.xy - r.zw * 0.5, toSun)) / 90.0);
-        float a = windowAlpha(over) * inside;
+        float a = o.alpha * inside;
         col = mix(col, vec3(1.0), 0.8 * glassStreak(px, r) * a);
         col = max(mix(col, mix(vec3(1.0), GOLD, 0.35), 0.35 * facing * a), background);
     }
@@ -403,8 +402,9 @@ vec4 backdrop(vec2 px) {
 // glints on the edge that faces it; and the light passing by outside, the
 // gold of a focus or a landing, catches the edge and warms it.
 vec4 frame(vec2 px, int i) {
-    vec4 r = windowRect(i);
-    float rounding = windowRounding(i);
+    Window w = window(px, i);
+    vec4 r = w.rect;
+    float rounding = w.rounding;
     float d = rectDistance(px, r, rounding);
     if (d < -2.0 || d > 14.0) return vec4(0.0);
     bool focus = i == focusedIndex;
@@ -420,9 +420,9 @@ vec4 frame(vec2 px, int i) {
     float line = (1.0 - smoothstep(0.4, 1.4, abs(d - 0.5))) * (focus ? 0.95 : 0.7) * (1.0 + 0.8 * warm);
     float edge = (1.0 - smoothstep(0.0, 4.0, d)) * smoothstep(-2.0, 0.0, d);
     vec3 bent = mix(outside, vec3(1.0), 0.3);
-    float glint = line * facing * (0.5 + 0.5 * windowLift(i));
+    float glint = line * facing * (0.5 + 0.5 * w.lift);
     float halo = exp(-max(d, 0.0) / 7.0) * step(0.0, d) * (focus ? 0.12 : 0.0) * (1.0 + 2.0 * warm);
     float a = clamp(max(max(edge * 0.8, line), halo), 0.0, 1.0);
     vec3 col = bent * edge * 0.8 * (1.0 - line) + tint * line + vec3(1.0) * glint * 0.6 + tint * halo;
-    return vec4(min(col, vec3(a)), a) * windowAlpha(i);
+    return vec4(min(col, vec3(a)), a) * w.alpha;
 }

@@ -9,7 +9,8 @@ uniform float frameAlpha;
 uniform float frameBorder;
 void main() {
     vec4 edge = frame(v_px, frameWindow);
-    float d = rectDistance(v_px, windowRect(frameWindow), windowRounding(frameWindow));
+    Window w = window(v_px, frameWindow);
+    float d = rectDistance(v_px, w.rect, w.rounding);
     float ring = smoothstep(-1.0, 0.0, d) * (1.0 - smoothstep(frameBorder, frameBorder + 1.0, d));
     vec3 colour = edge.a > 0.02 ? edge.rgb / edge.a : accent;
     fragColor = mix(edge, vec4(colour, 1.0), ring) * frameAlpha;

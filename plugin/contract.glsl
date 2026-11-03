@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 3
+// omarchy-cinema contract 4
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -12,9 +12,7 @@
 // Lengths are logical pixels from the screen's top left. The windows are the
 // ones Hyprland is drawing on this screen in this frame, where it is drawing
 // them: mid-animation, mid-drag, sliding between workspaces, fading out after
-// closing. windowAlpha(i) fades with the window; windowVelocity(i) is how it
-// moves (px a second), windowLift(i) eases to 1 while it has focus and back,
-// windowDepth(i) is its place in the stack (0 on top). `focused` is the focused window's rect
+// closing; window(px, i) says all of each (below). `focused` is the focused window's rect
 // (x, y, w, h), easing to a new window when focus moves and then following it
 // exactly; with no focused window it is a rect in the middle of the screen
 // (focusAlpha says how present it is).
@@ -50,7 +48,7 @@ uniform int focusedIndex;
 // How present the focus is, for decorations that follow it: the focused
 // window's own opacity (rising as it opens). When it closes and Hyprland
 // focuses another window, the focus moves there (the closing window's own
-// decorations fade with windowAlpha); when it closes with nothing else
+// decorations fade with its alpha); when it closes with nothing else
 // focused, focusedIndex and `focused` stay on it as it fades out and this
 // falls with it; with no window focused on this screen it eases to 0.
 uniform float focusAlpha;
@@ -151,30 +149,6 @@ vec4 windowTexel(int texel) {
     return texelFetch(windowData, ivec2(texel % 256, texel / 256), 0);
 }
 
-vec4 windowRect(int i) {
-    return windowTexel(3 * i);
-}
-
-float windowAlpha(int i) {
-    return windowTexel(3 * i + 1).x;
-}
-
-float windowRounding(int i) {
-    return windowTexel(3 * i + 1).y;
-}
-
-float windowLift(int i) {
-    return windowTexel(3 * i + 1).z;
-}
-
-float windowDepth(int i) {
-    return windowTexel(3 * i + 1).w;
-}
-
-vec2 windowVelocity(int i) {
-    return windowTexel(3 * i + 2).xy;
-}
-
 // Distance from px to a rect's edge, rounded by `radius`: negative inside it.
 float rectDistance(vec2 px, vec4 rect, float radius) {
     vec2 half_ = rect.zw * 0.5;
@@ -182,14 +156,12 @@ float rectDistance(vec2 px, vec4 rect, float radius) {
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
 
-// Distance to window i, pushed away as it fades, so a window fading in grows
-// out of nothing and one fading out sinks away.
-float windowDistance(vec2 px, int i) {
-    return rectDistance(px, windowRect(i), windowRounding(i)) + (1.0 - windowAlpha(i)) * 200.0;
-}
-
 // Window i as the point px sees it: everything the plugin says of it, read
-// once, and d, px's windowDistance to it. A film meets the windows at px in
+// once: its rect, alpha (fading with it), rounding, lift (easing to 1 while
+// it has focus and back), depth (its place in the stack, 0 on top), velocity
+// (px a second), and d, px's distance to it, pushed away as it fades, so a
+// window fading in grows out of nothing and one fading out sinks away. A
+// film meets the windows at px in
 // one loop, `for (int i = 0; i < windowCount; i++) { Window w = window(px, i);
 // ... }`, and asks all it needs of each there: at 2880x1800 every further
 // loop over three windows cost a draw 0.2 to 0.6 ms (specs/polish.md).
@@ -202,8 +174,8 @@ struct Window {
 };
 
 Window window(vec2 px, int i) {
-    vec4 rect = windowRect(i), a = windowTexel(3 * i + 1);
-    return Window(i, rect, a.x, a.y, a.z, a.w, windowVelocity(i), rectDistance(px, rect, a.y) + (1.0 - a.x) * 200.0);
+    vec4 rect = windowTexel(3 * i), a = windowTexel(3 * i + 1);
+    return Window(i, rect, a.x, a.y, a.z, a.w, windowTexel(3 * i + 2).xy, rectDistance(px, rect, a.y) + (1.0 - a.x) * 200.0);
 }
 
 // What every film asks of the windows at a point, gathered by see() as its
@@ -271,7 +243,14 @@ float around(vec2 px, vec4 rect) {
 // when there is none.
 vec4 impulseRect(int k) {
     int i = impulseWindows[k];
-    return i < 0 ? vec4(impulses[k].xy, 0.0, 0.0) : windowRect(i);
+    return i < 0 ? vec4(impulses[k].xy, 0.0, 0.0) : windowTexel(3 * i);
+}
+
+// The distance from px to the window impulse k happened to, rounded as it
+// is, or to its point when there is none.
+float impulseDistance(vec2 px, int k) {
+    int i = impulseWindows[k];
+    return rectDistance(px, impulseRect(k), i < 0 ? 0.0 : windowTexel(3 * i + 1).y);
 }
 
 // The outward normal of a rounded rect's edge nearest px.
@@ -316,6 +295,24 @@ float windowFlare(int i, float landing) {
 // A soft rise over `rise` seconds and fade until `life`, for brief answers.
 float swell(float age, float rise, float life) {
     return smoothstep(0.0, rise, age) * (1.0 - smoothstep(rise, life, age));
+}
+
+// Answers several films give, each in its own ink: the distance from px to a
+// closing window's ring, spreading from 40 px round where it was at 240 px a
+// second; from a point d px out from an opening window to its ring, settling
+// onto the edge from 60 px out over 0.7 s; and how much a window taking focus
+// (impulse e) warms its edge d px out, over 0.9 s.
+float closingFront(vec2 px, vec4 e) {
+    return abs(length(px - e.xy) - 40.0 - e.z * 240.0);
+}
+
+float openingFront(float d, float age) {
+    float t = 1.0 - age / 0.7;
+    return abs(d - t * t * 60.0);
+}
+
+float focusWarmth(float d, vec4 e) {
+    return exp(-d / 30.0) * swell(e.z, 0.2, 0.9) * e.w;
 }
 
 // What a film defines. backdrop(px): the colour of the world at px. And,

@@ -1,4 +1,4 @@
-// omarchy-cinema contract 3
+// omarchy-cinema contract 4
 // Evangelion: NERV's displays. A honeycomb of hexagonal cells lies across
 // the dark and wakes like an AT field around the windows: cells light orange
 // along every window's edge and in the seams between windows, brightest at
@@ -71,11 +71,12 @@ float wallDistance(vec2 px, vec4 rect, float grow, float cut) {
 // the pane as the window moves, as a reflection does. Only the glass shows
 // it, so it is never over text.
 vec3 sheen(vec2 px, int i) {
-    vec4 r = windowRect(i);
+    Window w = window(px, i);
+    vec4 r = w.rect;
     vec2 at = px - r.xy;
     float upper = exp(-at.y / 70.0) * (1.0 - 0.4 * at.x / r.z);
     float band = glassStreak(px, r);
-    return WARM_LIGHT * (0.06 * upper + 0.05 * band) * windowAlpha(i);
+    return WARM_LIGHT * (0.06 * upper + 0.05 * band) * w.alpha;
 }
 
 // The field answering what happened at px, whose honeycomb cell is centred
@@ -160,7 +161,7 @@ vec4 backdrop(vec2 px) {
 
     // A dragged window moves the viewpoint: the honeycomb, the nearer layer,
     // shifts against it by a few pixels, the far lattice by a third of that.
-    vec2 view = focusedIndex >= 0 ? windowVelocity(focusedIndex) * 0.003 : vec2(0.0);
+    vec2 view = focusedIndex >= 0 ? window(px, focusedIndex).velocity * 0.003 : vec2(0.0);
 
     // Far behind: slow purple haze and a lattice three times the size, offset
     // against the focused window so it reads as deeper than the near one.
@@ -278,14 +279,15 @@ vec4 backdrop(vec2 px) {
 // within a dozen pixels of the wall, so it never lies over the text of a
 // window beneath.
 vec4 frame(vec2 px, int i) {
-    vec4 r = windowRect(i);
-    float rounding = windowRounding(i);
+    Window w = window(px, i);
+    vec4 r = w.rect;
+    float rounding = w.rounding;
     float d = rectDistance(px, r, rounding);
     if (d < -2.0 || d > 48.0) return vec4(0.0);
     vec2 n = edgeNormal(px, r, rounding);
     float f = fieldDistance(px, r);
     bool focus = i == focusedIndex;
-    float lift = windowLift(i);
+    float lift = w.lift;
     float breath = focus ? voice : 0.0;
 
     // What just happened to this window, all over within a second.
@@ -297,8 +299,8 @@ vec4 frame(vec2 px, int i) {
     float corner = smoothstep(-80.0, -24.0, min(q.x, q.y));
     float toward = 0.5 + 0.5 * clamp(dot(n, LIGHT), 0.0, 1.0);
     float strength = (focus ? 0.8 + 0.6 * lift : 0.45) * toward * (1.0 + 1.3 * corner) * (1.0 + flare + 0.4 * breath);
-    float w = abs(wallDistance(px, r, 6.0, 18.0));
-    float wall = (1.0 - smoothstep(0.0, 1.1, w) + 0.3 * exp(-w / 2.0)) * strength;
+    float onWall = abs(wallDistance(px, r, 6.0, 18.0));
+    float wall = (1.0 - smoothstep(0.0, 1.1, onWall) + 0.3 * exp(-onWall / 2.0)) * strength;
     float hairline = glowLine(abs(d - 0.5), 0.8) * 0.5 * strength;
     float wash = 0.12 * exp(-max(f, 0.0) / 5.0) * (1.0 + flare + 0.5 * breath) * (focus ? 1.0 : 0.5);
 
@@ -308,5 +310,5 @@ vec4 frame(vec2 px, int i) {
     vec3 behind = d < 10.0 ? backdrop(px - n * (max(d, 0.0) + 12.0)).rgb - background : vec3(0.0);
     vec3 glow = tint * (wall + hairline + wash) + behind * 3.0 * (wall + hairline) / max(strength, 0.3);
     float a = clamp(max(edge * 0.9, max(wall, hairline)), 0.0, 1.0);
-    return vec4((background + behind) * 1.1 * edge * 0.9 + glow, a) * windowAlpha(i);
+    return vec4((background + behind) * 1.1 * edge * 0.9 + glow, a) * w.alpha;
 }

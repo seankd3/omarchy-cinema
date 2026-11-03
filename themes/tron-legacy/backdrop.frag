@@ -1,4 +1,4 @@
-// omarchy-cinema contract 3
+// omarchy-cinema contract 4
 // Tron Legacy: the Grid. A floor of light lines runs out to the horizon under
 // a black sky, and light cycles race along it, trailing light. Around every
 // window a circuit line is drawn, and pulses run along it; around the focused
@@ -170,9 +170,10 @@ vec4 backdrop(vec2 px) {
     // A circuit line around every window, just off its edge, with two pulses
     // chasing round it; orange around the focused one.
     if (closest >= 0 && nearest > 0.0 && nearest < 60.0) {
+        Window c = window(px, closest);
         vec3 tint = closest == focusedIndex ? ORANGE : cyan;
         float circuit = glowLine(abs(nearest - 7.0), 1.1, HALO);
-        float around = around(px, windowRect(closest));
+        float around = around(px, c.rect);
         float pulse = 0.0;
         for (int k = 0; k < 2; k++) {
             float ahead = fract(cycle(closest == focusedIndex ? 4.0 : 8.0) - around + float(k) * 0.5);
@@ -182,7 +183,7 @@ vec4 backdrop(vec2 px) {
         for (int i = 0; i < impulseCount; i++)
             if (impulseKinds[i] == FOCUS && impulseWindows[i] == closest)
                 pulse += 1.2 * exp(-impulses[i].z * 3.0);
-        light += tint * circuit * (0.45 + pulse) * windowAlpha(closest);
+        light += tint * circuit * (0.45 + pulse) * c.alpha;
     }
 
     light += trail;
@@ -194,10 +195,11 @@ vec4 backdrop(vec2 px) {
     // shows it; the window's text stays over it, opaque.
     int over = seen.over;
     if (over >= 0) {
-        vec4 r = windowRect(over);
+        Window o = window(px, over);
+        vec4 r = o.rect;
         float streak = glassStreak(px, r);
         float top = exp(-(px.y - r.y) / 90.0);
-        light += mix(cyan, vec3(1.0), 0.5) * (0.045 * streak + 0.05 * top) * windowAlpha(over);
+        light += mix(cyan, vec3(1.0), 0.5) * (0.045 * streak + 0.05 * top) * o.alpha;
     }
 
     // Light pools in the seams between windows.
@@ -222,12 +224,13 @@ vec4 backdrop(vec2 px) {
 // light, brighter toward the horizon it is lit from and as focus lifts it;
 // orange on the focused window, as the circuit is.
 vec4 frame(vec2 px, int i) {
-    vec4 r = windowRect(i);
-    float rounding = windowRounding(i);
+    Window w = window(px, i);
+    vec4 r = w.rect;
+    float rounding = w.rounding;
     float d = rectDistance(px, r, rounding);
     if (d < -2.0 || d > 30.0) return vec4(0.0);
     vec2 n = edgeNormal(px, r, rounding);
-    float lift = windowLift(i);
+    float lift = w.lift;
     vec3 tint = i == focusedIndex ? ORANGE : accent;
     float edge = (1.0 - smoothstep(0.0, 6.0, d)) * smoothstep(-2.0, 0.0, d);
     float toward = 0.6 + 0.4 * clamp(-n.y, 0.0, 1.0);
@@ -239,5 +242,5 @@ vec4 frame(vec2 px, int i) {
     float rim = glowLine(abs(d - 0.5), 1.0, HALO) * toward * (0.8 + 0.8 * lift + 1.6 * passing);
     float a = clamp(max(edge * 0.9, rim), 0.0, 1.0);
     vec3 col = behind * 1.15 * edge * 0.9 + tint * rim;
-    return vec4(col, a) * windowAlpha(i);
+    return vec4(col, a) * w.alpha;
 }

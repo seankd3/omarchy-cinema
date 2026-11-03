@@ -1,4 +1,4 @@
-// omarchy-cinema contract 3
+// omarchy-cinema contract 4
 // Roadster: the 2026 Roadster's cockpit, drawn like a fighter jet's display.
 // A floor of red dots runs out to a thin white horizon and rushes toward the
 // viewer, with streaks of speed along it. A wireframe wedge turns slowly on
@@ -110,13 +110,12 @@ vec3 answers(vec2 px, vec3 red, float horizon, out float lit) {
         if (kind == TYPE || kind == VOICE) continue;
         if (kind == CLOSE) {
             // One red ring spreads where the window was and fades.
-            float front = abs(length(px - e.xy) - 40.0 - age * 240.0);
+            float front = closingFront(px, e);
             if (front > 120.0) continue;
             light += red * (glowLine(front, 1.2) * 0.5 + 0.08 * exp(-front / 30.0)) * swell(age, 0.1, 0.9);
             continue;
         }
-        int i = impulseWindows[k];
-        vec4 rect = i < 0 ? vec4(e.xy, 0.0, 0.0) : windowRect(i);
+        vec4 rect = impulseRect(k);
         if (kind == LAND) {
             // Touchdown, the end of a move, which may shine: the seams round
             // the window flash, and a shock runs out over the floor from its
@@ -142,7 +141,7 @@ vec3 answers(vec2 px, vec3 red, float horizon, out float lit) {
             if (abs(d - gap) < 60.0) light += mix(red, WHITE, 0.3) * glowLine(brackets(px, rect, gap, 48.0), 1.2) * 0.6 * swell(age, 0.15, 0.6);
         } else if (kind == FOCUS) {
             // The window's edge warms softly.
-            light += red * exp(-d / 30.0) * 0.3 * swell(age, 0.2, 0.9) * e.w;
+            light += red * 0.3 * focusWarmth(d, e);
         }
     }
     return light;
@@ -254,7 +253,7 @@ vec4 backdrop(vec2 px) {
         float depth = CAMERA * resolution.y / below;
         // A dragged window pulls the floor after it (in cells, so near rows
         // shift more); the lanes bow round the windows' feet.
-        float lean = focusedIndex < 0 ? 0.0 : windowVelocity(focusedIndex).x * 0.0006;
+        float lean = focusedIndex < 0 ? 0.0 : window(px, focusedIndex).velocity.x * 0.0006;
         vec2 fp = vec2(px.x - bend, px.y);
         vec2 cell = vec2((fp.x - resolution.x * 0.5) * CAMERA / below + lean, depth + drive);
         // The nearest dot projected back onto the screen, so every dot is
@@ -309,8 +308,7 @@ vec4 backdrop(vec2 px) {
                    clamp(horizon + size * 0.5, focused.y + 0.7 * size, focused.y + focused.w - 0.7 * size));
     vec2 reach = abs(px - at) - vec2(1.4, 0.7) * size;
     if (size > 8.0 && max(reach.x, reach.y) < 24.0) {
-        float on = focusedIndex < 0 ? inside
-            : 1.0 - smoothstep(-1.0, 1.0, rectDistance(px, windowRect(focusedIndex), windowRounding(focusedIndex)));
+        float on = focusedIndex < 0 ? inside : 1.0 - smoothstep(-1.0, 1.0, seen.focus);
         float shown = mix(1.0, 0.35 * focusAlpha * on, present);
         vec2 d = wedge(px, at, size);
         light += mix(red, WHITE, 0.65) * glowLine(d.x, 1.3) * shown;
@@ -333,9 +331,10 @@ vec4 backdrop(vec2 px) {
     // upper glass. Only the glass shows it; the window's text stays over it.
     int over = seen.over;
     if (over >= 0) {
-        vec4 r = windowRect(over);
+        Window o = window(px, over);
+        vec4 r = o.rect;
         float top = exp(-(px.y - r.y) / 90.0);
-        light += mix(red, WHITE, 0.5) * (0.07 * glassStreak(px, r) + 0.09 * top) * windowAlpha(over);
+        light += mix(red, WHITE, 0.5) * (0.07 * glassStreak(px, r) + 0.09 * top) * o.alpha;
     }
 
     // The bar's lower edge: a red line with a white marker sweeping along it,
@@ -359,8 +358,9 @@ vec4 backdrop(vec2 px) {
 // warming focus, runs into the line; and the window glows a little red, as
 // Hyprland's shadow made it.
 vec4 frame(vec2 px, int i) {
-    vec4 r = windowRect(i);
-    float rounding = windowRounding(i);
+    Window w = window(px, i);
+    vec4 r = w.rect;
+    float rounding = w.rounding;
     float d = rectDistance(px, r, rounding);
     if (d < -2.0 || d > 20.0) return vec4(0.0);
     bool focus = i == focusedIndex;
@@ -375,10 +375,10 @@ vec4 frame(vec2 px, int i) {
         // bends into view, and what light is passing there.
         vec3 behind = backdrop(px - n * 12.0).rgb;
         float passing = smoothstep(0.05, 0.25, dot(behind, vec3(0.3, 0.5, 0.2)));
-        float line = glowLine(abs(d - 0.5), 0.9) * toward * (focus ? 0.55 : 0.5) * (1.0 + 0.6 * windowLift(i));
+        float line = glowLine(abs(d - 0.5), 0.9) * toward * (focus ? 0.55 : 0.5) * (1.0 + 0.6 * w.lift);
         float edge = (1.0 - smoothstep(0.0, 4.0, d)) * smoothstep(-2.0, 0.0, d);
         col += behind * 1.2 * edge * 0.85 + tint * line + mix(tint, WHITE, 0.5) * line * passing * 2.0;
         a = clamp(max(edge * 0.85, line * (1.0 + passing)), 0.0, 1.0);
     }
-    return vec4(col, a) * windowAlpha(i);
+    return vec4(col, a) * w.alpha;
 }

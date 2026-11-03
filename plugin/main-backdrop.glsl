@@ -13,7 +13,7 @@ in vec2 v_uv;
 // Whether px is more than `inset` px inside a veiled window.
 bool veiled(vec2 px, float inset) {
     for (int i = 0; i < windowCount; i++)
-        if (windowTexel(3 * i + 2).z > 0.0 && windowDistance(px, i) < -inset) return true;
+        if (windowTexel(3 * i + 2).z > 0.0 && window(px, i).d < -inset) return true;
     return false;
 }
 
