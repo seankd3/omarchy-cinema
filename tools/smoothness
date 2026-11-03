@@ -45,8 +45,11 @@ if [[ ${1:-} == --inside ]]; then
   now >"$out/end"
   sleep 6
   now >"$out/gpu"
-  # The log has to go on past the end, to show it did not stop before it.
-  sleep 0.1
+  # The log has to go on past the end, to show it did not stop before it:
+  # frameclock counts a vblank after it.
+  until awk -v end="$(cat "$out/gpu")" '$1 == "p" { last = int((end - $3) / $2) + 1 } $1 == "v" && last && $2 > last { found = 1 } END { exit !found }' "$out/frames.log"; do
+    sleep 0.05
+  done
   exit
 fi
 
