@@ -51,16 +51,20 @@ if ! grep -qxF "$plugin" "$hypr" && { pgrep -u "$UID" -x Hyprland >/dev/null || 
 fi
 # Both lines in one write, the moment after that check, and only when one is
 # missing: what is missing goes just after Omarchy's defaults, the plugin's
-# first. The new file takes the config's permissions (a link's target's)
-# once it is written, and each step stops the install if it fails.
+# first. The config (a link's target) is replaced as a whole: written to a
+# new private file beside it, given its permissions, then renamed over it,
+# and the new file is removed if any step fails.
 if ! { grep -qxF "$plugin" "$hypr" && grep -qxF "$film" "$hypr"; }; then
   target=$(readlink -f "$hypr")
+  new=$(mktemp "$target.XXXXXX")
+  trap 'rm -f "$new"' EXIT
   awk -v plugin="$plugin" -v film="$film" '
     BEGIN { while ((getline line < ARGV[1]) > 0) { if (line == plugin) p = 1; if (line == film) f = 1 } }
     { print } $0 == "require(\"default.hypr.omarchy\")" { if (!p) print plugin; if (!f) print film }
-  ' "$target" >"$target.new"
-  chmod --reference="$target" "$target.new"
-  mv "$target.new" "$target"
+  ' "$target" >"$new"
+  chmod --reference="$target" "$new"
+  mv "$new" "$target"
+  trap - EXIT
 fi
 
 # A link never replaces a real directory or file: the user's own theme of the
