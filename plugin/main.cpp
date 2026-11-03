@@ -355,12 +355,6 @@ void main() {
         return buffer.str();
     }
 
-    // A colour's relative luminance, as WCAG measures contrast.
-    float luminance(const std::array<float, 3>& c) {
-        const auto linear = [](float v) { return v <= 0.04045F ? v / 12.92F : std::pow((v + 0.055F) / 1.055F, 2.4F); };
-        return 0.2126F * linear(c[0]) + 0.7152F * linear(c[1]) + 0.0722F * linear(c[2]);
-    }
-
     std::array<float, 3> hexColor(const std::string& hex) {
         const auto value = std::stoul(hex, nullptr, 16);
         return {((value >> 16) & 0xff) / 255.F, ((value >> 8) & 0xff) / 255.F, (value & 0xff) / 255.F};
@@ -1160,18 +1154,10 @@ void main() {
         std::string keys;
         for (const auto& c : g->backgrounds)
             keys += (keys.empty() ? "" : ", ") + vec3(c);
-        // Muted text keeps 4.5:1 (WCAG) on the glass where the pane's
-        // luminance is no more than this for a palette whose muted is lighter
-        // than its background, no less for one whose muted is darker; where
-        // the background itself is short of that, as far as the background.
-        const float background = luminance(g->background), muted = luminance(g->muted);
-        const float side       = muted > background ? 1.F : -1.F;
-        const float limit      = side > 0 ? std::max(background, (muted + 0.05F) / 4.5F - 0.05F) : std::min(background, 4.5F * (muted + 0.05F) - 0.05F);
         source.insert(at, std::format(R"(// omarchy-cinema glass: see the backdrop plugin.
 const vec3  CINEMA_BACKGROUNDS[{}] = vec3[]({});
 const float CINEMA_GLASS = {:.4f};
-const vec3  CINEMA_BACKGROUND = {};
-const float CINEMA_LIMIT = {:.6f}, CINEMA_SIDE = {:.1f};
+const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
 vec3 cinemaLinear(vec3 c) {{
     return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
 }}
@@ -1179,18 +1165,21 @@ float cinemaLuminance(vec3 c) {{
     return dot(cinemaLinear(c), vec3(0.2126, 0.7152, 0.0722));
 }}
 // The frost behind the glass, held so that the theme's glass over it keeps
-// muted text at 4.5:1: where the pane would pass the limit, it moves toward
-// the background in linear light, dimming in its own hue on a dark theme,
-// until it meets it.
+// muted text at 4.5:1 (WCAG): a pane past that, as the display shows it in
+// whole 8-bit levels, moves toward the background in linear light, dimming in
+// its own hue on a dark theme, until it meets it; where the background itself
+// is short of 4.5:1, as far as the background.
 vec4 cinemaFrost(vec4 frost) {{
+    float b     = cinemaLuminance(CINEMA_BACKGROUND), m = cinemaLuminance(CINEMA_MUTED);
+    float side  = sign(m - b);
+    float limit = side > 0.0 ? max(b, (m + 0.05) / 4.5 - 0.05) : min(b, 4.5 * (m + 0.05) - 0.05);
     vec3  under = CINEMA_BACKGROUND * CINEMA_GLASS;
     vec3  pane  = under + frost.rgb * (1.0 - CINEMA_GLASS);
-    float y     = cinemaLuminance(pane);
-    if ((y - CINEMA_LIMIT) * CINEMA_SIDE <= 0.0) return frost;
-    float b    = cinemaLuminance(CINEMA_BACKGROUND);
-    vec3  held = mix(cinemaLinear(CINEMA_BACKGROUND), cinemaLinear(pane), (CINEMA_LIMIT - b) / (y - b));
-    held       = mix(held * 12.92, 1.055 * pow(held, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, held));
-    return vec4((held - under) / (1.0 - CINEMA_GLASS), frost.a);
+    float y     = cinemaLuminance(round(pane * 255.0) / 255.0);
+    if ((y - limit) * side <= 0.0) return frost;
+    vec3 held = mix(cinemaLinear(CINEMA_BACKGROUND), cinemaLinear(pane), (limit - b) / (y - b));
+    held      = mix(held * 12.92, 1.055 * pow(held, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, held)) * 255.0;
+    return vec4(((side > 0.0 ? floor(held) : ceil(held)) / 255.0 - under) / (1.0 - CINEMA_GLASS), frost.a);
 }}
 vec4 cinemaGlass(vec4 c) {{
     // Nothing to judge where the app drew nothing.
@@ -1216,7 +1205,7 @@ vec4 cinemaGlass(vec4 c) {{
 }}
 
 )",
-                                         g->backgrounds.size(), keys, glass, vec3(g->background), limit, side, g->backgrounds.size()));
+                                         g->backgrounds.size(), keys, glass, vec3(g->background), vec3(g->muted), g->backgrounds.size()));
         source.insert(source.find(read), "#if USE_BLUR\n    pixColor = cinemaGlass(pixColor);\n#endif\n\n");
         const auto held = "cinemaFrost(" + frost + ")";
         for (auto found = source.find(frost); found != std::string::npos; found = source.find(frost, found + held.size()))
