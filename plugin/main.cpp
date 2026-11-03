@@ -1143,7 +1143,7 @@ void main() {
         std::string source{found->second};
         const std::string output = "layout(location = 0) out vec4 fragColor;";
         const std::string read   = "#if USE_DISCARD && !USE_BLUR";
-        const std::string frost  = "texture(blurredBG, blurUV)";
+        const std::string frost  = "pixColor += blurredPixColor * pixBlurBgAlpha;";
         const auto        at     = source.find(output);
         if (at == std::string::npos || source.find(output, at + 1) != std::string::npos || source.find(read) == std::string::npos ||
             source.find(frost) == std::string::npos) {
@@ -1164,22 +1164,24 @@ vec3 cinemaLinear(vec3 c) {{
 float cinemaLuminance(vec3 c) {{
     return dot(cinemaLinear(c), vec3(0.2126, 0.7152, 0.0722));
 }}
-// The frost behind the glass, held so that the theme's glass over it keeps
-// muted text at 4.5:1 (WCAG): a pane past that, as the display shows it in
-// whole 8-bit levels, moves toward the background in linear light, dimming in
-// its own hue on a dark theme, until it meets it; where the background itself
-// is short of 4.5:1, as far as the background.
-vec4 cinemaFrost(vec4 frost) {{
-    float b     = cinemaLuminance(CINEMA_BACKGROUND), m = cinemaLuminance(CINEMA_MUTED);
-    float side  = sign(m - b);
-    float limit = side > 0.0 ? max(b, (m + 0.05) / 4.5 - 0.05) : min(b, 4.5 * (m + 0.05) - 0.05);
-    vec3  under = CINEMA_BACKGROUND * CINEMA_GLASS;
-    vec3  pane  = under + frost.rgb * (1.0 - CINEMA_GLASS);
-    float y     = cinemaLuminance(round(pane * 255.0) / 255.0);
-    if ((y - limit) * side <= 0.0) return frost;
-    vec3 held = mix(cinemaLinear(CINEMA_BACKGROUND), cinemaLinear(pane), (limit - b) / (y - b));
-    held      = mix(held * 12.92, 1.055 * pow(held, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, held)) * 255.0;
-    return vec4(((side > 0.0 ? floor(held) : ceil(held)) / 255.0 - under) / (1.0 - CINEMA_GLASS), frost.a);
+// A pixel composited over the frost (pix plus k of frost), held so that
+// muted text keeps 4.5:1 (WCAG) on it: one past that, as the display shows
+// it in whole 8-bit levels, moves in linear light toward the same pixel over
+// the theme's background, dimming in its own hue on a dark theme, until it
+// meets 4.5:1 on a whole level; where the background itself is short of
+// 4.5:1, as far as the background. Text drawn opaque has no frost to hold.
+vec4 cinemaHold(vec4 pix, vec4 frost, float k) {{
+    vec4  c     = pix + frost * k;
+    float m     = cinemaLuminance(CINEMA_MUTED), side = sign(m - cinemaLuminance(CINEMA_BACKGROUND));
+    float limit = side > 0.0 ? (m + 0.05) / 4.5 - 0.05 : 4.5 * (m + 0.05) - 0.05;
+    vec3  shown = round(c.rgb * 255.0) / 255.0;
+    float y     = cinemaLuminance(shown);
+    if ((y - limit) * side <= 0.0) return c;
+    vec3  safe = pix.rgb + CINEMA_BACKGROUND * k;
+    float s    = cinemaLuminance(safe);
+    vec3  held = mix(cinemaLinear(safe), cinemaLinear(shown), (s - limit) * side < 0.0 ? (limit - s) / (y - s) : 0.0);
+    held       = mix(held * 12.92, 1.055 * pow(held, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, held)) * 255.0;
+    return vec4((side > 0.0 ? floor(held) : ceil(held)) / 255.0, c.a);
 }}
 vec4 cinemaGlass(vec4 c) {{
     // Nothing to judge where the app drew nothing.
@@ -1207,9 +1209,10 @@ vec4 cinemaGlass(vec4 c) {{
 )",
                                          g->backgrounds.size(), keys, glass, vec3(g->background), vec3(g->muted), g->backgrounds.size()));
         source.insert(source.find(read), "#if USE_BLUR\n    pixColor = cinemaGlass(pixColor);\n#endif\n\n");
-        const auto held = "cinemaFrost(" + frost + ")";
-        for (auto found = source.find(frost); found != std::string::npos; found = source.find(frost, found + held.size()))
-            source.replace(found, frost.size(), held);
+        // The frost is held where Hyprland composites it, for the window's
+        // pixel and, when it mirrors, the mirror's.
+        static const std::regex COMPOSITE(R"((pixColor|mirrorColor) \+= (blurred\w+) \* (\w+);)");
+        source = std::regex_replace(source, COMPOSITE, "$1 = cinemaHold($1, $2, $3);");
         return source;
     }
 
