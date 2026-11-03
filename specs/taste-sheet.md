@@ -16,3 +16,13 @@ data, Jarvis's glass 0.6) are in git history.
    Moving the pointer corner to corner changed 28, 4, 40, 20 and 7% of the
    screen in Jarvis, Oblivion, Evangelion, the Matrix and Roadster, now 2.6,
    1.3, 0, 0 and 0.2% (its light). Stills: scratch/batch2/view/sheet-*.png.
+3. The Matrix's depth (films/matrix-depth): the far rain goes soft, letters
+   lost to focus, and the near rain never shows through the glass, so text
+   sits on calmer glass. Recommend keeping it. Stills:
+   scratch/batch2/depth/matrix-{empty,windows}-12-before-after.png,
+   matrix-swap-{before,after}.png.
+4. The glass's frost (films/frame-budget): the plugin makes it now, so the
+   glass shows the world brighter and a little sharper than Hyprland's frost
+   did (no 0.75 dimming, noise or vibrancy); muted text still holds 4.5:1.
+   Keep, or dim the frost to match the old look? Recommend keeping.
+   Stills: scratch/batch2/frame-budget/*-before-after.png.
