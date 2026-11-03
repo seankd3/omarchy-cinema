@@ -270,9 +270,6 @@ void main() {
         uint64_t                                generation = 1;
         uint64_t                                compiled   = 0;
         bool                                    framed     = false; // the film's shader defines frame()
-        // How far the glass blurs the world behind it (colors.toml's frost,
-        // as film.lua gives Hyprland's blur size; 3 without one).
-        float                                   frost      = 3.F;
         SGpu                                    gpu;
         // Frames a second of the backdrop's own motion, plugged in and on
         // battery; 0 is the display's own rate. Sean: "keep it native? or
@@ -460,17 +457,13 @@ void main() {
 
         static const std::regex PALETTE(R"re(^\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})")re");
         static const std::regex GLASS(R"re(^\s*glass\s*=\s*"\s*([^"\s]*)\s*")re");
-        static const std::regex FROST(R"re(^\s*frost\s*=\s*"\s*([0-9.]+)\s*")re");
         std::istringstream      colors(readFile(dir + "/colors.toml"));
         g->backgrounds.clear();
         g->glass = 0.85F;
-        g->frost = 3.F;
         for (std::string line; std::getline(colors, line);) {
             std::smatch match;
             if (std::regex_search(line, match, GLASS))
                 g->glass = glassOf(match[1]);
-            if (std::regex_search(line, match, FROST))
-                g->frost = std::stof(match[1]);
             if (!std::regex_search(line, match, PALETTE))
                 continue;
             const auto name  = match[1].str();
@@ -763,12 +756,10 @@ void main() {
         static auto BLEND        = CConfigValue<Config::INTEGER>("render:use_shader_blur_blend");
         static auto VARIANT      = CConfigValue<Config::INTEGER>("decoration:blur:variant");
         static auto PROPORTIONAL = CConfigValue<Config::INTEGER>("decoration:blur:proportional");
-        static auto XRAY         = CConfigValue<Config::INTEGER>("decoration:blur:xray");
         const auto  surface      = w->wlSurface();
         const bool  whole        = surface && surface->resource() &&
             (surface->m_visibleRegion.empty() || CRegion(CBox{{}, surface->resource()->m_current.bufferSize}).subtract(surface->m_visibleRegion).empty());
-        const bool  shared       = (!w->isFloating() && !w->onSpecialWorkspace()) || *XRAY;
-        return *BLEND && *VARIANT == 0 && !*PROPORTIONAL && shared && w->shouldBlur(drawn) && !w->effects().hasActiveTransformers() && whole;
+        return *BLEND && *VARIANT == 0 && !*PROPORTIONAL && w->shouldBlur(drawn) && !w->effects().hasActiveTransformers() && whole;
     }
 
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {
@@ -1430,10 +1421,12 @@ vec4 cinemaGlass(vec4 c) {{
             // same projection, softened into the glass's frost (frost()).
             auto&     coarse = gpu.coarse[monitor->m_id];
             const int width = (monitor->m_transformedSize.x + 1) / 2, height = (monitor->m_transformedSize.y + 1) / 2;
-            // As soft as the film's frost: Hyprland's blur of that size in
-            // two passes spreads a point over about twice its size, in the
+            // As soft as the glass's frost (Hyprland's blur size, which
+            // film.lua sets from the film's frost): a blur of that size in two
+            // passes spreads a point over about twice its size, in the
             // monitor's pixels, of which the coarse world has one in two.
-            const int levels = std::clamp(int(std::round(std::log2(std::max(2.0 * g->frost * monitor->m_scale, 1.0)))), 1, 6);
+            static auto SIZE   = CConfigValue<Config::INTEGER>("decoration:blur:size");
+            const int   levels = std::clamp(int(std::round(std::log2(std::max(2.0 * *SIZE * monitor->m_scale, 1.0)))), 1, 6);
             if (coarse.width != width || coarse.height != height || coarse.levels != levels) {
                 if (coarse.fbo) {
                     glDeleteTextures(1, &coarse.texture);
@@ -1472,11 +1465,14 @@ vec4 cinemaGlass(vec4 c) {{
             frost(monitor, coarse);
             // At full size where the world is seen as it is: not inside a
             // window whose glass shows it only through the frost, which
-            // Hyprland composites opaque over all of it; its rounded corners
-            // and the pixel round its edge are drawn.
+            // Hyprland composites opaque over all of it from that frost, not
+            // from a live blur of what is under it (Hyprland's own decision);
+            // its rounded corners and the pixel round its edge are drawn.
             CRegion seen = ctx.m_data.damage.copy();
             for (const auto& shape : m_scene.shapes) {
-                if (!shape.veiled)
+                const auto& windows = Desktop::windowState()->windows();
+                const auto  window  = std::ranges::find_if(windows, [&](const auto& w) { return w->metadata().stableID() == shape.id; });
+                if (!shape.veiled || window == windows.end() || !g_pHyprRenderer->shouldUseNewBlurOptimizations(ctx, nullptr, *window))
                     continue;
                 CBox inside = CBox{shape.rect[0], shape.rect[1], shape.rect[2], shape.rect[3]}.expand(-shape.rounding - 2.0).scale(monitor->m_scale);
                 ctx.m_data.renderModif.applyToBox(inside);
@@ -1498,6 +1494,11 @@ vec4 cinemaGlass(vec4 c) {{
         }
         ePassElementType type() override {
             return EK_CUSTOM;
+        }
+        // It makes the glass's frost, which Hyprland no longer does, so it
+        // runs even when windows hide all of it.
+        bool undiscardable(Render::CRenderContext&) override {
+            return true;
         }
         // The backdrop covers the whole monitor, so Hyprland can skip drawing
         // the wallpaper under it.
