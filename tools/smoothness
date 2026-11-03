@@ -45,6 +45,8 @@ if [[ ${1:-} == --inside ]]; then
   now >"$out/end"
   sleep 6
   now >"$out/gpu"
+  # The log has to go on past the end, to show it did not stop before it.
+  sleep 0.1
   exit
 fi
 
@@ -129,13 +131,13 @@ for c in commits:
     if drawn is not None:
         shown[-(-(c - epoch) // period)] = drawn
 first, last = -(-(start - epoch) // period), (end - epoch) // period
-# The log must cover the run: frameclock counted every vblank up to the GPU
+# The log must cover the run: frameclock counted a vblank after the GPU
 # window's end, every frame of the motion window drew the backdrop since the
 # frame before it, and a frame was shown before that window began.
 inside = [c for c in commits if start <= c <= end]
 drawnAt = [at for at, _ in times]
 untraced = [b for a, b in zip(inside, inside[1:]) if bisect.bisect_right(drawnAt, b) == bisect.bisect_right(drawnAt, a)]
-if period is None or not shown or min(shown) >= first or len(inside) < 2 or untraced or vblanks <= (gpuEnd - epoch) // period:
+if period is None or not shown or min(shown) >= first or len(inside) < 2 or untraced or vblanks <= (gpuEnd - epoch) // period + 1:
     sys.exit(1)
 p = period / 1e9
 vblanks = range(first + 1, last + 1)
