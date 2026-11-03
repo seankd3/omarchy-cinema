@@ -1309,10 +1309,10 @@ vec4 cinemaGlass(vec4 c) {{
         glBindVertexArray(gpu.vao);
     }
 
-    // Draws the square once per damaged rect.
-    void drawSquare(Render::CRenderContext& ctx, const std::function<void()>& set, GLuint coarse = 0) {
+    // Draws the square over each rect of `where`, a part of the damage.
+    void drawSquare(Render::CRenderContext& ctx, const CRegion& where, const std::function<void()>& set, GLuint coarse = 0) {
         prepare(coarse, set);
-        ctx.m_data.damage.forEachRect([&ctx](const auto& rect) {
+        where.forEachRect([&ctx](const auto& rect) {
             g_pHyprOpenGL->scissor(ctx, &rect, ctx.m_data.transformDamage);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         });
@@ -1354,7 +1354,7 @@ vec4 cinemaGlass(vec4 c) {{
                 return [&, pass] { setUniforms(gpu.backdrop, monitor, m_scene, m_answer, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}, now, pass); };
             };
             if (!std::ranges::any_of(m_scene.shapes, &SShape::veiled)) {
-                drawSquare(ctx, set(0));
+                drawSquare(ctx, ctx.m_data.damage, set(0));
                 return {};
             }
             // The world behind the veiled windows, at half the monitor's
@@ -1386,7 +1386,7 @@ vec4 cinemaGlass(vec4 c) {{
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
             glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-            drawSquare(ctx, set(2), coarse.texture);
+            drawSquare(ctx, ctx.m_data.damage, set(2), coarse.texture);
             return {};
         }
 
@@ -1438,13 +1438,19 @@ vec4 cinemaGlass(vec4 c) {{
                 return {};
             const int  index = found - shapes.begin();
             const CBox area  = band(*found);
-            CBox       box   = area.copy().scale(monitor->m_scale);
-            ctx.m_data.renderModif.applyToBox(box);
-            const auto   proj = g_pHyprRenderer->projectBoxToTarget(ctx, box);
-            const auto   now  = std::chrono::steady_clock::now();
+            const auto onTarget = [&](CBox logical) {
+                ctx.m_data.renderModif.applyToBox(logical.scale(monitor->m_scale));
+                return logical;
+            };
+            const CBox box = onTarget(area);
+            // A frame draws nothing over 2 px inside its window (contract.glsl),
+            // so only its ring is drawn, as Hyprland draws its border.
+            const CBox   inside = onTarget(CBox{found->rect[0], found->rect[1], found->rect[2], found->rect[3]}.expand(-found->rounding - 3.0));
+            const auto   proj   = g_pHyprRenderer->projectBoxToTarget(ctx, box);
+            const auto   now    = std::chrono::steady_clock::now();
             const SGuest guest;
             g_pHyprRenderer->blend(true);
-            drawSquare(ctx, [&] {
+            drawSquare(ctx, ctx.m_data.damage.copy().intersect(box).subtract(inside), [&] {
                 setUniforms(g->gpu.frame, monitor, state.drawn, state.answered, proj, area, now);
                 glUniform1i(g->gpu.frame.frameWindow, index);
                 glUniform1f(g->gpu.frame.frameAlpha, m_alpha);
