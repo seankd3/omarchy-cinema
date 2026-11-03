@@ -89,13 +89,56 @@ this release.
 - **The preview's fake glass overlay** (Sol finding 7); the two preview tools
   share `omarchy-cinema preview` and keep their own renderers.
 
-## Packaging (coordinator, 2026-11-02)
+## Packaging (coordinator, 2026-11-02; shape settled 2026-11-03)
 
-The engine (plugin, `film.lua`, OSD base, command) is one Arch package for
-x86_64 and aarch64, pinned to its Hyprland, reading the shaders installed with
-its own build (no contract skew, no rebuild hook). A film is a theme
-directory with no code for `omarchy theme install`: values in `colors.toml`,
-borders from Omarchy's template, folder icons and popup base from the engine.
+The engine is one Arch package for x86_64 and aarch64 (`PKGBUILD`, MIT):
+the plugin and `film.lua` in `/usr/lib/omarchy-cinema`, built by
+`plugin/Makefile`'s install, which `./install` uses too. It depends on exactly
+the Hyprland package it was built against, release included. A film is a
+theme directory with no code, for `omarchy theme install`: values in
+`colors.toml`, borders from Omarchy's template. The plugin compiles whatever
+`backdrop.frag` the applied theme has, at every theme switch, against its own
+contract, and refuses one written for another contract with a notice that
+names the fix (SPEC.md, "Theme switch"). Compiling the shipped films into the
+plugin (the first attempt, c521c6e) was rejected: every shader edit needed a
+rebuild and a login, and it ignored Omarchy's same-name overlay of a shipped
+film's `backdrop.frag` or `colors.toml`.
+
+Still open: a cloned film's popup base (a fixed engine path its QML imports)
+and folder icons have no staging point yet (specs/polish.md, item 6), so the
+package ships the plugin and `film.lua` only, and `./install`'s popup and icon
+steps stay.
+
+**The switch on Sean's machine** (not done; each step waits on Sean):
+
+1. Build and install the package (`makepkg -si` in a clone). From then on
+   pacman refuses a Hyprland update until the package is rebuilt for it (see
+   below), which is what keeps the next login from loading a plugin its
+   Hyprland refuses.
+2. In `~/.config/hypr/hyprland.lua`, load `/usr/lib/omarchy-cinema/backdrop.so`
+   and run `/usr/lib/omarchy-cinema/film.lua` in place of the two
+   `~/.local/lib/omarchy-cinema` lines; then remove `~/.local/lib/omarchy-cinema`.
+   It takes effect at the next login (never load or unload in a running
+   Hyprland).
+3. Remove `~/.config/omarchy/hooks/post-update.d/omarchy-cinema-rebuild`, the
+   old rebuild after `omarchy update`; the pin replaces it. `./install` no
+   longer writes it.
+4. The themes stay links into the checkout until films ship on their own; a
+   contract change then needs the package rebuilt and a login before a theme
+   switch, and the notice says so if it is missed.
+
+**The pin for other users, without blocking `omarchy update`.** An exact
+`hyprland=` dependency makes pacman stop a whole `omarchy update` when Omarchy
+ships a new Hyprland and the engine has not been rebuilt. Proposed: the engine
+goes into omarchy-pkgs, the repository Hyprland already comes from here
+(`pacman -Si hyprland`: repository omarchy, 0.57.0-4), and is rebuilt there in
+the same push as each Hyprland it ships, so the two always move together and
+the pin never blocks. An AUR build, which no one rebuilds in lockstep, takes
+the other side: it depends on `hyprland` without a version, so updates are
+never held; after a Hyprland update the plugin refuses to load (Hyprland's own
+message) until the user rebuilds the package, and the desktop runs without the
+backdrop meanwhile. The PKGBUILD here is the pinned one, for the omarchy-pkgs
+route.
 
 ## Non-goals
 

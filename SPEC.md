@@ -63,8 +63,16 @@ asleep or fullscreen.
 **Theme switch.** `omarchy-theme-set` swaps `current/theme` and reloads
 Hyprland. The plugin reads `backdrop.frag` and `colors.toml` from
 `current/theme` on load and on every config reload, and compiles the program
-at the next draw. A shader that does not compile is reported once and draws
-nothing.
+at the next draw, so the theme directory is the one home of a film's shader
+and glass: editing `backdrop.frag` and switching theme shows the edit, and
+Omarchy's same-name overlay of a shipped film is drawn as overlaid. The
+contract carries a version (`// omarchy-cinema contract N`, its first comment
+line) and each `backdrop.frag` says the version it was written for on the same
+line; a shader written for another contract, or for none, is not compiled. One
+notice names the fix (log in again to run the engine installed now, or update
+the theme) and the backdrop draws nothing, so a theme switch after a contract
+change never draws a film against a contract it was not written for. A shader
+that does not compile is reported once and draws nothing.
 
 **Loaded once a session.** `~/.config/hypr/hyprland.lua` loads the plugin at
 login and nothing unloads it while Hyprland runs; a theme without
@@ -80,7 +88,8 @@ opaque. Just the background elements should have the transparency." Hyprland's
 window opacity fades a whole window, so the plugin adds one step to Hyprland's
 own window shader (`surface.frag`, taken from the running build): it un-mixes
 each pixel from the theme's background colour (colour-to-alpha), so pure
-background becomes glass at `plugin:backdrop:glass` and everything drawn over
+background becomes glass at the theme's `glass` (`colors.toml`, which the
+plugin reads with the palette) and everything drawn over
 it keeps its opacity. The step runs only in the shader's blur variant, which
 `render:use_shader_blur_blend` selects for windows Hyprland blurs; glass
 windows are 0.999 opaque to be blurred, browsers stay at 1 and are never
@@ -136,19 +145,22 @@ their 2560x1440.
 ## Layout and install
 
 ```
-plugin/        main.cpp, contract.glsl, Makefile (g++ against installed headers)
+plugin/        main.cpp, contract.glsl, Makefile (g++ against installed headers;
+               `make install` puts the plugin and film.lua in ENGINE)
+PKGBUILD       the engine as one Arch package in /usr/lib/omarchy-cinema,
+               pinned to the Hyprland it was built against
 osd/           FilmOsd.qml (each film's dictation popup builds on it), the
                stock themes' voxtype-osd.toml template
 themes/<slug>/ colors.toml, backdrop.frag, backgrounds/,
                voxtype-osd.toml and voxtype-osd-<slug>.qml, ...
-install        build the plugin into ~/.local/lib/omarchy-cinema/backdrop.so
+install        the developer's install: the engine into ~/.local/lib/omarchy-cinema
                (a new file, then renamed: Hyprland maps the old one), link each
                theme into ~/.config/omarchy/themes/<slug> (never over a real
                directory), add film.lua's line to the Hyprland config
 ```
 
-A Hyprland update needs `./install` again: the plugin refuses to load into
-another version and says so.
+A Hyprland update needs `./install` again, or the package rebuilt for it: the
+plugin refuses to load into another version and says so.
 
 ## What it deletes
 
