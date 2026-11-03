@@ -129,10 +129,11 @@ def render(theme, t, windows, focused, velocity=None, pointer=None, impulses=(),
     texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
     texture.use(0)
 
-    # A theme with lettering draws the agents' text: the preview fills the feed
-    # with this repository's spec, as if agents were writing it.
+    # A theme's lettering, for whatever it writes, and the agents' text for a
+    # film that rains it: the preview fills the feed with this repository's
+    # spec, as if agents were writing it.
     glyphs_png = theme / "glyphs.png"
-    if glyphs_png.exists() and "feed" in program:
+    if glyphs_png.exists() and "glyphs" in program:
         atlas = Image.open(glyphs_png).convert("RGBA").getchannel("A")
         glyphs = ctx.texture(atlas.size, 1, atlas.tobytes())
         glyphs.filter = (moderngl.LINEAR, moderngl.LINEAR)
