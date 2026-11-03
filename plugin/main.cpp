@@ -697,8 +697,9 @@ void main() {
     // Whether Hyprland draws all of window w's rect frosted, as the world
     // behind it was measured to hide a half-resolution world
     // (specs/smoothness.md): the window untransformed (no wobble, motion blur
-    // or other transformer) and fully present, its surface drawn whole (no
-    // visible or blur region of the client's own), blurred by Hyprland's
+    // or other transformer) and fully present, its surface drawn and blurred
+    // whole (a visible or blur region of the client's own covers all of it, as
+    // foot's blur region does), blurred by Hyprland's
     // Kawase blur (variant 0) at size 3 or more, two passes or more, at full
     // strength (not proportional to alpha, nor faded with opacity), with
     // nothing amplifying it (contrast and brightness at most 1). How much of
@@ -713,8 +714,12 @@ void main() {
         static auto CONTRAST     = CConfigValue<Config::FLOAT>("decoration:blur:contrast");
         static auto BRIGHTNESS   = CConfigValue<Config::FLOAT>("decoration:blur:brightness");
         const auto  surface      = w->wlSurface();
+        // A region the client set (none is all of it) that covers all of `size`.
+        const auto whole = [](const CRegion& region, const Vector2D& size) { return region.empty() || CRegion(CBox{{}, size}).subtract(region).empty(); };
         return *VARIANT == 0 && *SIZE >= 3 && *PASSES >= 2 && !*PROPORTIONAL && *IGNORE_ALPHA && *CONTRAST <= 1.F && *BRIGHTNESS <= 1.F && drawn.fadeAlpha >= 1.F &&
-            !w->effects().hasActiveTransformers() && w->shouldBlur(drawn) && surface && !surface->m_hasBackgroundEffect && surface->m_visibleRegion.empty();
+            !w->effects().hasActiveTransformers() && w->shouldBlur(drawn) && surface && surface->resource() &&
+            (!surface->m_hasBackgroundEffect || whole(surface->m_blurRegion, surface->getViewporterCorrectedSize())) &&
+            whole(surface->m_visibleRegion, surface->resource()->m_current.bufferSize);
     }
 
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {
