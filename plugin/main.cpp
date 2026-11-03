@@ -153,7 +153,7 @@ void main() {
         std::array<float, 2> velocity{};
         float                lift  = 0;
         float                depth = 0;
-        uint64_t             id    = 0; // the window's stable id; 0 for a closed one fading out
+        uint64_t             id    = 0; // the window's stable id, kept by its fadeout; 0 for none
         bool                 operator==(const SShape&) const = default;
     };
 
@@ -187,6 +187,12 @@ void main() {
         std::chrono::steady_clock::time_point seen;
     };
 
+    // A closed window as its fadeout still needs it.
+    struct SClosed {
+        float    rounding = 0;
+        uint64_t id       = 0;
+    };
+
     struct SImpulse {
         Vector2D                              at; // global logical px
         std::chrono::steady_clock::time_point start;
@@ -207,7 +213,6 @@ void main() {
         // keeps; 0 is none. Any change of source eases from what was drawn.
         PHLWINDOWREF                          focusedWindow;
         WP<Desktop::IFadeout>                 focusFadeout;
-        uint64_t                              focusFadeoutOf = 0;
         uint64_t                              source         = 0;
         Rect                                  focusFrom{};
         float                                 alphaFrom = 0;
@@ -280,9 +285,10 @@ void main() {
         bool                                    speaking = false;
         std::chrono::steady_clock::time_point   voiceReceived;
         // Hyprland keeps a closed window's rounding inside its fadeout, out of
-        // reach, so the plugin keeps it beside: each window fadeout's rounding
-        // from the moment it is made until Hyprland lets it go.
-        std::unordered_map<const void*, float>  fadeoutRounding;
+        // reach, and forgets which window it was, so the plugin keeps both
+        // beside: each window fadeout's rounding and stable id from the moment
+        // it is made until Hyprland lets it go.
+        std::unordered_map<const void*, SClosed> closed;
         std::unordered_set<const void*>         seenFadeouts;
         // The window whose fadeout comes next, held until its radius is read:
         // a client can destroy it in the same call that closes it, and
@@ -651,17 +657,15 @@ void main() {
                 continue;
             alive.insert(fadeout.get());
             if (g->seenFadeouts.insert(fadeout.get()).second && g->closing) {
-                g->fadeoutRounding[fadeout.get()] = g->closing->presentation().rounding();
+                g->closed[fadeout.get()] = {g->closing->presentation().rounding(), g->closing->metadata().stableID()};
                 for (auto& [id, state] : g->monitors)
-                    if (state.focusedWindow.lock() == g->closing) {
-                        state.focusFadeout   = fadeout;
-                        state.focusFadeoutOf = g->closing->metadata().stableID();
-                    }
+                    if (state.focusedWindow.lock() == g->closing)
+                        state.focusFadeout = fadeout;
             }
         }
         g->closing.reset();
         std::erase_if(g->seenFadeouts, [&](const void* f) { return !alive.contains(f); });
-        std::erase_if(g->fadeoutRounding, [&](const auto& entry) { return !alive.contains(entry.first); });
+        std::erase_if(g->closed, [&](const auto& entry) { return !alive.contains(entry.first); });
     }
 
     // The windows Hyprland draws on this monitor in this frame, and those
@@ -750,12 +754,12 @@ void main() {
                 continue;
             const auto position = fadeout->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) - monitor->m_position;
             const auto size     = fadeout->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-            const auto rounding = g->fadeoutRounding.find(fadeout.get());
+            const auto closed   = g->closed.find(fadeout.get());
             if (!focusedHere && fadeout == state.focusFadeout.lock())
                 scene.focusedIndex = scene.shapes.size();
             // Only a fadeout already running when the plugin loaded has none.
-            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(),
-                                    rounding != g->fadeoutRounding.end() ? rounding->second : float(*ROUNDING)});
+            const auto window = closed != g->closed.end() ? closed->second : SClosed{float(*ROUNDING)};
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(), window.rounding, {}, 0, 0, window.id});
             const auto plane = fadeout->plane();
             stacking.push_back(drawOrder(workspace,
                                          plane == Desktop::FADEOUT_PLANE_WINDOW_TILED            ? TILED_FADEOUTS :
@@ -772,7 +776,7 @@ void main() {
 
         if (focusedHere || scene.focusedIndex < 0)
             state.focusFadeout.reset(); // a new focus, or the fadeout is over
-        const uint64_t source = focusedHere ? focusedHere->metadata().stableID() : scene.focusedIndex >= 0 ? state.focusFadeoutOf : 0;
+        const uint64_t source = scene.focusedIndex >= 0 ? scene.shapes[scene.focusedIndex].id : 0;
         state.focusedWindow   = focusedHere;
 
         const Rect middle = {float(monitor->m_size.x * 0.3), float(monitor->m_size.y * 0.3), float(monitor->m_size.x * 0.4), float(monitor->m_size.y * 0.4)};
