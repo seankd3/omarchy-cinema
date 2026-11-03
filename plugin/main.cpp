@@ -702,8 +702,9 @@ void main() {
     // does), by Hyprland's Kawase blur (variant 0) at size 3 or more, two
     // passes or more, prepared as measured (contrast 1, brightness at most
     // 1), and drawn at full strength: Hyprland draws the blur at
-    // (ignore_opacity ? fade : alpha * fade) * the surface's overall opacity
-    // (0.57.0 src/render/OpenGL.cpp:1955). How much of the frost shows (glass,
+    // (ignore_opacity ? fade : a * fade) * the surface's overall opacity, a
+    // being the surface's alpha, alpha * fade * its client's alpha modifier
+    // (0.57.0 src/render/OpenGL.cpp:1955, ElementRenderer.cpp:260). How much of the frost shows (glass,
     // an app's own alpha) does not matter: with clear glass the half
     // resolution was measured as hidden too.
     bool frosted(const PHLWINDOW& w, const Render::SWindowRenderPresentation& drawn) {
@@ -719,7 +720,8 @@ void main() {
             return false;
         // A region the client set (none is all of it) that covers all of `size`.
         const auto  whole    = [](const CRegion& region, const Vector2D& size) { return region.empty() || CRegion(CBox{{}, size}).subtract(region).empty(); };
-        const float strength = (*IGNORE_ALPHA ? drawn.fadeAlpha : drawn.alpha * drawn.fadeAlpha) * surface->m_overallOpacity;
+        const float a        = drawn.alpha * drawn.fadeAlpha * surface->m_alphaModifier;
+        const float strength = (*IGNORE_ALPHA ? drawn.fadeAlpha : a * drawn.fadeAlpha) * surface->m_overallOpacity;
         return *VARIANT == 0 && *SIZE >= 3 && *PASSES >= 2 && !*PROPORTIONAL && *CONTRAST == 1.F && *BRIGHTNESS <= 1.F && strength >= 1.F &&
             !w->effects().hasActiveTransformers() && w->shouldBlur(drawn) &&
             (!surface->m_hasBackgroundEffect || whole(surface->m_blurRegion, surface->getViewporterCorrectedSize())) &&
