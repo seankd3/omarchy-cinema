@@ -1,3 +1,4 @@
+// omarchy-cinema contract 3
 // Jurassic Park: fsn, the File System Navigator Lex flies through on the
 // control room's SGI ("It's a UNIX system! I know this!"). A navy void under
 // a black sky that turns green at the horizon. Directories are rose platforms

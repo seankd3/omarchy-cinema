@@ -25,7 +25,6 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
-#include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/desktop/state/Fadeout.hpp>
@@ -64,6 +63,7 @@
 
 #include <array>
 #include <chrono>
+#include <charconv>
 #include <cstring>
 #include <deque>
 #include <cmath>
@@ -259,8 +259,10 @@ void main() {
         HANDLE                                  handle = nullptr;
         std::string                             source; // the theme's shader, empty when it has none
         std::array<float, 3>                    accent{1, 1, 1}, background{0, 0, 0}, foreground{1, 1, 1};
-        // The colours the theme paints backgrounds in: these turn to glass.
+        // The colours the theme paints backgrounds in: these turn to glass,
+        // keeping `glass` of themselves (colors.toml's, 0.85 without one).
         std::vector<std::array<float, 3>>       backgrounds;
+        float                                   glass = 0.85F;
         uint64_t                                generation = 1;
         uint64_t                                compiled   = 0;
         bool                                    framed     = false; // the film's shader defines frame()
@@ -275,8 +277,6 @@ void main() {
         // Windows are followed every frame whatever these are.
         SP<Config::Values::CIntValue>           fps;
         SP<Config::Values::CIntValue>           batteryFps;
-        // How much of a window's background stays: 1 solid, 0 clear glass.
-        SP<Config::Values::CFloatValue>         glass;
         // How far the windows' depth goes (specs/depth.md, "Tiers"): 0 is the
         // backdrop alone, with no answers, no frames and no facts moving.
         SP<Config::Values::CIntValue>           depth;
@@ -403,21 +403,60 @@ void main() {
     }
 
     // The shader and its palette, both from the theme Omarchy has just applied.
+    // The contract version a shader says it was written for (contract.glsl's
+    // first comment line), empty when it says none.
+    std::string contractOf(std::string_view shader) {
+        static const std::regex VERSION(R"(^// omarchy-cinema contract (\d+)[ \t]*$)", std::regex::multiline);
+        std::match_results<std::string_view::const_iterator> match;
+        return std::regex_search(shader.begin(), shader.end(), match, VERSION) ? match[1].str() : "";
+    }
+
+    // How much of a window's background a colors.toml's glass keeps: one
+    // number (as Lua's tonumber reads it: spaces and a + allowed), 0 to 1;
+    // 0.85 for anything else.
+    float glassOf(std::string value) {
+        // One sign at most: from_chars takes a minus, not a plus.
+        if (value.starts_with('+') && value.size() > 1 && value[1] != '-' && value[1] != '+')
+            value.erase(0, 1);
+        float      glass        = 0;
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), glass);
+        return error == std::errc{} && end == value.data() + value.size() && std::isfinite(glass) ? std::clamp(glass, 0.F, 1.F) : 0.85F;
+    }
+
+    // The theme's shader, palette and glass. A shader written for another
+    // contract than this build's is not compiled: it would not draw what its
+    // film means, so the plugin says why and draws nothing.
     void readTheme() {
-        const auto dir    = themeDir();
-        const auto shader = readFile(dir + "/backdrop.frag");
+        const auto        dir     = themeDir();
+        auto              shader  = readFile(dir + "/backdrop.frag");
+        static const auto ours    = contractOf(CONTRACT);
+        const auto        written = contractOf(shader);
+        if (!shader.empty() && written != ours) {
+            const auto fix = written.empty() ? std::string("its backdrop.frag says no contract; update the theme") :
+                std::stoul(written) > std::stoul(ours)                                ? std::string("log in again to run the engine installed now, or update omarchy-cinema") :
+                                                                                        std::string("update the theme");
+            HyprlandAPI::addNotification(g->handle,
+                                         std::format("[backdrop] this theme is written for contract {}, and this engine draws contract {}: {}",
+                                                     written.empty() ? "?" : written, ours, fix),
+                                         CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+            shader.clear();
+        }
         g->source         = shader.empty() ? "" : std::string(CONTRACT) + "\n#line 1\n" + shader;
         static const std::regex FRAME(R"(\bvec4\s+frame\s*\()");
         g->framed         = std::regex_search(shader, FRAME);
 
         static const std::regex PALETTE(R"re(^\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})")re");
         static const std::regex VEIL(R"re(^\s*behind_glass\s*=\s*"veil")re");
+        static const std::regex GLASS(R"re(^\s*glass\s*=\s*"\s*([^"\s]*)\s*")re");
         std::istringstream      colors(readFile(dir + "/colors.toml"));
         g->backgrounds.clear();
-        g->veil = false;
+        g->veil  = false;
+        g->glass = 0.85F;
         for (std::string line; std::getline(colors, line);) {
             g->veil = g->veil || std::regex_search(line, VEIL);
             std::smatch match;
+            if (std::regex_search(line, match, GLASS))
+                g->glass = glassOf(match[1]);
             if (!std::regex_search(line, match, PALETTE))
                 continue;
             const auto name  = match[1].str();
@@ -1073,7 +1112,7 @@ void main() {
     // is drawn where Hyprland draws windows: its own surface shader, the
     // version in this very build, with one step added after the window's pixel
     // is read: a pixel in one of the theme's background colours (background,
-    // dark, darker, lighter) becomes glass at plugin:backdrop:glass, and every
+    // dark, darker, lighter) becomes glass at the theme's glass, and every
     // other pixel keeps exactly the opacity the app drew it with. An earlier
     // colour-to-alpha un-mixing made grey text partly see-through (Sol, 2026-10-28). It runs only in the shader's
     // blur variant (film.lua turns render:use_shader_blur_blend on), which
@@ -1083,7 +1122,7 @@ void main() {
     // and loaded with reloadShaders; Hyprland's own come back when the theme
     // has no backdrop or the plugin unloads.
     std::string glassShaderSource() {
-        const auto glass = g->glass->value();
+        const auto glass = g->glass;
         if (g->source.empty() || glass >= 1.F || g->backgrounds.empty())
             return "";
         const auto found = std::ranges::find(SHADERS, std::string_view{"surface.frag"}, [](const auto& pair) { return pair.first; });
@@ -1521,10 +1560,10 @@ vec4 cinemaGlass(vec4 c) {{
     }
 
     // Once Hyprland has finished a change that may move the glass or start
-    // or stop the world (a theme read or config change, which sets
-    // plugin:backdrop:glass after the theme; a lock or a monitor leaving, both
-    // announced before Hyprland marks them; a window going fullscreen; a
-    // monitor coming, sleeping or waking): the glass the theme asks for;
+    // or stop the world (a theme read or config change; a lock or a monitor
+    // leaving, both announced before Hyprland marks them; a window going
+    // fullscreen; a monitor coming, sleeping or waking): the glass the theme
+    // asks for;
     // answers let go if the world no longer answers, so turning depth or
     // animations off and on again brings nothing back; and the world started
     // where it moves and standing still where it does not.
@@ -1624,13 +1663,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                           0, Config::Values::SIntValueOptions{.min = 0, .max = 1000});
     g->batteryFps = makeShared<Config::Values::CIntValue>("plugin:backdrop:battery_fps", "Frames a second of the backdrop's own motion on battery; 0 is the display's rate",
                                                           30, Config::Values::SIntValueOptions{.min = 0, .max = 1000});
-    g->glass      = makeShared<Config::Values::CFloatValue>("plugin:backdrop:glass", "How much of a window's background stays: 1 solid, 0 clear glass", 1.F,
-                                                            Config::Values::SFloatValueOptions{.min = 0.F, .max = 1.F});
     HyprlandAPI::addConfigValueV2(handle, g->fps);
     HyprlandAPI::addConfigValueV2(handle, g->batteryFps);
     g->depth      = makeShared<Config::Values::CIntValue>("plugin:backdrop:depth", "How far windows' depth goes: 0 the backdrop alone (no answers or frames), 1 to 3 the tiers of specs/depth.md", 2,
                                                          Config::Values::SIntValueOptions{.min = 0, .max = 3});
-    HyprlandAPI::addConfigValueV2(handle, g->glass);
     HyprlandAPI::addConfigValueV2(handle, g->depth);
     g->plugged        = plugged();
     g->lastPowerCheck = std::chrono::steady_clock::now();

@@ -1,3 +1,4 @@
+// omarchy-cinema contract 3
 // The Matrix: the code, and the code is what the agents on this machine are
 // writing (specs/agent-rain.md). Their text rains down the black screen in
 // mirrored glyphs, in three depths, nearer columns larger, brighter and

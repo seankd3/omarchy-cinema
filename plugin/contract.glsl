@@ -1,7 +1,13 @@
 #version 300 es
+// omarchy-cinema contract 3
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
+//
+// The line above is the contract's version. A film's backdrop.frag says the
+// version it was written for with the same line, and the plugin draws only a
+// film written for its own. A change to what a film is given or can call is
+// a new version, and the films that ship move to it in the same change.
 //
 // Lengths are logical pixels from the screen's top left. The windows are the
 // ones Hyprland is drawing on this screen in this frame, where it is drawing

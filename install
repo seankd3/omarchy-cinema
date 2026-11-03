@@ -1,36 +1,20 @@
 #!/bin/bash
-# Builds the backdrop plugin for the installed Hyprland and links the themes
-# into Omarchy. Run it again after changing anything and after every Hyprland
-# update: the plugin refuses to load into a Hyprland it was not built for.
-# A new build takes effect at the next login: never load or unload it in the
-# running Hyprland (that hung the desktop on 2026-10-28).
+# The developer's install: builds the engine from this checkout into
+# ~/.local/lib/omarchy-cinema (the package puts the same in
+# /usr/lib/omarchy-cinema) and links the themes into Omarchy. Run it again
+# after changing anything and after every Hyprland update: the plugin refuses
+# to load into a Hyprland it was not built for. A new build takes effect at
+# the next login: never load or unload it in the running Hyprland (that hung
+# the desktop on 2026-10-28).
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 
-# The headers' version file names the Hyprland they describe (version, commit
-# and the libraries it was built with, all that decides whether a plugin
-# loads), so its hash names the build; timestamps would not tell an update.
-sdk=$(sha256sum "$(pkg-config --variable=prefix hyprland)/hyprland/src/version.h" | cut -c1-16)
-if ! make -s -C "$here/plugin" BUILD="$here/plugin/build/$sdk"; then
-  # After omarchy update this runs unattended, where a failed hook is one line
-  # in a scrolling terminal. Unless the installed plugin is the one these
-  # headers built before, the next login loses the backdrop: say so on the
-  # desktop (Sean, 2026-10-29).
-  if ! cmp -s "$here/plugin/build/$sdk/backdrop.so" ~/.local/lib/omarchy-cinema/backdrop.so; then
-    omarchy-notification-send -u critical "Cinema backdrop needs a port" \
-      "It does not build for Hyprland $(pkg-config --modversion hyprland). From your next login, film themes run without the live backdrop and glass."
-  fi
-  exit 1
-fi
-mkdir -p ~/.local/lib/omarchy-cinema
-# A new file, not an overwrite: Hyprland has the old one mapped while it runs.
-install -m 755 "$here/plugin/build/$sdk/backdrop.so" ~/.local/lib/omarchy-cinema/backdrop.so.new
-mv ~/.local/lib/omarchy-cinema/backdrop.so.new ~/.local/lib/omarchy-cinema/backdrop.so
-# The film themes' Hyprland setup. The user's Hyprland config runs it just
-# after Omarchy's defaults, where a theme's own hyprland.lua runs, so a film
-# theme holds no Lua, which `omarchy theme install` drops.
-install -m 644 "$here/film.lua" ~/.local/lib/omarchy-cinema/film.lua
+make -s -C "$here/plugin" install
+# The film themes' Hyprland setup, installed with the plugin. The user's
+# Hyprland config runs it just after Omarchy's defaults, where a theme's own
+# hyprland.lua runs, so a film theme holds no Lua, which `omarchy theme
+# install` drops.
 film='dofile(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/film.lua")()'
 hypr=~/.config/hypr/hyprland.lua
 if ! grep -qxF "$film" "$hypr"; then
@@ -145,16 +129,9 @@ StandardOutput=null
 WantedBy=graphical-session.target
 EOF
 # With no user manager to reach (a console, a sandbox) the feed is not
-# enabled, and the update hook below is still put in place.
+# enabled, and the rest still runs.
 { systemctl --user daemon-reload && systemctl --user enable --now omarchy-cinema-feed.service; } >/dev/null 2>&1 ||
   echo "omarchy-cinema-feed did not start: systemctl --user status omarchy-cinema-feed" >&2
-
-# Omarchy runs this after `omarchy update`: the plugin is rebuilt for the
-# Hyprland just installed (Sean, 2026-10-28). It loads at the next login.
-hook=~/.config/omarchy/hooks/post-update.d/omarchy-cinema-rebuild
-mkdir -p "${hook%/*}"
-printf '#!/bin/bash\n# Rebuilds the backdrop plugin for the Hyprland just installed.\nexec %q\n' "$here/install" >"$hook"
-chmod 755 "$hook"
 
 # Google Chrome's header follows the applied theme too (browser/chrome-theme):
 # Omarchy runs it after every theme switch, and Chrome takes the theme it

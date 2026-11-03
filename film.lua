@@ -8,11 +8,13 @@
 -- Omarchy's own template, and what differs by film is in its colors.toml:
 --
 --   glass  how much of a window's background stays, 1 solid to 0 clear (0.85
---          if not given); text and everything else on it stays opaque
+--          if not given); text and everything else on it stays opaque. The
+--          backdrop plugin reads it with the theme.
 --   frost  how far the glass blurs what is behind it, as Hyprland's blur
 --          size (3 if not given): fine lettering behind it needs less
 --
--- install puts it at ~/.local/lib/omarchy-cinema/film.lua.
+-- It is installed with the plugin (plugin/Makefile's install: the package in
+-- /usr/lib/omarchy-cinema, ./install in ~/.local/lib/omarchy-cinema).
 
 local theme = (os.getenv("XDG_STATE_HOME") or (os.getenv("HOME") .. "/.local/state")) .. "/omarchy/current/theme"
 
@@ -43,7 +45,7 @@ end
 -- Every window is glass over the backdrop: its background turns to glass and
 -- its text stays opaque (Sean, 2026-10-28: "the transparency should effect the
 -- background but not the text"). The plugin draws that in Hyprland's window
--- shader at plugin:backdrop:glass, in the version Hyprland uses for windows it
+-- shader at the theme's glass, in the version Hyprland uses for windows it
 -- blurs, which is the one use_shader_blur_blend selects. Hyprland blurs only
 -- behind windows it can see through, so glass windows are 0.999 opaque: no
 -- visible fade, but blurred behind. Browsers stay solid (Sean: "except
@@ -85,12 +87,6 @@ hl.config({
 -- 2026-10-28, Oblivion); a dark film keeps Omarchy's dimming.
 local frost = { size = tonumber(colors.frost) or 3, passes = 2, brightness = colors.mode == "light" and 1 or nil }
 hl.on("config.reloaded", function()
-  -- The glass amount is the backdrop plugin's own setting, set here with the
-  -- frost: the plugin registers it when it loads, and a build left behind by
-  -- a Hyprland update never loads, so an absent key is skipped, not an error.
-  if hl.get_config("plugin.backdrop.glass") ~= nil then
-    hl.config({ plugin = { backdrop = { glass = tonumber(colors.glass) or 0.85 } } })
-  end
   hl.config({ decoration = { blur = frost } })
   o.window("org\\.gnome\\.Nautilus", { opacity = "0.999 0.999" })
 end)
