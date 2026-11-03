@@ -1164,12 +1164,25 @@ vec3 cinemaLinear(vec3 c) {{
 float cinemaLuminance(vec3 c) {{
     return dot(cinemaLinear(c), vec3(0.2126, 0.7152, 0.0722));
 }}
+// The theme's background shade nearest a colour (rgb), and how far off it is
+// (w, its largest channel's difference).
+vec4 cinemaShade(vec3 rgb) {{
+    vec4 nearest = vec4(CINEMA_BACKGROUND, 1.0);
+    for (int i = 0; i < {}; i++) {{
+        vec3  e   = abs(rgb - CINEMA_BACKGROUNDS[i]);
+        float off = max(max(e.r, e.g), e.b);
+        if (off < nearest.w) nearest = vec4(CINEMA_BACKGROUNDS[i], off);
+    }}
+    return nearest;
+}}
 // A pixel composited over the frost (pix plus k of frost), held so that
 // muted text keeps 4.5:1 (WCAG) on it: one past that, as the display shows
-// it in whole 8-bit levels, moves in linear light toward the same pixel over
-// the theme's background, dimming in its own hue on a dark theme, until it
-// meets 4.5:1 on a whole level; where the background itself is short of
-// 4.5:1, as far as the background. Text drawn opaque has no frost to hold.
+// it in whole 8-bit levels, moves in linear light toward the same pixel with
+// its own background shade (the theme's background for anything else) in
+// place of the frost, dimming in its own hue on a dark theme, until it meets
+// 4.5:1 on a whole level. Where that shade, drawn solid, is itself short of
+// 4.5:1, it goes as far as the shade: the glass never reads worse than the
+// theme drawn solid. Text drawn opaque has no frost to hold.
 vec4 cinemaHold(vec4 pix, vec4 frost, float k) {{
     vec4  c     = pix + frost * k;
     float m     = cinemaLuminance(CINEMA_MUTED), side = sign(m - cinemaLuminance(CINEMA_BACKGROUND));
@@ -1177,7 +1190,8 @@ vec4 cinemaHold(vec4 pix, vec4 frost, float k) {{
     vec3  shown = round(c.rgb * 255.0) / 255.0;
     float y     = cinemaLuminance(shown);
     if ((y - limit) * side <= 0.0) return c;
-    vec3  safe = pix.rgb + CINEMA_BACKGROUND * k;
+    vec4  own  = cinemaShade(pix.a > 0.0 ? pix.rgb / pix.a : CINEMA_BACKGROUND);
+    vec3  safe = pix.rgb + (own.w <= 2.5 / 255.0 ? own.rgb : CINEMA_BACKGROUND) * k;
     float s    = cinemaLuminance(safe);
     vec3  held = mix(cinemaLinear(safe), cinemaLinear(shown), (s - limit) * side < 0.0 ? (limit - s) / (y - s) : 0.0);
     held       = mix(held * 12.92, 1.055 * pow(held, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, held)) * 255.0;
@@ -1191,17 +1205,12 @@ vec4 cinemaGlass(vec4 c) {{
     // that draws it solid (Sean: "the transparency in T3 code is also
     // mimicked in the terminal and other apps").
     vec3  rgb = c.rgb / c.a;
-    float off = 1.0;
-    for (int i = 0; i < {}; i++) {{
-        vec3 e = abs(rgb - CINEMA_BACKGROUNDS[i]);
-        off = min(off, max(max(e.r, e.g), e.b));
-    }}
     // Only a background colour itself is background, within a step or two of
     // rounding. Panels, cards, fields, rows and dividers are shaded a few
     // steps off it, and they are interface, not background: they keep their
     // opacity with the text, icons and lines (Sean, 2026-10-28: "keep the text
     // opaque and other UI elements other than the background").
-    float background = 1.0 - smoothstep(0.5 / 255.0, 2.5 / 255.0, off);
+    float background = 1.0 - smoothstep(0.5 / 255.0, 2.5 / 255.0, cinemaShade(rgb).w);
     float a = mix(c.a, CINEMA_GLASS, background);
     return vec4(rgb * a, a);
 }}
