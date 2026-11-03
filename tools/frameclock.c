@@ -7,9 +7,11 @@
 //
 //   frameclock <socket-name> <width>x<height> [log]
 //
-// With a log, it writes the vblank grid ("p <period ns> <epoch ns>") and each
-// commit of a buffer ("c <ns>"), on CLOCK_MONOTONIC, appending a line at a time
-// so other writers can share the file (tools/smoothness reads it).
+// With a log, it writes the vblank grid ("p <period ns> <epoch ns>"), each
+// wakeup on it with the vblanks it covers ("v <ns> <count>"), and each commit
+// of a buffer ("c <ns>"), on CLOCK_MONOTONIC, appending a line at a time so
+// other writers can share the file (tools/smoothness reads it; a vblank it has
+// no line for means the log stopped, not that a frame was missed).
 //
 // Every object a client makes is accepted through one dispatcher that reads
 // the protocol's own message tables: a request creates the objects its
@@ -122,6 +124,9 @@ static int answer(int fd, uint32_t mask, void *unused) {
     uint64_t expirations;
     if (read(fd, &expirations, sizeof expirations) < 0)
         return 0;
+    char line[64];
+    snprintf(line, sizeof line, "v %lld %llu\n", monotonic(), (unsigned long long)expirations);
+    note(line);
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     uint32_t ms = now.tv_sec * 1000 + now.tv_nsec / 1000000;
