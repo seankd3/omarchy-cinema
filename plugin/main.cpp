@@ -1442,15 +1442,18 @@ vec4 cinemaGlass(vec4 c) {{
                 ctx.m_data.renderModif.applyToBox(logical.scale(monitor->m_scale));
                 return logical;
             };
-            const CBox box = onTarget(area);
             // A frame draws nothing over 2 px inside its window (contract.glsl),
-            // so only its ring is drawn, as Hyprland draws its border.
+            // so the pixels wholly inside that are left out, as Hyprland's
+            // border leaves out the window's inside; CRegion would truncate a
+            // box's origin and size apart, so the pixels are counted here.
             const CBox   inside = onTarget(CBox{found->rect[0], found->rect[1], found->rect[2], found->rect[3]}.expand(-found->rounding - 3.0));
-            const auto   proj   = g_pHyprRenderer->projectBoxToTarget(ctx, box);
+            const double left = std::ceil(inside.x), top = std::ceil(inside.y);
+            const CRegion within(left, top, std::max(std::floor(inside.x + inside.w) - left, 0.0), std::max(std::floor(inside.y + inside.h) - top, 0.0));
+            const auto   proj   = g_pHyprRenderer->projectBoxToTarget(ctx, onTarget(area));
             const auto   now    = std::chrono::steady_clock::now();
             const SGuest guest;
             g_pHyprRenderer->blend(true);
-            drawSquare(ctx, ctx.m_data.damage.copy().intersect(box).subtract(inside), [&] {
+            drawSquare(ctx, ctx.m_data.damage.copy().subtract(within), [&] {
                 setUniforms(g->gpu.frame, monitor, state.drawn, state.answered, proj, area, now);
                 glUniform1i(g->gpu.frame.frameWindow, index);
                 glUniform1f(g->gpu.frame.frameAlpha, m_alpha);
