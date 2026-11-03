@@ -9,22 +9,10 @@ Stills: each film's theme preview in the hidden desktop
 (`tools/theme-previews`, kept out of git in
 `/home/sean/Projects/omarchy-cinema-polish/scratch/audit/<slug>-before.png`).
 
-GPU, one full-screen backdrop draw at 2880x1800, at rest on workspace 1's
-layout (tools/preview.py's setup timed with a GL query, five interleaved
-rounds, medians; the machine also ran CI and Sean's desktop):
-
-| film | ms | | film | ms |
-|---|---|---|---|---|
-| Jarvis | 9.02 | | Roadster | 7.16 |
-| Jurassic Park | 8.86 | | Oblivion | 6.21 |
-| Evangelion | 7.80 | | Tron Legacy | 5.28 |
-| an empty pass | 0.43 | | The Matrix | 6.72 raining, 4.50 not |
-
-specs/depth.md budgets 1.5 ms. Sean's own Hyprland on Tron used about 70% of
-the GPU's SM time at idle, with the clock held at 734 of 3003 MHz. Jarvis
-with parts switched off: its wake loop at rest 1.6 ms, the gyroscope 1.4, the
-window-under-pixel lookup 1.0, shadows 0.9, the globe 0.2. The cost is spread
-over per-pixel loops over every window, each helper looping again.
+GPU per draw, against specs/depth.md's 1.5 ms: item 4 here, then
+specs/smoothness.md, "GPU per draw", which has where the time goes now. At
+this audit the cost was spread over per-pixel loops over every window, each
+helper looping again.
 
 Worst muted-text contrast over the glass (scratch/edge-judge.py, three times
 of day), at the window's edge and 4 px in: Jarvis 6.7 and 6.7, Tron 5.3 and

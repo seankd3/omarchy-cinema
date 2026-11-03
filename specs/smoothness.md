@@ -115,8 +115,8 @@ within one run.
   everywhere.
 - The clock: during the bench the GPU ran at 734 to 760 of 3003 MHz at 96%
   use, 3.3 W and 39 C, nvidia-smi giving "Reliability" as its clock reason.
-  There, 64 multiply-adds of a vec4 a pixel cost 0.66 ms over the 0.35 ms
-  empty pass: the budget is about 170 of them.
+  There 64 vec4 multiply-adds a pixel cost 0.66 ms over the 0.35 ms empty
+  pass, so the budget is about 110 of them.
 
 **Shape.** Hyprland's frost (blur size 3, two passes) blurs what is behind a
 glass window over about a dozen pixels, so a world drawn there at half
@@ -137,17 +137,15 @@ levels of 255 on screen. Outside the windows every pixel is identical, and
 so is every frame. Inside, the worst pixel and the pixels at 2 levels or
 more, of about 4 million: Jarvis 4.8 and at most 2344, Jurassic Park 2.25 and
 8, Evangelion 2.25 and 22, Roadster 1.7 and none, Oblivion under 1. At 1:1,
-the worst spot of each beside main's cannot be told apart (stills in
-scratch/stills/), nor can Jarvis's glass in the hidden desktop.
+the worst spot of each beside main's cannot be told apart, nor can Jarvis's
+glass in the hidden desktop.
 
 Not kept: Tron's grid at half resolution differs by up to 15 levels at the
 horizon, where its far rows are finer than a half-size pixel, and blending
 those rows into their average changed Tron's own horizon by up to 103 levels
 and still left 8; the Matrix's frost is 1. Oblivion skipping its clouds under
 the glass, which its daylight wash replaces, came to 8% and was not exact: 3
-levels along the panes' edges, from the clouds' screen derivatives. Scaling
-the half-size pass's derivatives back to screen pixels changed nothing
-measurable.
+levels along the panes' edges, from the clouds' screen derivatives.
 
 | ms a draw, main and this | rest | drag |
 |---|---|---|
