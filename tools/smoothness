@@ -29,6 +29,83 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")/.." && pwd)
 
+# Reads a run's frames.log: "covered" exits 0 once the log went on past the
+# GPU window's end; "report" prints the run's line, or exits 1 if the log does
+# not cover the run.
+reader=$(cat <<'EOF'
+import bisect, math, sys
+mode, out, *named = sys.argv[1:]
+gpuEnd = int(open(f"{out}/gpu").read())
+period = epoch = None
+commits, times = [], []
+vblanks = 0
+for line in open(f"{out}/frames.log"):
+    kind, *rest = line.split()
+    if kind == "p":
+        period, epoch = int(rest[0]), int(rest[1])
+    elif kind == "v":
+        vblanks = max(vblanks, int(rest[0]))
+    elif kind == "c":
+        # A commit within a millisecond of the last is that frame again: a
+        # frame takes a whole render.
+        if not commits or int(rest[0]) - commits[-1] > 1_000_000:
+            commits.append(int(rest[0]))
+    elif kind == "t":
+        times.append((int(rest[0]), float(rest[1])))
+# frameclock counted a vblank after the GPU window's end: the log did not stop
+# before it.
+covered = period is not None and vblanks > (gpuEnd - epoch) // period + 1
+if mode == "covered":
+    sys.exit(0 if covered else 1)
+round_, label = named
+start, end = (int(open(f"{out}/{n}").read()) for n in ("start", "end"))
+# What each commit shows: the backdrop time drawn last before it. It is on
+# screen from the first vblank after it.
+shown, t = {}, 0
+drawn = None
+for c in commits:
+    while t < len(times) and times[t][0] <= c:
+        drawn = times[t][1]
+        t += 1
+    if drawn is not None:
+        shown[-(-(c - epoch) // period)] = drawn
+first, last = -(-(start - epoch) // period), (end - epoch) // period
+# The log must cover the run: it went on past the end, every frame of the
+# motion window drew the backdrop since the frame before it, and a frame was
+# shown before that window began.
+inside = [c for c in commits if start <= c <= end]
+drawnAt = [at for at, _ in times]
+untraced = [b for a, b in zip(inside, inside[1:]) if bisect.bisect_right(drawnAt, b) == bisect.bisect_right(drawnAt, a)]
+if not covered or not shown or min(shown) >= first or len(inside) < 2 or untraced:
+    sys.exit(1)
+p = period / 1e9
+vblanks = range(first + 1, last + 1)
+on = {}
+for k in range(min(shown), last + 1):
+    on[k] = shown.get(k, on.get(k - 1))
+steps = [shown[k] - shown[k - 1] for k in vblanks if k in shown and k - 1 in shown]
+if not steps:
+    sys.exit(1)
+n = len(steps)
+missed = 100 * sum(k not in shown for k in vblanks) / len(vblanks)
+judder = math.sqrt(sum((s - p) ** 2 for s in steps) / n) * 1000
+held = 100 * sum(s == 0 for s in steps) / n
+jumps = 100 * sum(s > 1.5 * p for s in steps) / n
+speed = (on[last] - on[first]) / (len(vblanks) * p)
+rendered = sum(end <= c <= gpuEnd for c in commits) / ((gpuEnd - end) / 1e9)
+gpu = wait = float("nan")
+try:
+    pid, waited = open(f"{out}/hyprland").read().split()
+    wait = int(waited) / ((end - start) / 1e9)
+    sm = [int(f[3]) for f in (l.split() for l in open(f"{out}/pmon") if not l.startswith("#")) if f[1] == pid and f[3].isdigit()]
+    gpu = sum(sm) / len(sm) if sm else float("nan")
+except FileNotFoundError:
+    pass
+print(f"round {round_} {label:<12} missed {missed:4.1f}%  judder {judder:5.2f} ms  held {held:4.1f}%  jumps {jumps:4.1f}%  "
+      f"speed {speed:5.3f}  gpu {gpu:4.1f}% {gpu / 100 * 1000 / rendered if rendered else float('nan'):5.2f} ms/frame ({rendered:.0f} rendered/s)  wait {wait:5.1f} ms/s")
+EOF
+)
+
 if [[ ${1:-} == --inside ]]; then
   out=$2
   hyprctl plugin list | grep -q '^Plugin backdrop ' || { echo "smoothness: the backdrop plugin did not load" >&2; exit 1; }
@@ -45,11 +122,8 @@ if [[ ${1:-} == --inside ]]; then
   now >"$out/end"
   sleep 6
   now >"$out/gpu"
-  # The log has to go on past the end, to show it did not stop before it:
-  # frameclock counts a vblank after it.
-  until awk -v end="$(cat "$out/gpu")" '$1 == "p" { last = int((end - $3) / $2) + 1 } $1 == "v" && last && $2 > last { found = 1 } END { exit !found }' "$out/frames.log"; do
-    sleep 0.05
-  done
+  # The log has to go on past the end, to show it did not stop before it.
+  until python3 -c "$reader" covered "$out"; do sleep 0.05; done
   exit
 fi
 
@@ -103,68 +177,6 @@ for ((round = 1; round <= rounds; round++)); do
     fi
     fail() { echo "smoothness: ${labels[i]} round $round $1; see $out" >&2; trap - EXIT; exit 1; }
     wait "$desktop" || fail failed
-    python3 - "$out" "$round" "${labels[i]}" <<'EOF' || fail "has no trace of the backdrop"
-import bisect, math, sys
-out, round_, label = sys.argv[1:]
-start, end, gpuEnd = (int(open(f"{out}/{n}").read()) for n in ("start", "end", "gpu"))
-period = epoch = None
-commits, times = [], []
-vblanks = 0
-for line in open(f"{out}/frames.log"):
-    kind, *rest = line.split()
-    if kind == "p":
-        period, epoch = int(rest[0]), int(rest[1])
-    elif kind == "v":
-        vblanks = max(vblanks, int(rest[0]))
-    elif kind == "c":
-        # A commit within a millisecond of the last is that frame again: a
-        # frame takes a whole render.
-        if not commits or int(rest[0]) - commits[-1] > 1_000_000:
-            commits.append(int(rest[0]))
-    elif kind == "t":
-        times.append((int(rest[0]), float(rest[1])))
-# What each commit shows: the backdrop time drawn last before it. It is on
-# screen from the first vblank after it.
-shown, t = {}, 0
-drawn = None
-for c in commits:
-    while t < len(times) and times[t][0] <= c:
-        drawn = times[t][1]
-        t += 1
-    if drawn is not None:
-        shown[-(-(c - epoch) // period)] = drawn
-first, last = -(-(start - epoch) // period), (end - epoch) // period
-# The log must cover the run: frameclock counted a vblank after the GPU
-# window's end, every frame of the motion window drew the backdrop since the
-# frame before it, and a frame was shown before that window began.
-inside = [c for c in commits if start <= c <= end]
-drawnAt = [at for at, _ in times]
-untraced = [b for a, b in zip(inside, inside[1:]) if bisect.bisect_right(drawnAt, b) == bisect.bisect_right(drawnAt, a)]
-if period is None or not shown or min(shown) >= first or len(inside) < 2 or untraced or vblanks <= (gpuEnd - epoch) // period + 1:
-    sys.exit(1)
-p = period / 1e9
-vblanks = range(first + 1, last + 1)
-on = {}
-for k in range(min(shown), last + 1):
-    on[k] = shown.get(k, on.get(k - 1))
-steps = [shown[k] - shown[k - 1] for k in vblanks if k in shown and k - 1 in shown]
-n = len(steps) or 1
-missed = 100 * sum(k not in shown for k in vblanks) / len(vblanks)
-judder = math.sqrt(sum((s - p) ** 2 for s in steps) / n) * 1000
-held = 100 * sum(s == 0 for s in steps) / n
-jumps = 100 * sum(s > 1.5 * p for s in steps) / n
-speed = (on[last] - on[first]) / (len(vblanks) * p)
-rendered = sum(end <= c <= gpuEnd for c in commits) / ((gpuEnd - end) / 1e9)
-gpu = wait = float("nan")
-try:
-    pid, waited = open(f"{out}/hyprland").read().split()
-    wait = int(waited) / ((end - start) / 1e9)
-    sm = [int(f[3]) for f in (l.split() for l in open(f"{out}/pmon") if not l.startswith("#")) if f[1] == pid and f[3].isdigit()]
-    gpu = sum(sm) / len(sm) if sm else float("nan")
-except FileNotFoundError:
-    pass
-print(f"round {round_} {label:<12} missed {missed:4.1f}%  judder {judder:5.2f} ms  held {held:4.1f}%  jumps {jumps:4.1f}%  "
-      f"speed {speed:5.3f}  gpu {gpu:4.1f}% {gpu / 100 * 1000 / rendered if rendered else float('nan'):5.2f} ms/frame ({rendered:.0f} rendered/s)  wait {wait:5.1f} ms/s")
-EOF
+    python3 -c "$reader" report "$out" "$round" "${labels[i]}" || fail "has no whole trace of the backdrop"
   done
 done
