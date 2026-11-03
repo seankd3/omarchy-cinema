@@ -56,14 +56,18 @@ model is not enough; a judge through Hyprland's own blur is the next step.
    brightness how bright the world behind the glass may be for muted text to
    keep 4.5:1; Jarvis, Tron and Oblivion hold none. A copied film with a new
    palette keeps the old numbers. The condition is on the composited glass,
-   and the plugin's own glass step in Hyprland's window shader is where the
-   glass is composited (SPEC.md, "Glass"): held to the limit there, the
-   glass keeps muted text at 4.5:1 under every film, every palette and any
-   light the frost gathers from outside the window, and the three films'
-   limits, BLUR_REACH and their derivations go. What it changes: a colour
-   too bright behind the glass dims toward the limit in its own hue, so
-   Roadster's white flashes stay white (a look question, with stills, before
-   building). The Matrix's outer 4 px (Evidence) is the same case.
+   which Hyprland's window shader composites from its frost (`blurredBG`,
+   surface.frag) after the plugin's glass step there (SPEC.md, "Glass"). So
+   the step can hold the composited glass to muted text's 4.5:1 in the
+   palette's direction: no brighter than that for a dark film, no darker for
+   a light one (Oblivion keeps its light by hand today), for any palette
+   whose muted text reaches 4.5:1 on its own background. Then the three
+   window limits, BLUR_REACH and their derivations go; the bar is a layer,
+   not a window, so Evangelion's limit under the bar stays until the bar's
+   glass has the same step. What it changes: a colour too bright behind a
+   dark film's glass dims in its own hue, so Roadster's white flashes stay
+   white (a look question, with stills, before building). The Matrix's outer
+   4 px (Evidence) is the same case.
 6. **Elegance, next contract version. The contract's per-field readers repeat
    window().** `windowDepth` has no caller; `windowDistance` only the
    backdrop main's. The films share answers' geometry, each in its own ink:
