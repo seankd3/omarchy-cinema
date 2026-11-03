@@ -156,27 +156,6 @@ vec3 cloudDeck(vec2 px, float horizon, vec2 sun, float lean) {
 
 const float RING = 30.0; // the sensor ring's distance from the focused window
 
-// How far round a rect's edge the point nearest px is, clockwise from the top
-// left corner, 0 to 1.
-float around(vec2 px, vec4 rect) {
-    vec2 p = clamp(px - rect.xy, vec2(0.0), rect.zw);
-    float w = rect.z, h = rect.w;
-    float m = min(min(p.x, w - p.x), min(p.y, h - p.y));
-    float s;
-    if (m == p.y) s = p.x;
-    else if (m == w - p.x) s = w + p.y;
-    else if (m == h - p.y) s = w + h + (w - p.x);
-    else s = 2.0 * w + h + (h - p.y);
-    return s / (2.0 * (w + h));
-}
-
-// Distance from p to the segment from a to b.
-float segment(vec2 p, vec2 a, vec2 b) {
-    vec2 ab = b - a;
-    vec2 ap = p - a;
-    return length(ap - ab * clamp(dot(ap, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0));
-}
-
 // Where the horizon lies and the sun stands, for the sky and the panes' edges.
 float horizonY() {
     return resolution.y * 0.56;
@@ -248,17 +227,13 @@ vec3 answers(vec2 px) {
 // moving windows round ... then you can really make things shine"): vapour
 // trails from its corners (`glow`, with a blue fringe in `blue`) and the
 // cloud it parts behind it (`part`), gone as soon as the pane stops.
-void wake(vec2 px, out float glow, out float blue, out float part) {
-    glow = 0.0;
-    blue = 0.0;
-    part = 0.0;
-    for (int i = 0; i < windowCount; i++) {
-        vec2 v = windowVelocity(i);
-        float speed = length(v);
-        // Only a moving pane pays for its wake.
-        if (speed < 40.0) continue;
-        float k = min(speed / 1200.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
-        vec4 r = windowRect(i);
+void wake(vec2 px, Window w, inout float glow, inout float blue, inout float part) {
+    vec2 v = w.velocity;
+    float speed = length(v);
+    // Only a moving pane pays for its wake.
+    if (speed >= 40.0) {
+        float k = min(speed / 1200.0, 1.0) * w.alpha * smoothstep(0.0, 3.0, w.d);
+        vec4 r = w.rect;
         vec2 tail = -v * 0.3;
         for (int c = 0; c < 4; c++) {
             vec2 a = r.xy + r.zw * vec2(float(c & 1), float(c >> 1));
@@ -271,7 +246,7 @@ void wake(vec2 px, out float glow, out float blue, out float part) {
         for (int g = 1; g <= 3; g++) {
             vec4 ghost = r;
             ghost.xy -= v * 0.06 * float(g);
-            float d = rectDistance(px, ghost, windowRounding(i));
+            float d = rectDistance(px, ghost, w.rounding);
             part = max(part, (1.0 - smoothstep(-30.0, 30.0, d)) * (1.0 - 0.25 * float(g)) * k);
         }
     }
@@ -284,22 +259,21 @@ vec4 backdrop(vec2 px) {
     // The window nearest this point, for its line and its sunlit edge; how
     // near any is and how near a lifted one; and how the cloud flows round
     // them: pushed out from each edge and curling along it.
-    float nearest = FAR;
-    int closest = -1;
+    Seen seen = UNSEEN;
     float near = 0.0, lifted = 0.0;
     vec2 flow = vec2(0.0);
     for (int i = 0; i < windowCount; i++) {
-        float d = windowDistance(px, i);
+        Window w = window(px, i);
+        see(seen, w);
+        float d = w.d;
         near += exp(-max(d, 0.0) / 70.0);
-        if (d < nearest) {
-            nearest = d;
-            closest = i;
-        }
-        float a = windowAlpha(i);
-        lifted = max(lifted, windowLift(i) * exp(-max(d, 0.0) / 120.0) * a);
-        vec2 n = edgeNormal(px, windowRect(i), windowRounding(i));
+        float a = w.alpha;
+        lifted = max(lifted, w.lift * exp(-max(d, 0.0) / 120.0) * a);
+        vec2 n = edgeNormal(px, w.rect, w.rounding);
         flow += (n * 26.0 * exp(-max(d, 0.0) / 70.0) + vec2(n.y, -n.x) * 16.0 * exp(-max(d, 0.0) / 45.0)) * a;
     }
+    float nearest = seen.nearest;
+    int closest = seen.closest;
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
     near = clamp(near, 0.0, 1.0);
 
@@ -325,22 +299,22 @@ vec4 backdrop(vec2 px) {
     // below), so a point well under one does not pay for it.
     if (nearest > -1.0) {
         // The panes' shadows, cast toward the viewer and away from the sun:
-        // slate, soft, and on the cloud rimmed by the gold caustic a pane's edge
-        // focuses (brightest where the shadow fades).
-        float shadow = 0.0;
+        // slate, soft, and on the cloud rimmed by the gold caustic a pane's
+        // edge focuses (brightest where the shadow fades); and the wakes of the
+        // moving ones. A second look at the windows, which only the points
+        // outside them take: under a pane it would cost more than it saves.
+        float shadow = 0.0, trail = 0.0, fringe = 0.0, part = 0.0;
         for (int i = 0; i < windowCount; i++) {
-            vec4 r = windowRect(i);
-            float lift = windowLift(i);
-            vec2 away = normalize(vec2((r.x + r.z * 0.5 - sun.x) / resolution.x, 0.6));
-            shadow = max(shadow, windowShadow(px, i, away * (24.0 + 56.0 * lift), 22.0 + 46.0 * lift));
+            Window w = window(px, i);
+            vec2 away = normalize(vec2((w.rect.x + w.rect.z * 0.5 - sun.x) / resolution.x, 0.6));
+            shadow = max(shadow, windowShadow(px, w, away * (24.0 + 56.0 * w.lift), 22.0 + 46.0 * w.lift));
+            wake(px, w, trail, fringe, part);
         }
         col = mix(col, SLATE, 0.4 * shadow);
         col = mix(col, GOLD, 1.4 * shadow * (1.0 - shadow) * deck);
 
         // The cloud a moving pane parts: deeper below the deck's tops, and a
         // white haze of its passage in the sky.
-        float trail, fringe, part;
-        wake(px, trail, fringe, part);
         col = mix(col, mix(vec3(1.0), DEEP, deck), part * mix(0.5, 0.35, deck));
 
         // A little sunlight gathers round the pointer.
@@ -398,7 +372,7 @@ vec4 backdrop(vec2 px) {
     // moves, and the sun's warm glow along the side facing it. Only the glass
     // shows it, the text stays over it, and it is never darker than the
     // background (colors.toml's), so it cannot lower the text's contrast.
-    int over = windowOver(px);
+    int over = seen.over;
     if (over >= 0) {
         vec4 r = windowRect(over);
         vec2 toSun = normalize(sun - r.xy - r.zw * 0.5 + vec2(0.0, -1e-3));

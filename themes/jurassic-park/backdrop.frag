@@ -87,6 +87,7 @@ const vec3 BEVEL_LIT = vec3(0.894, 0.894, 0.910);
 const vec3 BEVEL_SHADED = vec3(0.541, 0.541, 0.580);
 const vec3 BEVEL_IDLE = vec3(0.353, 0.369, 0.424);
 const float RIM = 6.0; // the bevel's width outside the window, in pixels
+const vec2 HALO = vec2(0.25, 6.0); // how the bar's wire glows (glowLine)
 
 // How the blocks round a window's foot answer what happens to it: landing
 // pops them up and lets them settle, as fsn opens a directory, harder the
@@ -247,12 +248,6 @@ float dirLabel(vec2 p, float sine, float t) {
     float cw = min(0.75, (d.hi.x - d.lo.x) / len);
     vec2 cell = vec2(cw, min(cw * 1.6, 2.0));
     return writing(n, p, vec2((d.lo.x + d.hi.x - cw * len) * 0.5, d.lo.y - 0.4), cell) * legible(cell.y, sine, t);
-}
-
-// Distance from p to the segment a-b.
-float segment(vec2 p, vec2 a, vec2 b) {
-    vec2 ab = b - a, ap = p - a;
-    return length(ap - ab * clamp(dot(ap, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0));
 }
 
 // The events the blocks are answering (popOf), the newest POP_COUNT of them:
@@ -449,38 +444,33 @@ vec2 groundAt(vec2 px, vec3 ro, vec3 forward, vec3 right, vec3 up) {
     return ro.xz + rd.xz * (rd.y < 0.0 ? min(-ro.y / rd.y, far) : far);
 }
 
-// A line `d` pixels away: a crisp core `w` pixels wide in a soft glow.
-float glowLine(float d, float w) {
-    return (1.0 - smoothstep(0.0, w, d)) + 0.25 * exp(-d / (w * 6.0));
-}
-
-// Window i's shadow at px: lit from behind and above, a window standing in
+// Window w's shadow at px: lit from behind and above, a window standing in
 // the landscape throws its shadow forward, onto whatever lies in front of its
 // foot and a little to the right, away from the light, further and softer as
 // focus lifts it; what stands behind it, seen through the glass, stays lit.
 // 1 in full shadow.
-float shadowOf(vec2 px, int i) {
-    vec4 r = windowRect(i);
-    float lift = windowLift(i);
+float shadowOf(vec2 px, Window w) {
+    vec4 r = w.rect;
+    float lift = w.lift;
     float reach = 30.0 + 50.0 * lift;
     float below = px.y - (r.y + r.w);
     if (below < -2.0 || below > reach * 4.0) return 0.0;
     float slide = max(below, 0.0) * LIGHT.x / LIGHT.y;
     float across = max(r.x + slide - px.x, px.x - (r.x + r.z + slide));
     float side = 1.0 - smoothstep(-8.0 - 12.0 * lift, 8.0 + 24.0 * lift, across);
-    return side * exp(-max(below, 0.0) / reach) * smoothstep(-2.0, 2.0, below) * windowAlpha(i);
+    return side * exp(-max(below, 0.0) / reach) * smoothstep(-2.0, 2.0, below) * w.alpha;
 }
 
-// How much window i's wake lights px, `d` from its edge: the ground it
+// How much window w's wake lights px: the ground it
 // crossed in the last tenth of a second or so, at most 400 pixels of it,
 // outside the window itself, brightest just behind it; 0 while it stands
 // still.
-float wakeOf(vec2 px, int i, float d) {
-    vec2 v = windowVelocity(i);
+float wakeOf(vec2 px, Window w) {
+    vec2 v = w.velocity;
     float speed = length(v);
-    if (speed < 40.0 || d < 0.0) return 0.0;
-    vec4 r = windowRect(i);
-    float pace = min(speed / 1500.0, 1.0) * windowAlpha(i);
+    if (speed < 40.0 || w.d < 0.0) return 0.0;
+    vec4 r = w.rect;
+    float pace = min(speed / 1500.0, 1.0) * w.alpha;
     vec2 back = v * min(0.03, 80.0 / speed);
     float wake = 0.0;
     for (int k = 1; k <= 5; k++) {
@@ -503,14 +493,15 @@ vec4 backdrop(vec2 px) {
 
     // The windows at this point: the nearest one's distance, the topmost
     // whose glass it is behind, the shadows they throw on it and their wakes.
-    float nearest = FAR, shadow = 0.0, wake = 0.0;
-    int pane = -1;
+    Seen seen = UNSEEN;
+    float shadow = 0.0, wake = 0.0;
     for (int i = 0; i < windowCount; i++) {
-        float d = windowDistance(px, i);
-        nearest = min(nearest, d);
-        shadow = max(shadow, shadowOf(px, i));
-        wake = max(wake, wakeOf(px, i, d));
+        Window w = window(px, i);
+        see(seen, w);
+        shadow = max(shadow, shadowOf(px, w));
+        wake = max(wake, wakeOf(px, w));
     }
+    float nearest = seen.nearest;
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
 
     // fsn's spotlight: the focused window is the selected item, so a pool of
@@ -631,7 +622,7 @@ vec4 backdrop(vec2 px) {
     // and a faint diagonal streak whose place follows the window across the
     // screen, as a reflection slides when the pane moves. Only the glass
     // shows it; the window's text stays over it, opaque.
-    pane = windowOver(px);
+    int pane = seen.over;
     if (pane >= 0) {
         vec4 r = windowRect(pane);
         vec2 at = px - r.xy;
@@ -651,7 +642,7 @@ vec4 backdrop(vec2 px) {
         col *= mix(1.0, 0.35, step(below, 0.0));
         float flash = cycle(20.0) * (resolution.x + 2400.0) - 400.0;
         float trail = px.x < flash ? exp(-(flash - px.x) / 300.0) : exp(-(px.x - flash) / 8.0);
-        col += WIRE * glowLine(abs(below), 1.0) * (0.35 + 0.9 * trail);
+        col += WIRE * glowLine(abs(below), 1.0, HALO) * (0.35 + 0.9 * trail);
     }
 
     return vec4(col, 1.0);

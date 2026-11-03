@@ -37,18 +37,6 @@ const vec3 WHITE = vec3(1.0, 0.94, 0.94);
 const vec3 UNDER_GLASS = vec3(0.6, 0.3, 0.3);
 const float CAMERA = 15.0; // the eye's height over the floor, in grid cells
 
-// A line `d` pixels away: a crisp core `w` pixels wide in a soft glow.
-float glowLine(float d, float w) {
-    return (1.0 - smoothstep(0.0, w, d)) + 0.25 * exp(-d / (w * 5.0));
-}
-
-// Distance from p to the segment from a to b.
-float segment(vec2 p, vec2 a, vec2 b) {
-    vec2 ab = b - a;
-    vec2 ap = p - a;
-    return length(ap - ab * clamp(dot(ap, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0));
-}
-
 // Distance to four corner brackets around a rect pushed out by `gap`, each
 // arm `arm` pixels long. Folding into one quadrant draws all four at once.
 float brackets(vec2 px, vec4 rect, float gap, float arm) {
@@ -169,43 +157,41 @@ vec3 answers(vec2 px, vec3 red, float horizon, out float lit) {
 // like I'm moving windows round ... then you can really make things shine"):
 // streaks of light back from its trailing edge across its width, and the
 // flight path marker riding ahead of it, gone as soon as the window stops.
-vec3 speedLines(vec2 px, vec3 red) {
+vec3 speedLines(vec2 px, Window w, vec3 red) {
     vec3 light = vec3(0.0);
-    for (int i = 0; i < windowCount; i++) {
-        vec2 v = windowVelocity(i);
-        float speed = length(v);
-        // Only a moving window pays for its lines (a loop count, not a
-        // branch, so the work is skipped, not merely masked).
-        for (int on = 0; on < (speed < 40.0 ? 0 : 1); on++) {
-            float k = min(speed / 1200.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
-            vec4 r = windowRect(i);
-            vec2 n = v / max(speed, 1e-3);
-            vec2 side = vec2(-n.y, n.x);
-            vec2 q = px - r.xy - r.zw * 0.5;
-            float ext = 0.5 * (abs(n.x) * r.z + abs(n.y) * r.w);
-            float wide = 0.5 * (abs(side.x) * r.z + abs(side.y) * r.w);
-            float w = dot(q, side);
-            float back = -dot(q, n) - ext;
-            if (back > 0.0 && abs(w) < wide) {
-                float lane = floor(w / 18.0);
-                float seed = hash(vec2(lane, float(i) + 3.1));
-                float start = seed * 40.0;
-                float len = speed * (0.06 + 0.14 * hash(vec2(lane, 9.7)));
-                float across = abs(fract(w / 18.0) - 0.5) * 18.0;
-                float streak = step(0.35, seed) * step(start, back) * (1.0 - smoothstep(start, start + len, back))
-                    * (1.0 - smoothstep(0.5, 1.4, across));
-                light += mix(red, WHITE, 0.55 + 0.4 * seed) * streak * 1.2 * k;
-                light += red * exp(-back / (speed * 0.12)) * 0.22 * k;
-            }
-            // The flight path marker: a ring with wings and a fin, ahead of
-            // the leading edge, as present as the speed.
-            vec2 m = px - (r.xy + r.zw * 0.5 + n * (ext + 50.0 + speed * 0.02));
-            float ring = abs(length(m) - 9.0);
-            float wings = abs(m.y) + max(abs(abs(m.x) - 17.0) - 8.0, 0.0);
-            float fin = abs(m.x) + max(abs(m.y + 13.0) - 4.0, 0.0);
-            float marker = glowLine(min(ring, min(wings, fin)), 1.4);
-            light += mix(red, WHITE, 0.7) * marker * smoothstep(150.0, 600.0, speed) * 1.3 * windowAlpha(i);
+    vec2 v = w.velocity;
+    float speed = length(v);
+    // Only a moving window pays for its lines (a loop count, not a
+    // branch, so the work is skipped, not merely masked).
+    for (int on = 0; on < (speed < 40.0 ? 0 : 1); on++) {
+        float k = min(speed / 1200.0, 1.0) * w.alpha * smoothstep(0.0, 3.0, w.d);
+        vec4 r = w.rect;
+        vec2 n = v / max(speed, 1e-3);
+        vec2 side = vec2(-n.y, n.x);
+        vec2 q = px - r.xy - r.zw * 0.5;
+        float ext = 0.5 * (abs(n.x) * r.z + abs(n.y) * r.w);
+        float wide = 0.5 * (abs(side.x) * r.z + abs(side.y) * r.w);
+        float off = dot(q, side);
+        float back = -dot(q, n) - ext;
+        if (back > 0.0 && abs(off) < wide) {
+            float lane = floor(off / 18.0);
+            float seed = hash(vec2(lane, float(w.i) + 3.1));
+            float start = seed * 40.0;
+            float len = speed * (0.06 + 0.14 * hash(vec2(lane, 9.7)));
+            float across = abs(fract(off / 18.0) - 0.5) * 18.0;
+            float streak = step(0.35, seed) * step(start, back) * (1.0 - smoothstep(start, start + len, back))
+                * (1.0 - smoothstep(0.5, 1.4, across));
+            light += mix(red, WHITE, 0.55 + 0.4 * seed) * streak * 1.2 * k;
+            light += red * exp(-back / (speed * 0.12)) * 0.22 * k;
         }
+        // The flight path marker: a ring with wings and a fin, ahead of
+        // the leading edge, as present as the speed.
+        vec2 m = px - (r.xy + r.zw * 0.5 + n * (ext + 50.0 + speed * 0.02));
+        float ring = abs(length(m) - 9.0);
+        float wings = abs(m.y) + max(abs(abs(m.x) - 17.0) - 8.0, 0.0);
+        float fin = abs(m.x) + max(abs(m.y + 13.0) - 4.0, 0.0);
+        float marker = glowLine(min(ring, min(wings, fin)), 1.4);
+        light += mix(red, WHITE, 0.7) * marker * smoothstep(150.0, 600.0, speed) * 1.3 * w.alpha;
     }
     return light;
 }
@@ -222,20 +208,20 @@ vec4 backdrop(vec2 px) {
     // holds.
     // The floor's lanes bow out round each window's foot (`bend`, pixels
     // across), and its lines run from the foot's corners toward the viewer.
-    float nearest = FAR, near = 0.0, present = 0.0, shadow = 0.0, bend = 0.0;
-    int closest = -1;
+    // And a moving window's speed lines.
+    Seen seen = UNSEEN;
+    float near = 0.0, present = 0.0, shadow = 0.0, bend = 0.0;
+    vec3 speeding = vec3(0.0);
     vec2 vanish = vec2(resolution.x * 0.5, horizon);
     for (int i = 0; i < windowCount; i++) {
-        float a = windowAlpha(i), d = windowDistance(px, i);
-        if (d < nearest) {
-            nearest = d;
-            closest = i;
-        }
+        Window w = window(px, i);
+        see(seen, w);
+        float a = w.alpha, d = w.d;
         near += exp(-max(d, 0.0) / 120.0);
         present += a;
-        vec4 r = windowRect(i);
-        float lift = windowLift(i);
-        shadow = max(shadow, windowShadow(px, i, vec2(0.0, 26.0 + 44.0 * lift), 18.0 + 34.0 * lift));
+        vec4 r = w.rect;
+        float lift = w.lift;
+        shadow = max(shadow, windowShadow(px, w, vec2(0.0, 26.0 + 44.0 * lift), 18.0 + 34.0 * lift));
         if (i != focusedIndex) light += red * glowLine(brackets(px, r, 22.0, 34.0), 1.0) * 0.4 * a;
         float foot = r.y + r.w;
         float side = px.x < r.x + r.z * 0.5 ? -1.0 : 1.0;
@@ -249,10 +235,12 @@ vec4 backdrop(vec2 px) {
             float run = dot(px - corner, dir);
             light += red * (glowLine(off, 1.0) * 0.5 + 0.04 * exp(-off / 20.0)) * exp(-max(run, 0.0) / 260.0) * step(0.0, run) * a;
         }
+        speeding += speedLines(px, w, red);
     }
+    float nearest = seen.nearest;
     float shade = 1.0 - 0.85 * shadow;
     float lit;
-    vec3 answered = answers(px, red, horizon, lit) + speedLines(px, red);
+    vec3 answered = answers(px, red, horizon, lit) + speeding;
     // The floor lights up a little round the pointer.
     lit += 0.4 * exp(-length((px - pointer.xy) * vec2(1.0, 1.6)) / 200.0);
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
@@ -350,7 +338,7 @@ vec4 backdrop(vec2 px) {
     // The glass catches the cockpit's light: behind each window the world
     // draws the sheen on it, the streak and the horizon's glow along its
     // upper glass. Only the glass shows it; the window's text stays over it.
-    int over = windowOver(px);
+    int over = seen.over;
     if (over >= 0) {
         vec4 r = windowRect(over);
         float top = exp(-(px.y - r.y) / 90.0);

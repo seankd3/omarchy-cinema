@@ -15,25 +15,7 @@
 
 const vec3 ORANGE = vec3(1.0, 0.52, 0.10);
 const float CELL = 40.0; // grid spacing on the floor, in floor units
-
-// A line `d` pixels away: a crisp core `w` pixels wide in a soft glow.
-float glowLine(float d, float w) {
-    return (1.0 - smoothstep(0.0, w, d)) + 0.25 * exp(-d / (w * 6.0));
-}
-
-// How far round a rect's edge the point nearest px is, clockwise from the top
-// left corner, 0 to 1.
-float perimeter(vec2 px, vec4 rect) {
-    vec2 p = clamp(px - rect.xy, vec2(0.0), rect.zw);
-    float w = rect.z, h = rect.w;
-    float m = min(min(p.x, w - p.x), min(p.y, h - p.y));
-    float s;
-    if (m == p.y) s = p.x;
-    else if (m == w - p.x) s = w + p.y;
-    else if (m == h - p.y) s = w + h + (w - p.x);
-    else s = 2.0 * w + h + (h - p.y);
-    return s / (2.0 * (w + h));
-}
+const vec2 HALO = vec2(0.25, 6.0); // how the Grid's lines glow (glowLine)
 
 // The floor under the point, in floor units: x across, z away from the viewer.
 // The viewer glides forward a cell every two seconds; eight cells per sixteen
@@ -46,21 +28,6 @@ vec2 floorAt(vec2 px, float horizon) {
     float depth = 140.0 * resolution.y / dy;
     float x = (px.x - resolution.x * 0.5) * depth / resolution.y + (pointer.x / resolution.x - 0.5) * 20.0;
     return vec2(x, depth + cycle(16.0) * 8.0 * CELL);
-}
-
-// The floor gives under the windows standing on it: points near a window's
-// foot are pulled toward it, so the grid lines bend round its weight, less as
-// focus lifts it off the floor.
-vec2 sag(vec2 px) {
-    vec2 pull = vec2(0.0);
-    for (int i = 0; i < windowCount; i++) {
-        vec4 r = windowRect(i);
-        vec2 foot = vec2(clamp(px.x, r.x, r.x + r.z), r.y + r.w);
-        vec2 to = foot - px;
-        float weight = (1.0 - 0.7 * windowLift(i)) * windowAlpha(i);
-        pull += to * 0.18 * weight * exp(-length(to * vec2(1.0, 2.4)) / 70.0);
-    }
-    return px + pull;
 }
 
 // A light cycle in lane `lane` (cells from the middle), riding away from the
@@ -113,52 +80,74 @@ float gridLit(vec2 px) {
     return lit;
 }
 
-// The windows' shadows on the floor: lit from the horizon behind them, a pane
-// standing on the Grid throws its shadow forward, onto the floor in front of
-// its foot, longer and softer as focus lifts it; the floor behind it, seen
-// through the glass, stays lit. 1 in full shadow.
-float shadowAt(vec2 px) {
-    float s = 0.0;
-    for (int i = 0; i < windowCount; i++) {
-        vec4 r = windowRect(i);
-        float lift = windowLift(i);
-        float reach = 36.0 + 70.0 * lift;
-        float below = px.y - (r.y + r.w);
-        if (below < -2.0 || below > reach * 2.0) continue;
-        float across = max(r.x - px.x, px.x - (r.x + r.z));
-        float side = 1.0 - smoothstep(-12.0, 14.0 + 20.0 * lift, across);
-        s = max(s, side * exp(-max(below, 0.0) / reach) * smoothstep(-2.0, 3.0, below) * windowAlpha(i));
-    }
-    return s;
-}
-
 vec4 backdrop(vec2 px) {
     vec3 cyan = accent;
     float horizon = resolution.y * 0.40;
     vec3 col = background;
     vec3 light = vec3(0.0);
 
-    // The window nearest this point, for its circuit line and pulses.
-    float nearest = FAR;
-    int closest = -1;
+    // One pass over the windows: the nearest, for its circuit line and
+    // pulses, and the one whose glass this point is behind; the light pooled
+    // round them, adding up in the seams; and on the floor, how it gives under
+    // them and their shadows.
+    //
+    // The floor gives under the windows standing on it: points near a window's
+    // foot are pulled toward it, so the grid lines bend round its weight, less
+    // as focus lifts it off the floor. Lit from the horizon behind them, a
+    // pane standing on the Grid throws its shadow forward, onto the floor in
+    // front of its foot, longer and softer as focus lifts it; the floor behind
+    // it, seen through the glass, stays lit (1 in full shadow).
+    //
+    // A moving window leaves its circuit behind it as a fading light trail,
+    // outside the window itself.
+    bool ground = px.y > horizon;
+    Seen seen = UNSEEN;
+    float near = 0.0, shadow = 0.0;
+    vec2 pull = vec2(0.0);
+    vec3 trail = vec3(0.0);
     for (int i = 0; i < windowCount; i++) {
-        float d = windowDistance(px, i);
-        if (d < nearest) {
-            nearest = d;
-            closest = i;
+        Window w = window(px, i);
+        see(seen, w);
+        near += exp(-max(w.d, 0.0) / 90.0);
+        vec4 r = w.rect;
+        if (ground) {
+            vec2 foot = vec2(clamp(px.x, r.x, r.x + r.z), r.y + r.w);
+            vec2 to = foot - px;
+            float weight = (1.0 - 0.7 * w.lift) * w.alpha;
+            pull += to * 0.18 * weight * exp(-length(to * vec2(1.0, 2.4)) / 70.0);
+            float reach = 36.0 + 70.0 * w.lift;
+            float below = px.y - (r.y + r.w);
+            if (below >= -2.0 && below <= reach * 2.0) {
+                float across = max(r.x - px.x, px.x - (r.x + r.z));
+                float side = 1.0 - smoothstep(-12.0, 14.0 + 20.0 * w.lift, across);
+                shadow = max(shadow, side * exp(-max(below, 0.0) / reach) * smoothstep(-2.0, 3.0, below) * w.alpha);
+            }
+        }
+        float speed = length(w.velocity);
+        if (speed >= 40.0) {
+            float outside = smoothstep(0.0, 3.0, w.d);
+            vec3 tint = i == focusedIndex ? ORANGE : cyan;
+            for (int k = 1; k <= 5; k++) {
+                vec4 ghost = r;
+                ghost.xy -= w.velocity * 0.025 * float(k);
+                float d = rectDistance(px, ghost, w.rounding);
+                trail += tint * glowLine(abs(d - 7.0), 1.1, HALO) * (0.75 - 0.13 * float(k)) * min(speed / 1500.0, 1.0) * w.alpha * outside;
+            }
         }
     }
+    float nearest = seen.nearest;
+    int closest = seen.closest;
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
-    float near = clamp(windowGlow(px, 90.0), 0.0, 1.0);
+    near = clamp(near, 0.0, 1.0);
 
-    if (px.y > horizon) {
-        vec2 world = floorAt(sag(px), horizon);
+    if (ground) {
+        vec2 world = floorAt(px + pull, horizon);
         vec2 cell = world / CELL;
         vec2 aa = max(fwidth(cell), vec2(1e-4));
         vec2 lines = abs(fract(cell + 0.5) - 0.5) / aa;
         float grid = max(1.0 - smoothstep(0.0, 1.3, lines.x), 1.0 - smoothstep(0.0, 1.3, lines.y));
         float fade = exp(-world.y / 2600.0);
-        float shade = 1.0 - 0.7 * shadowAt(px);
+        float shade = 1.0 - 0.7 * shadow;
         float lit = gridLit(px);
         light += cyan * grid * fade * (0.35 + 0.9 * near) * (1.0 + lit) * shade;
         // The waves and the pointer's light carry a soft band of their own, so
@@ -182,8 +171,8 @@ vec4 backdrop(vec2 px) {
     // chasing round it; orange around the focused one.
     if (closest >= 0 && nearest > 0.0 && nearest < 60.0) {
         vec3 tint = closest == focusedIndex ? ORANGE : cyan;
-        float circuit = glowLine(abs(nearest - 7.0), 1.1);
-        float around = perimeter(px, windowRect(closest));
+        float circuit = glowLine(abs(nearest - 7.0), 1.1, HALO);
+        float around = around(px, windowRect(closest));
         float pulse = 0.0;
         for (int k = 0; k < 2; k++) {
             float ahead = fract(cycle(closest == focusedIndex ? 4.0 : 8.0) - around + float(k) * 0.5);
@@ -196,28 +185,14 @@ vec4 backdrop(vec2 px) {
         light += tint * circuit * (0.45 + pulse) * windowAlpha(closest);
     }
 
-    // A moving window leaves its circuit behind it as a fading light trail,
-    // outside the window itself.
-    for (int i = 0; i < windowCount; i++) {
-        vec2 v = windowVelocity(i);
-        float speed = length(v);
-        if (speed < 40.0) continue;
-        float outside = smoothstep(0.0, 3.0, windowDistance(px, i));
-        vec3 tint = i == focusedIndex ? ORANGE : cyan;
-        for (int k = 1; k <= 5; k++) {
-            vec4 ghost = windowRect(i);
-            ghost.xy -= v * 0.025 * float(k);
-            float d = rectDistance(px, ghost, windowRounding(i));
-            light += tint * glowLine(abs(d - 7.0), 1.1) * (0.75 - 0.13 * float(k)) * min(speed / 1500.0, 1.0) * windowAlpha(i) * outside;
-        }
-    }
+    light += trail;
 
     // The glass catches the Grid's light: behind each window the world draws
     // the sheen that falls on it, a soft diagonal streak whose place follows
     // the window across the screen, as a real reflection slides when the pane
     // moves, and the horizon's glow along its upper glass. Only the glass
     // shows it; the window's text stays over it, opaque.
-    int over = windowOver(px);
+    int over = seen.over;
     if (over >= 0) {
         vec4 r = windowRect(over);
         float streak = glassStreak(px, r);
@@ -231,7 +206,7 @@ vec4 backdrop(vec2 px) {
     // The bar's lower edge is a line of light, with pulses running along it
     // both ways, and a little of it fills the glass bar above.
     if (reserved.x > 0.0) {
-        float edge = glowLine(abs(px.y - reserved.x), 1.2);
+        float edge = glowLine(abs(px.y - reserved.x), 1.2, HALO);
         float along = px.x / resolution.x;
         float pulses = exp(-fract(cycle(6.0) - along) * 25.0) * 2.5 + exp(-fract(along - cycle(10.0)) * 25.0) * 1.5;
         light += cyan * edge * (0.5 + pulses);
@@ -260,7 +235,7 @@ vec4 frame(vec2 px, int i) {
     // Light passing behind the window, a cycle or a wave, catches its rim.
     vec3 behind = backdrop(px - n * 10.0).rgb;
     float passing = smoothstep(0.15, 0.6, dot(behind, vec3(0.3, 0.5, 0.2)));
-    float rim = glowLine(abs(d - 0.5), 1.0) * toward * (0.8 + 0.8 * lift + 1.6 * passing);
+    float rim = glowLine(abs(d - 0.5), 1.0, HALO) * toward * (0.8 + 0.8 * lift + 1.6 * passing);
     float a = clamp(max(edge * 0.9, rim), 0.0, 1.0);
     vec3 col = bent * edge * 0.9 + tint * rim;
     return vec4(col, a) * windowAlpha(i);

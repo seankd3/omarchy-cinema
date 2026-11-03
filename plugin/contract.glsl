@@ -177,28 +177,84 @@ float windowDistance(vec2 px, int i) {
     return rectDistance(px, windowRect(i), windowRounding(i)) + (1.0 - windowAlpha(i)) * 200.0;
 }
 
-// Distance to the nearest window: negative inside one.
-float nearestWindow(vec2 px) {
-    float d = FAR;
-    for (int i = 0; i < windowCount; i++) d = min(d, windowDistance(px, i));
-    return d;
+// Window i as the point px sees it: everything the plugin says of it, read
+// once, and d, px's windowDistance to it. A film meets the windows at px in
+// one loop, `for (int i = 0; i < windowCount; i++) { Window w = window(px, i);
+// ... }`, and asks all it needs of each there: at 2880x1800 every further
+// loop over three windows cost a draw 0.2 to 0.6 ms (specs/polish.md).
+struct Window {
+    int i;
+    vec4 rect;
+    float alpha, rounding, lift, depth;
+    vec2 velocity;
+    float d;
+};
+
+Window window(vec2 px, int i) {
+    vec4 rect = windowRect(i), a = windowTexel(3 * i + 1);
+    return Window(i, rect, a.x, a.y, a.z, a.w, windowVelocity(i), rectDistance(px, rect, a.y) + (1.0 - a.x) * 200.0);
 }
 
-// Distance to the focused window, FAR when nothing is focused.
-float focusedWindow(vec2 px) {
-    return focusedIndex < 0 ? FAR : windowDistance(px, focusedIndex);
-}
+// What every film asks of the windows at a point, gathered by see() as its
+// loop meets each: the nearest's distance (FAR with none) and index (-1), the
+// distance to the focused window (FAR when nothing is), and the window seen
+// there, the one on top of those containing the point, whose glass it is
+// behind (-1 for none; a window's depth is 0 on top).
+struct Seen {
+    float nearest;
+    int closest;
+    float focus;
+    int over;
+    float top;
+};
+const Seen UNSEEN = Seen(FAR, -1, FAR, -1, FAR);
 
-// Light that pools around the windows, `radius` pixels deep, and adds up in
-// the seams where they sit close: 1 at a window's edge.
-float windowGlow(vec2 px, float radius) {
-    float glow = 0.0;
-    for (int i = 0; i < windowCount; i++) glow += exp(-max(windowDistance(px, i), 0.0) / radius);
-    return glow;
+void see(inout Seen s, Window w) {
+    if (w.d < s.nearest) {
+        s.nearest = w.d;
+        s.closest = w.i;
+    }
+    if (w.i == focusedIndex) s.focus = w.d;
+    if (w.d < 0.0 && w.depth < s.top) {
+        s.over = w.i;
+        s.top = w.depth;
+    }
 }
 
 // Helpers several films share (a helper enters the contract once two films
 // answer a fact the same way).
+
+// A line `d` pixels away: a crisp core `w` pixels wide in a soft glow,
+// `halo.x` bright and fading over `halo.y` core widths; most films glow
+// vec2(0.25, 5.0).
+float glowLine(float d, float w, vec2 halo) {
+    return (1.0 - smoothstep(0.0, w, d)) + halo.x * exp(-d / (w * halo.y));
+}
+
+float glowLine(float d, float w) {
+    return glowLine(d, w, vec2(0.25, 5.0));
+}
+
+// Distance from p to the segment from a to b.
+float segment(vec2 p, vec2 a, vec2 b) {
+    vec2 ab = b - a;
+    vec2 ap = p - a;
+    return length(ap - ab * clamp(dot(ap, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0));
+}
+
+// How far round a rect's edge the point nearest px is, clockwise from the top
+// left corner, 0 to 1.
+float around(vec2 px, vec4 rect) {
+    vec2 p = clamp(px - rect.xy, vec2(0.0), rect.zw);
+    float w = rect.z, h = rect.w;
+    float m = min(min(p.x, w - p.x), min(p.y, h - p.y));
+    float s;
+    if (m == p.y) s = p.x;
+    else if (m == w - p.x) s = w + p.y;
+    else if (m == h - p.y) s = w + h + (w - p.x);
+    else s = 2.0 * w + h + (h - p.y);
+    return s / (2.0 * (w + h));
+}
 
 // The window an event at `at` belongs to: of the windows the point falls in
 // (within a pixel), the one whose middle is nearest, since a floating window
@@ -212,20 +268,6 @@ int windowAt(vec2 at) {
         if (all(lessThan(abs(off), r.zw * 0.5 + 1.0)) && length(off) < best) {
             found = i;
             best = length(off);
-        }
-    }
-    return found;
-}
-
-// The window seen at px: of the windows containing it, the one on top (a
-// window's depth is 0 on top), whose glass px is behind; -1 for none.
-int windowOver(vec2 px) {
-    int found = -1;
-    float top = FAR;
-    for (int i = 0; i < windowCount; i++) {
-        if (windowDistance(px, i) < 0.0 && windowDepth(i) < top) {
-            found = i;
-            top = windowDepth(i);
         }
     }
     return found;
@@ -245,14 +287,12 @@ vec2 edgeNormal(vec2 px, vec4 rect, float radius) {
     return g * vec2(p.x < 0.0 ? -1.0 : 1.0, p.y < 0.0 ? -1.0 : 1.0);
 }
 
-// The shadow window i casts on the world, `offset` away from its light and
+// The shadow window w casts on the world, `offset` away from its light and
 // `soft` wide, only outside the window itself, so the world seen through its
 // own glass stays lit: 1 in full shadow.
-float windowShadow(vec2 px, int i, vec2 offset, float soft) {
-    vec4 r = windowRect(i);
-    float rounding = windowRounding(i);
-    float d = rectDistance(px - offset, r, rounding);
-    return (1.0 - smoothstep(-soft, soft, d)) * smoothstep(-2.0, 3.0, rectDistance(px, r, rounding)) * windowAlpha(i);
+float windowShadow(vec2 px, Window w, vec2 offset, float soft) {
+    float d = rectDistance(px - offset, w.rect, w.rounding);
+    return (1.0 - smoothstep(-soft, soft, d)) * smoothstep(-2.0, 3.0, rectDistance(px, w.rect, w.rounding)) * w.alpha;
 }
 
 // The light falling on window i's glass, for a backdrop to draw under it (the
@@ -290,8 +330,8 @@ float swell(float age, float rise, float life) {
 // part 2), a premultiplied colour over a band reaching 48 px outside the
 // window and at most 2 px inside it, drawn above the window in its own pass,
 // so it moves, tilts and fades with it. A frame can call backdrop() at a bent
-// point to show the world through the glass's thickness. A film that defines
-// frame() draws the windows' edges itself: Hyprland's border and shadow are
-// off for it (film.lua).
+// point to show the world through the glass's thickness. Hyprland's border
+// and shadow stay on under a frame: the frame program's main colours the
+// border ring with the film's edge.
 vec4 backdrop(vec2 px);
 vec4 frame(vec2 px, int i);

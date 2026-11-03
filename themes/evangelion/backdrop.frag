@@ -40,11 +40,6 @@ const float UNDER_GLASS = 0.36;
 // rather than blurred into it, carries the light at the edge.
 const float BLUR_REACH = 22.0;
 
-// A line `d` pixels away: a crisp core `w` pixels wide in a soft glow.
-float glowLine(float d, float w) {
-    return (1.0 - smoothstep(0.0, w, d)) + 0.25 * exp(-d / (w * 5.0));
-}
-
 // The flat-topped hexagon of a honeycomb `size` pixels apart that holds px:
 // its centre (xy) and how far px is inside its edge (z), in pixels.
 vec3 hexCell(vec2 px, float size) {
@@ -149,21 +144,20 @@ vec4 backdrop(vec2 px) {
     // honeycomb packs tighter toward each window's edge, its cells smallest
     // there, and lets go as a window fades (held.xy is the shift from the
     // screen to the honeycomb, held.z how tightly it packs).
-    float nearest = FAR, shadow = 0.0;
-    int pane = -1;
+    Seen seen = UNSEEN;
+    float shadow = 0.0;
     vec3 held = vec3(0.0);
     for (int i = 0; i < windowCount; i++) {
-        vec4 r = windowRect(i);
-        float d = windowDistance(px, i);
-        nearest = min(nearest, d);
-        float beyond = max(d, 0.0);
+        Window w = window(px, i);
+        see(seen, w);
+        float beyond = max(w.d, 0.0);
         float grip = exp(-beyond / 70.0);
-        held += vec3(edgeNormal(px, r, windowRounding(i)) * 0.7 * beyond, 1.0) * grip;
-        float lift = windowLift(i);
-        float soft = 18.0 + 40.0 * lift;
-        float s = rectDistance(px + LIGHT * (24.0 + 44.0 * lift), r, windowRounding(i));
-        shadow = max(shadow, (1.0 - smoothstep(-soft, soft, s)) * windowAlpha(i));
+        held += vec3(edgeNormal(px, w.rect, w.rounding) * 0.7 * beyond, 1.0) * grip;
+        float soft = 18.0 + 40.0 * w.lift;
+        float s = rectDistance(px + LIGHT * (24.0 + 44.0 * w.lift), w.rect, w.rounding);
+        shadow = max(shadow, (1.0 - smoothstep(-soft, soft, s)) * w.alpha);
     }
+    float nearest = seen.nearest;
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
     // Behind a window's glass, and the bar's, only a trace of the field at
     // rest shows; its answers carry through.
@@ -196,14 +190,18 @@ vec4 backdrop(vec2 px) {
     // between windows add up) and most near the focused one. A moving window
     // sets it rippling: rings of cells light and run outward from the window,
     // and the cells where it has just been stay lit behind it, fading.
+    // The cell is a point of its own, so the windows are met again there.
     float wake = 0.0, stir = 0.0;
+    Seen atCell = UNSEEN;
     for (int i = 0; i < windowCount; i++) {
-        wake += 0.6 * exp(-abs(windowDistance(cell.xy, i)) / 28.0);
-        vec2 v = windowVelocity(i);
+        Window w = window(cell.xy, i);
+        see(atCell, w);
+        wake += 0.6 * exp(-abs(w.d) / 28.0);
+        vec2 v = w.velocity;
         float speed = length(v);
         if (speed < 40.0) continue;
-        float pace = min(speed / 1400.0, 1.0) * windowAlpha(i);
-        vec4 r = windowRect(i);
+        float pace = min(speed / 1400.0, 1.0) * w.alpha;
+        vec4 r = w.rect;
         float fc = fieldDistance(cell.xy, r);
         if (fc < 0.0) continue;
         stir += 2.2 * pace * exp(-fc / 160.0) * pow(0.5 + 0.5 * cos(fc / 26.0 - cycle(1.0) * TAU * 3.0), 3.0);
@@ -213,7 +211,7 @@ vec4 backdrop(vec2 px) {
             stir += (1.4 - 0.3 * float(k)) * pace * exp(-abs(fieldDistance(cell.xy, ghost)) / 26.0);
         }
     }
-    float toFocus = abs(focusedWindow(cell.xy));
+    float toFocus = abs(atCell.focus);
     wake += 2.0 * exp(-toFocus / 40.0) + 0.35 * exp(-toFocus / 500.0);
     // The field breathes gently with your voice round the focused window.
     wake += voice * 0.6 * exp(-toFocus / 80.0);
@@ -278,8 +276,7 @@ vec4 backdrop(vec2 px) {
         light += orange * 0.05 * step(px.y, reserved.x);
     }
 
-    pane = windowOver(px);
-    if (pane >= 0) light += sheen(px, pane);
+    if (seen.over >= 0) light += sheen(px, seen.over);
 
     // Behind the glass no channel goes over UNDER_GLASS, so the field passing
     // behind muted text never takes it under 4.5:1.

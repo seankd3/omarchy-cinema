@@ -42,11 +42,6 @@ const vec2 LIGHT = vec2(0.12, -0.99);
 // 120 fps).
 const float PERIODS[6] = float[](6.0, 8.0, 10.0, 12.0, 16.0, 20.0);
 
-// A line `d` pixels away: a crisp core `w` pixels wide in a soft glow.
-float glowLine(float d, float w) {
-    return (1.0 - smoothstep(0.0, w, d)) + 0.25 * exp(-d / (w * 5.0));
-}
-
 // One column's light at height y: a head falls a repeat of `span` pixels
 // every `period` seconds, lighting cell after cell, and the cells behind it
 // fade out over `tail` pixels, leaving the rest of the repeat black. Measured
@@ -163,50 +158,44 @@ vec4 answers(vec2 px, vec2 cell) {
 vec4 backdrop(vec2 px) {
     vec3 green = accent;
 
-    // The windows at px: the nearest, the topmost whose glass px is behind,
-    // the light pooled in the gaps, and the shelter each gives the rain
-    // below it, deeper and softer the more focus lifts it.
-    float nearest = FAR, near = 0.0, shadow = 0.0;
-    int closest = -1, pane = -1;
+    // The windows at px: the nearest, the focused, the topmost whose glass px
+    // is behind, the light pooled in the gaps, and the shelter each gives the
+    // rain below it, deeper and softer the more focus lifts it. A moving
+    // window drags the columns beside it along, bending them, and leaves a
+    // bright wake where it has just been.
+    Seen seen = UNSEEN;
+    float near = 0.0, shadow = 0.0, pull = 0.0, wake = 0.0;
     for (int i = 0; i < windowCount; i++) {
-        vec4 r = windowRect(i);
-        float d = windowDistance(px, i);
+        Window w = window(px, i);
+        see(seen, w);
+        float d = w.d;
         near += exp(-max(d, 0.0) / 60.0);
-        if (d < nearest) {
-            nearest = d;
-            closest = i;
-        }
-        float lift = windowLift(i);
-        float soft = 18.0 + 40.0 * lift;
-        float s = rectDistance(px + LIGHT * (26.0 + 46.0 * lift), r, windowRounding(i));
-        shadow = max(shadow, (1.0 - smoothstep(-soft, soft, s)) * windowAlpha(i));
-    }
-    float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
-    float open = 1.0 - inside;
-    near = clamp(near, 0.0, 1.0);
-    float nearFocus = exp(-max(focusedWindow(px), 0.0) / 160.0);
-
-    // The pointer and a dragged window move the viewpoint, so the near
-    // columns shift a few pixels more than the far ones. A moving window
-    // drags the columns beside it along, bending them, and leaves a bright
-    // wake where it has just been.
-    vec2 drag = focusedIndex >= 0 ? windowVelocity(focusedIndex) : vec2(0.0);
-    float view = (pointer.x - resolution.x * 0.5) * 0.007 + drag.x * 0.003;
-    float pull = 0.0, wake = 0.0;
-    for (int i = 0; i < windowCount; i++) {
-        vec2 v = windowVelocity(i);
+        float soft = 18.0 + 40.0 * w.lift;
+        float s = rectDistance(px + LIGHT * (26.0 + 46.0 * w.lift), w.rect, w.rounding);
+        shadow = max(shadow, (1.0 - smoothstep(-soft, soft, s)) * w.alpha);
+        vec2 v = w.velocity;
         float speed = length(v);
         if (speed < 40.0) continue;
-        float pace = min(speed / 1500.0, 1.0) * windowAlpha(i);
-        float d = windowDistance(px, i);
+        float pace = min(speed / 1500.0, 1.0) * w.alpha;
         pull -= v.x * 0.02 * exp(-max(d, 0.0) / 80.0) * pace;
         if (d < 0.0) continue;
         for (int k = 1; k <= 4; k++) {
-            vec4 ghost = windowRect(i);
+            vec4 ghost = w.rect;
             ghost.xy -= v * 0.035 * float(k);
-            wake = max(wake, exp(-max(rectDistance(px, ghost, windowRounding(i)), 0.0) / 30.0) * (1.0 - 0.2 * float(k)) * pace);
+            wake = max(wake, exp(-max(rectDistance(px, ghost, w.rounding), 0.0) / 30.0) * (1.0 - 0.2 * float(k)) * pace);
         }
     }
+    float nearest = seen.nearest;
+    int closest = seen.closest;
+    float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
+    float open = 1.0 - inside;
+    near = clamp(near, 0.0, 1.0);
+    float nearFocus = exp(-max(seen.focus, 0.0) / 160.0);
+
+    // The pointer and a dragged window move the viewpoint, so the near
+    // columns shift a few pixels more than the far ones.
+    vec2 drag = focusedIndex >= 0 ? windowVelocity(focusedIndex) : vec2(0.0);
+    float view = (pointer.x - resolution.x * 0.5) * 0.007 + drag.x * 0.003;
     float shift = view + pull;
 
     // Three depths: far columns small, dim and slow; near ones large and fast.
@@ -288,7 +277,7 @@ vec4 backdrop(vec2 px) {
     // The rain's light on the glass: a glow along the upper glass, where the
     // rain comes from, and a soft diagonal streak that slides across the pane
     // as the window moves, as a reflection does. Only the glass shows it.
-    pane = windowOver(px);
+    int pane = seen.over;
     if (pane >= 0) {
         vec4 r = windowRect(pane);
         vec2 at = px - r.xy;
