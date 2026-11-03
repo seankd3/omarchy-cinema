@@ -1,0 +1,70 @@
+#!/usr/bin/env -S uv run -q --script
+# /// script
+# dependencies = ["moderngl", "numpy", "pillow"]
+# ///
+"""GPU time of one 2880x1800 backdrop draw, per film and checkout: each
+checkout's own tools/preview.py scene (its contract, film and the uniforms its
+plugin gives), in one of the storyboard's moments, timed with a GL query over
+40 draws, five rounds interleaved, median. specs/depth.md budgets 1.5 ms;
+the empty pass is about 0.4.
+
+    tools/gpu-bench [--moment rest|drag|land|open] [--frames] [CHECKOUT:]SLUG ...
+
+With --frames it times the moment's windows' frames instead, each drawn over
+the whole screen (outside its band a frame returns at once). A CHECKOUT is
+timed from its own tools/preview.py, which needs scene() and storyboard()
+(this tool's first commit has them, on an unchanged plugin and films, as a
+base to time against). Run it under the hidden desktop's lock: it shares the
+GPU.
+"""
+import importlib.util
+import sys
+from pathlib import Path
+
+import moderngl
+
+ROUNDS, DRAWS = 5, 40
+
+
+def checkout(root, cache={}):
+    if root not in cache:
+        spec = importlib.util.spec_from_file_location(f"preview{len(cache)}", Path(root) / "tools/preview.py")
+        cache[root] = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cache[root])
+    return cache[root]
+
+
+def main():
+    args = sys.argv[1:]
+    moment = args[args.index("--moment") + 1] if "--moment" in args else "rest"
+    frames = "--frames" in args
+    films = [a for k, a in enumerate(args) if not a.startswith("--") and (k == 0 or args[k - 1] != "--moment")]
+    here = str(Path(__file__).resolve().parent.parent)
+    ctx = moderngl.create_standalone_context(backend="egl", require=330)
+    runs = []
+    for film in films:
+        root, _, slug = film.rpartition(":")
+        preview = checkout(root or here)
+        _, windows, focused, answers = next(m for m in preview.storyboard() if m[0] == moment)
+        passes = range(len(windows)) if frames else [None]
+        theme = preview.ROOT / "themes" / slug
+        runs.append((film, [preview.scene(ctx, theme, 12.0, windows, focused, frame=f, **answers) for f in passes]))
+    ctx.simple_framebuffer(checkout(here).PIXELS, components=4).use()
+    times = {film: [] for film, _ in runs}
+    for _ in range(ROUNDS):
+        for film, draws in runs:
+            total = 0.0
+            for draw in draws:
+                draw()
+                query = ctx.query(time=True)
+                with query:
+                    for _ in range(DRAWS):
+                        draw()
+                total += query.elapsed / DRAWS / 1e6
+            times[film].append(total)
+    for film, t in times.items():
+        t.sort()
+        print(f"{film:<40} {t[len(t) // 2]:6.2f} ms  ({t[0]:.2f} to {t[-1]:.2f})")
+
+
+main()
