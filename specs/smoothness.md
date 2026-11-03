@@ -122,8 +122,8 @@ within one run.
 glass window over about a dozen pixels, so a world drawn there at half
 resolution and filtered back up looks the same, where the film lets only a
 veil of its world through. That is the film's own fact, so it is data:
-`behind_glass = "veil"` in colors.toml, for Jarvis, Oblivion, Evangelion,
-Roadster and Jurassic Park. The plugin marks each window whose world reaches
+`behind_glass = "veil"` in colors.toml, for Jarvis, Oblivion, Evangelion
+and Roadster (and Jurassic Park until Sean removed it on 2026-11-03). The plugin marks each window whose world reaches
 the screen only through Hyprland's frost (frosted() in main.cpp, below); with
 any marked, the backdrop program draws the world inside them into a half-size
 texture first,

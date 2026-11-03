@@ -80,4 +80,4 @@ the worktree's scratch/.
    film's rules differ (Roadster's brackets, Oblivion's soft frames), so they
    are not copies; only the `:root` roles could come from `colors.toml`
    (RELEASE.md order 3), which moves literal colours a little.
-10. **Docs, next.** SPEC.md and RELEASE.md count six films; seven ship.
+10. **Docs.** SPEC.md and RELEASE.md count six films; six ship again since Jurassic Park went (2026-11-03).

@@ -129,7 +129,7 @@ A plugin window decoration (`HyprlandAPI::addWindowDecoration`, on the OVER
 layer, which Hyprland draws inside the window's own pass) on every window
 draws the film's `frame(px, i)` in a band outside the window's edge and at
 most 2 px inside it: a rim lit from the film's light, a bevel, the film's
-own edge (IRIX grey bevels for Jurassic Park). Because it is drawn in the
+own edge. Because it is drawn in the
 window's pass it tilts, wobbles and fades with the window; fullscreen windows
 have no decorations and so no frame, as today.
 
@@ -228,8 +228,7 @@ animation, which Omarchy turns off so a switch is instant.
 - **Paths.** Each film names its path in `film.lua` (`switch = "fly" |
   "carousel" | "drop" | "dissolve" | "platform"`): Tron flies down the grid
   to the next sector, Jarvis turns a holo carousel, Oblivion drops through
-  cloud, the Matrix dissolves into rain, Jurassic Park flies to the next fsn
-  platform.
+  cloud, the Matrix dissolves into rain.
 
 ### 6. Damage and cost
 
@@ -286,8 +285,6 @@ what was said (only that a key was pressed, and how loud); changing apps.
 4. Workspaces as 3D panels.
 5. Glass that survives motion, tilt, and each film's wobble and motion blur.
 6. The space tier and the binding.
-
-Jurassic Park (another lane) adopts each part as it lands.
 
 ## To verify before building (against Hyprland v0.57.0, scratch/ref/hyprland-057)
 

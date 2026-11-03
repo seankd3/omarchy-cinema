@@ -77,6 +77,12 @@ link() {
   ln -sfn "$1" "$2"
 }
 
+# A film that left this checkout leaves its links behind, dangling: they go,
+# so Omarchy's theme list and GTK's icon themes show only films that exist.
+for old in ~/.config/omarchy/themes/* ~/.local/share/icons/*; do
+  [[ -L $old && ! -e $old && $(readlink "$old") == "$here/themes/"* ]] && rm "$old"
+done
+
 # Each theme's folder icons are an icon theme of their own. GTK finds it by
 # its directory name; the theme's icons.theme names it, and Omarchy sets it.
 mkdir -p ~/.config/omarchy/themes ~/.local/share/icons
