@@ -104,16 +104,18 @@ vec3 rain(vec2 px, vec4 depth, float layer, float shift) {
 }
 
 // The near rain's glyph cell holding px, its columns shifted `shift` across:
-// the cell's middle on the screen (xy), so a burst lights glyph by glyph, and
-// how much of a character of the agents' text covers px (z).
-vec3 nearGlyph(vec2 px, float shift) {
+// the cell's middle on the screen, so a burst lights glyph by glyph.
+vec2 nearCell(vec2 px, float shift) {
+    return (floor(vec2(px.x + shift, px.y) / NEAR_RAIN.xy) + 0.5) * NEAR_RAIN.xy - vec2(shift, 0.0);
+}
+
+// How much of a character of the agents' text covers px in that cell.
+float nearInk(vec2 px, float shift) {
     vec2 at = vec2(px.x + shift, px.y) / NEAR_RAIN.xy;
-    vec2 cell = floor(at);
     vec2 box = NEAR_RAIN.xy * vec2(0.62, 0.7);
     vec2 q = (fract(at) - 0.5) * NEAR_RAIN.xy + box * 0.5;
     float inBox = step(0.0, min(q.x, q.y)) * step(max(q.x - box.x, q.y - box.y), 0.0);
-    float ink = feedCount > 0 ? glyph(feedChar(int(hash(cell + 7.7) * float(feedCount))), q / box) * inBox : 0.0;
-    return vec3((cell + 0.5) * NEAR_RAIN.xy - vec2(shift, 0.0), ink);
+    return glyph(feedChar(int(hash(floor(at) + 7.7) * float(feedCount))), q / box) * inBox;
 }
 
 // The rain answering what happened, at px, whose near glyph cell is centred
@@ -219,8 +221,7 @@ vec4 backdrop(vec2 px) {
     // something just happened and as you speak, and sheltered below the
     // windows. Behind the glass it keeps its shape but not its glare (the
     // limit below).
-    vec3 g = nearGlyph(px, shift);
-    vec4 answer = answers(px, g.xy);
+    vec4 answer = answers(px, nearCell(px, shift));
     vec2 toPointer = px - pointer.xy;
     float touch = exp(-dot(toPointer, toPointer) / (2.0 * 90.0 * 90.0));
     float shade = 1.0 - 0.75 * shadow;
@@ -265,9 +266,10 @@ vec4 backdrop(vec2 px) {
     }
 
     // The answers' own glow, with or without rain, and a landing's glyphs,
-    // only while there is rain; within the blur's reach of a window they keep
-    // to the glass's limit.
-    vec3 glow = green * answer.x + (green * answer.z * 1.2 + HEAD * min(answer.w, 2.0) * 1.4) * g.z * feedPresence;
+    // only while there is rain, read only where a landing reaches; within the
+    // blur's reach of a window they keep to the glass's limit.
+    float ink = answer.z > 0.0 && feedCount > 0 ? nearInk(px, shift) : 0.0;
+    vec3 glow = green * answer.x + (green * answer.z * 1.2 + HEAD * min(answer.w, 2.0) * 1.4) * ink * feedPresence;
     float glowPeak = max(glow.r, max(glow.g, glow.b));
     light += glow * mix(1.0, min(1.0, UNDER_GLASS / max(glowPeak, 1e-4)), max(inside, 1.0 - smoothstep(0.0, BLUR_REACH, nearest)));
 
