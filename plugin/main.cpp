@@ -694,38 +694,30 @@ void main() {
 
     // The windows Hyprland draws on this monitor in this frame, and those
     // fading out after closing, where they are drawn; and where attention is.
-    // Whether Hyprland draws all of window w's rect frosted, as the world
-    // behind it was measured to hide a half-resolution world
-    // (specs/smoothness.md): the window untransformed (no wobble, motion blur
-    // or other transformer), its surface drawn and blurred whole (a visible or
-    // blur region of the client's own covers all of it, as foot's blur region
-    // does), by Hyprland's Kawase blur (variant 0) at size 3 or more, two
-    // passes or more, prepared as measured (contrast 1, brightness at most
-    // 1), and drawn at full strength: Hyprland draws the blur at
-    // (ignore_opacity ? fade : a * fade) * the surface's overall opacity, a
-    // being the surface's alpha, alpha * fade * its client's alpha modifier
-    // (0.57.0 src/render/OpenGL.cpp:1955, ElementRenderer.cpp:260). How much of the frost shows (glass,
-    // an app's own alpha) does not matter: with clear glass the half
-    // resolution was measured as hidden too.
+    // Whether the world behind window w reaches the screen only through
+    // Hyprland's frost, as it was measured to hide a half-resolution world
+    // (specs/smoothness.md). A film session blends the frost in the window's
+    // own shader (render:use_shader_blur_blend, which film.lua sets and the
+    // glass runs in), where every pixel of a blurred surface comes out opaque,
+    // its colour and alpha plus the frost under the rest, whatever its
+    // opacity or fade (0.57.0 surface.frag, OpenGL.cpp:1488). What is left
+    // is whether Hyprland draws w that way over all of its rect (blurred, not
+    // transformed, not proportional, the client's visible region, if any,
+    // all of it) and whether the frost is the one measured: Kawase at size 3
+    // or more, two passes or more, contrast 1, brightness at most 1.
     bool frosted(const PHLWINDOW& w, const Render::SWindowRenderPresentation& drawn) {
+        static auto BLEND        = CConfigValue<Config::INTEGER>("render:use_shader_blur_blend");
         static auto VARIANT      = CConfigValue<Config::INTEGER>("decoration:blur:variant");
         static auto SIZE         = CConfigValue<Config::INTEGER>("decoration:blur:size");
         static auto PASSES       = CConfigValue<Config::INTEGER>("decoration:blur:passes");
         static auto PROPORTIONAL = CConfigValue<Config::INTEGER>("decoration:blur:proportional");
-        static auto IGNORE_ALPHA = CConfigValue<Config::INTEGER>("decoration:blur:ignore_opacity");
         static auto CONTRAST     = CConfigValue<Config::FLOAT>("decoration:blur:contrast");
         static auto BRIGHTNESS   = CConfigValue<Config::FLOAT>("decoration:blur:brightness");
         const auto  surface      = w->wlSurface();
-        if (!surface || !surface->resource())
-            return false;
-        // A region the client set (none is all of it) that covers all of `size`.
-        const auto  whole    = [](const CRegion& region, const Vector2D& size) { return region.empty() || CRegion(CBox{{}, size}).subtract(region).empty(); };
-        const float a        = drawn.alpha * drawn.fadeAlpha * surface->m_alphaModifier;
-        const float strength = (*IGNORE_ALPHA ? drawn.fadeAlpha : a * drawn.fadeAlpha) * surface->m_overallOpacity;
-        return *VARIANT == 0 && *SIZE >= 3 && *PASSES >= 2 && !*PROPORTIONAL && *CONTRAST == 1.F && *BRIGHTNESS <= 1.F && strength >= 1.F &&
-            !w->effects().hasActiveTransformers() && w->shouldBlur(drawn) &&
-            (!surface->m_hasBackgroundEffect || whole(surface->m_blurRegion, surface->getViewporterCorrectedSize())) &&
-            whole(surface->m_visibleRegion, surface->resource()->m_current.bufferSize);
+        const bool  whole        = surface && surface->resource() &&
+            (surface->m_visibleRegion.empty() || CRegion(CBox{{}, surface->resource()->m_current.bufferSize}).subtract(surface->m_visibleRegion).empty());
+        return *BLEND && *VARIANT == 0 && *SIZE >= 3 && *PASSES >= 2 && !*PROPORTIONAL && *CONTRAST == 1.F && *BRIGHTNESS <= 1.F && w->shouldBlur(drawn) &&
+            !w->effects().hasActiveTransformers() && whole;
     }
 
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {

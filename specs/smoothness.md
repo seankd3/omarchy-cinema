@@ -123,9 +123,10 @@ glass window over about a dozen pixels, so a world drawn there at half
 resolution and filtered back up looks the same, where the film lets only a
 veil of its world through. That is the film's own fact, so it is data:
 `behind_glass = "veil"` in colors.toml, for Jarvis, Oblivion, Evangelion,
-Roadster and Jurassic Park. The plugin marks each fully present window that
-Hyprland blurs at size 3 or more, two passes or more; with any marked, the
-backdrop program draws the world inside them into a half-size texture first,
+Roadster and Jurassic Park. The plugin marks each window whose world reaches
+the screen only through Hyprland's frost (frosted() in main.cpp, below); with
+any marked, the backdrop program draws the world inside them into a half-size
+texture first,
 then the screen, reading that texture more than 8 px inside them
 (main-backdrop.glsl). Frames, the bar, every other point and every point of
 Tron and the Matrix stay full resolution.
@@ -142,8 +143,22 @@ glass in the hidden desktop. With clear glass and no dimming, the most any
 compositing can let through, the worst is Jarvis's 16 levels on a blurred
 line core and 3 to 6 for the rest, and at 1:1 it still cannot be told apart:
 so the glass amount, an app's own alpha and the blur's brightness only make
-it smaller, and what decides is that Hyprland frosts the whole window
-untransformed with nothing amplifying the frost (frosted() in main.cpp).
+it smaller.
+
+Which windows (coordinator, 2026-11-03: decide from what the plugin's own
+setup makes true, not a copy of Hyprland's blur formula). Nothing the plugin
+owns says, before the windows are drawn, which pixels Hyprland will replace
+by frost, and a wrong guess shows the half-resolution world sharp through a
+translucent window (Omarchy's glassy terminals draw their own background at
+0.65). What the plugin's setup does settle: a film session blends the frost in
+the window's own shader (render:use_shader_blur_blend, which film.lua sets and
+the glass runs in), where every pixel of a blurred surface comes out opaque,
+its colour plus the frost under the rest, whatever its opacity, fade or alpha
+modifier, and no client blur region clips it. So what is left to ask is
+whether Hyprland draws the window that way over all of its rect (blurred,
+untransformed, not proportional, no client visible region leaving part of it
+undrawn) and whether the frost is the one measured (Kawase, size 3 or more,
+two passes or more, contrast 1, brightness at most 1).
 
 Not kept: Tron's grid at half resolution differs by up to 15 levels at the
 horizon, where its far rows are finer than a half-size pixel, and blending
