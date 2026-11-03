@@ -36,3 +36,8 @@ bright_green = "#8cffd6"
 bright_cyan = "#d2fcff"
 bright_blue = "#66d4ff"
 bright_magenta = "#dcbcff"
+
+# Clearer glass than the others (film.lua; Sean, 2026-10-28: "make the
+# windows more transparent (except chrome) for this theme", then "push it a
+# bit farther").
+glass = "0.4"

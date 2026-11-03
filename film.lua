@@ -1,7 +1,11 @@
--- A film theme's Hyprland setup, the same for every film: the live backdrop,
--- every window made of glass, and the film's borders and glow, all taken from
--- the applied theme's colors.toml. A film theme's hyprland.lua calls this with
--- what differs by film:
+-- The film themes' Hyprland setup, the same for every film: every window made
+-- of glass over the live backdrop, room round the windows and the film's glow.
+-- ~/.config/hypr/hyprland.lua calls it on every config load, just after
+-- Omarchy's defaults, where a theme's own hyprland.lua would run, so the
+-- user's config and Omarchy's toggles still come after it. A theme with no
+-- backdrop.frag is not a film, and gets nothing from it. A film theme then
+-- holds no Lua, which `omarchy theme install` drops: its borders come from
+-- Omarchy's own template, and what differs by film is in its colors.toml:
 --
 --   glass  how much of a window's background stays, 1 solid to 0 clear (0.85
 --          if not given); text and everything else on it stays opaque
@@ -10,10 +14,17 @@
 --
 -- install puts it at ~/.local/lib/omarchy-cinema/film.lua.
 
-local state = os.getenv("XDG_STATE_HOME") or (os.getenv("HOME") .. "/.local/state")
+local theme = (os.getenv("XDG_STATE_HOME") or (os.getenv("HOME") .. "/.local/state")) .. "/omarchy/current/theme"
+
+return function()
+local shader = io.open(theme .. "/backdrop.frag")
+if not shader then
+  return
+end
+shader:close()
 
 local colors = {}
-local file = io.open(state .. "/omarchy/current/theme/colors.toml")
+local file = io.open(theme .. "/colors.toml")
 if file then
   for line in file:lines() do
     local key, value = line:match('^%s*([%w_]+)%s*=%s*"(.-)"')
@@ -24,34 +35,10 @@ if file then
   file:close()
 end
 
--- "rgba(a) rgba(b) 45deg" as Hyprland's Lua config takes it, the way Omarchy's
--- own hyprland.lua template writes colors.toml's border gradients.
-local function gradient(value)
-  local list, angle = {}, nil
-  for part in value:gmatch("%S+") do
-    local degrees = part:match("^(%-?%d+)deg$")
-    if degrees then
-      angle = tonumber(degrees)
-    else
-      list[#list + 1] = part
-    end
-  end
-  if #list == 1 and not angle then
-    return list[1]
-  end
-  return { colors = list, angle = angle or 0 }
-end
-
 -- An accent "#rrggbb" as rgba with the given alpha, for the glow.
 local function glow(alpha)
   return "rgba(" .. (colors.accent or "#ffffff"):sub(2) .. alpha .. ")"
 end
-
-local active = gradient(colors.hyprland_active_border or ("rgba(" .. (colors.accent or "#ffffff"):sub(2) .. "ee)"))
-local inactive = gradient(colors.hyprland_inactive_border or "rgba(595959aa)")
-
-return function(film)
-film = film or {}
 
 -- Every window is glass over the backdrop: its background turns to glass and
 -- its text stays opaque (Sean, 2026-10-28: "the transparency should effect the
@@ -70,7 +57,6 @@ o.window({ tag = "firefox-based-browser" }, { opacity = "1 1" })
 
 hl.config({
   general = {
-    col = { active_border = active, inactive_border = inactive },
     -- Room around and between the windows for the backdrop's light to play in
     -- (Sean, 2026-10-28: "more space between windows and the edge of the
     -- screen to give more breathing room for the effects").
@@ -80,7 +66,6 @@ hl.config({
     gaps_out = 64,
     gaps_in = 32,
   },
-  group = { col = { border_active = active, border_inactive = inactive } },
   -- The windows glow in the film's light.
   decoration = {
     shadow = { enabled = true, range = 22, render_power = 3, color = glow("40"), color_inactive = glow("10") },
@@ -98,13 +83,13 @@ hl.config({
 -- A light film's frost keeps its light: Omarchy's glass dims the blur to 0.75,
 -- which on white glass leaves apps' dimmed secondary text under 4.5:1 (Sol,
 -- 2026-10-28, Oblivion); a dark film keeps Omarchy's dimming.
-local frost = { size = film.frost or 3, passes = 2, brightness = colors.mode == "light" and 1 or nil }
+local frost = { size = tonumber(colors.frost) or 3, passes = 2, brightness = colors.mode == "light" and 1 or nil }
 hl.on("config.reloaded", function()
   -- The glass amount is the backdrop plugin's own setting, set here with the
   -- frost: the plugin registers it when it loads, and a build left behind by
   -- a Hyprland update never loads, so an absent key is skipped, not an error.
   if hl.get_config("plugin.backdrop.glass") ~= nil then
-    hl.config({ plugin = { backdrop = { glass = film.glass or 0.85 } } })
+    hl.config({ plugin = { backdrop = { glass = tonumber(colors.glass) or 0.85 } } })
   end
   hl.config({ decoration = { blur = frost } })
   o.window("org\\.gnome\\.Nautilus", { opacity = "0.999 0.999" })

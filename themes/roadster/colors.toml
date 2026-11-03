@@ -37,3 +37,7 @@ bright_green = "#a3f7ca"
 bright_cyan = "#b8ecff"
 bright_blue = "#a6bfff"
 bright_magenta = "#ff9fcc"
+
+# Clear glass (film.lua), so the grid floor and the lock frame read through
+# the windows.
+glass = "0.55"

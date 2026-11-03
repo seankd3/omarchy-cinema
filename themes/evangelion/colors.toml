@@ -36,3 +36,7 @@ bright_green = "#b6f57e"
 bright_cyan = "#9ae8f4"
 bright_blue = "#9fb8ff"
 bright_magenta = "#cba6ff"
+
+# Half of each window's background stays (film.lua), so the AT field reads
+# through the windows.
+glass = "0.5"

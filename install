@@ -27,8 +27,20 @@ mkdir -p ~/.local/lib/omarchy-cinema
 # A new file, not an overwrite: Hyprland has the old one mapped while it runs.
 install -m 755 "$here/plugin/build/$sdk/backdrop.so" ~/.local/lib/omarchy-cinema/backdrop.so.new
 mv ~/.local/lib/omarchy-cinema/backdrop.so.new ~/.local/lib/omarchy-cinema/backdrop.so
-# Every film theme's hyprland.lua runs this.
+# The film themes' Hyprland setup. The user's Hyprland config runs it just
+# after Omarchy's defaults, where a theme's own hyprland.lua runs, so a film
+# theme holds no Lua, which `omarchy theme install` drops.
 install -m 644 "$here/film.lua" ~/.local/lib/omarchy-cinema/film.lua
+film='dofile(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/film.lua")()'
+hypr=~/.config/hypr/hyprland.lua
+if ! grep -qxF "$film" "$hypr"; then
+  if grep -qx 'require("default.hypr.omarchy")' "$hypr"; then
+    sed -i "/^require(\"default.hypr.omarchy\")\$/a $film" "$hypr"
+  else
+    echo "$hypr does not load Omarchy's defaults as require(\"default.hypr.omarchy\"); add this line after them, then run install again: $film" >&2
+    exit 1
+  fi
+fi
 
 # A link never replaces a real directory or file: the user's own theme of the
 # same name stays, and the install stops.
@@ -48,7 +60,7 @@ for theme in "$here"/themes/*/; do
   # A film still being built stays out of Omarchy's theme list until it has
   # everything a film theme has.
   missing=""
-  for file in colors.toml hyprland.lua backdrop.frag gtk.css shell.bar.toml folders.json; do
+  for file in colors.toml backdrop.frag gtk.css shell.bar.toml folders.json; do
     [[ -f $theme/$file ]] || missing+=" $file"
   done
   if [[ -n $missing ]]; then

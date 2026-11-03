@@ -85,7 +85,8 @@ touched. The patched shader is loaded with Hyprland's `reloadShaders`, only
 when it changes; Hyprland's own returns when the theme has no backdrop or the
 plugin unloads, and a Hyprland whose shader no longer has the expected shape
 gets solid windows and a notice. Glassy mode's 0.75 fade on Files is replaced
-by the same glass. Borders, glow and frost are set by `film.lua`, one per film.
+by the same glass. The session's `film.lua` sets glow, glass and frost from
+the film's `colors.toml`: a film theme holds no Lua.
 
 **Files.** Each film theme ships `gtk.css` (libadwaita variables and Nautilus
 selectors) and its folder icons (`tools/folders.py` writes an icon theme,
@@ -135,12 +136,12 @@ their 2560x1440.
 plugin/        main.cpp, contract.glsl, Makefile (g++ against installed headers)
 osd/           FilmOsd.qml (each film's dictation popup builds on it), the
                stock themes' voxtype-osd.toml template
-themes/<slug>/ colors.toml, hyprland.lua, backdrop.frag, backgrounds/,
+themes/<slug>/ colors.toml, backdrop.frag, backgrounds/,
                voxtype-osd.toml and voxtype-osd-<slug>.qml, ...
 install        build the plugin into ~/.local/lib/omarchy-cinema/backdrop.so
                (a new file, then renamed: Hyprland maps the old one), link each
                theme into ~/.config/omarchy/themes/<slug> (never over a real
-               directory)
+               directory), add film.lua's line to the Hyprland config
 ```
 
 A Hyprland update needs `./install` again: the plugin refuses to load into
@@ -153,8 +154,7 @@ and blur pass, the `qsb` shader compiler and the per-theme `.qsb` build.
 
 ## Non-goals
 
-HUD widgets and data readouts; a full-screen post-process shader; publishing
-for `omarchy theme install` (a git-installed theme loses its `hyprland.lua`).
+HUD widgets and data readouts; a full-screen post-process shader.
 
 ## Acceptance
 

@@ -41,9 +41,8 @@ already have.
    - *No gaps*, *Corners*: apply to the cinema spacing and rounding.
    - *Glassy bar*: the bar's glass.
    Finer values are Hyprland keys (`plugin:backdrop:fps`, `battery_fps`, the
-   theme's gaps), which a theme's `hyprland.lua` sets as defaults and the
-   user's own `~/.config/hypr` overrides, like any Hyprland setting. Toggles
-   load after the theme, so they win without the theme checking them.
+   gaps): `film.lua` sets defaults, the user's `~/.config/hypr` and the
+   toggles load after it and win.
 4. **Anyone can make one.** Copy a cinema theme directory (Omarchy's
    documented way to make a theme), change `colors.toml`, write one GLSL
    function `backdrop(px)` against `plugin/contract.glsl`. One command does the
@@ -76,11 +75,9 @@ this release.
 
 ## What it deletes
 
-- **film.lua's late overrides**: the `config.reloaded` callback that rewrites
-  blur and Files opacity after the user's config and the toggles, and the
-  rules that make every window transparent outside glassy mode. What stays is
-  per-film defaults (borders and glow from `colors.toml`, the glass amount,
-  the spacing), which the user's config and the toggles override.
+- **film.lua's late overrides** (the `config.reloaded` callback, the rules
+  that make every window transparent outside glassy mode): what stays is
+  defaults the user's config and the toggles override.
 - **The popup workaround** once a Voxtype release ships `style = "theme"`
   (the supported route is that release from Voxtype's own packages, AUR or
   release binaries, with its Quickshell frontend installed by
@@ -92,12 +89,19 @@ this release.
 - **The preview's fake glass overlay** (Sol finding 7); the two preview tools
   share `omarchy-cinema preview` and keep their own renderers.
 
+## Packaging (coordinator, 2026-11-02)
+
+The engine (plugin, `film.lua`, OSD base, command) is one Arch package for
+x86_64 and aarch64, pinned to its Hyprland, reading the shaders installed with
+its own build (no contract skew, no rebuild hook). A film is a theme
+directory with no code for `omarchy theme install`: values in `colors.toml`,
+borders from Omarchy's template, folder icons and popup base from the engine.
+
 ## Non-goals
 
 A settings file or a Cinema menu; HUD widgets or data readouts; a full-screen
-post-process shader; publishing through `omarchy theme install` (a cloned
-theme loses its `hyprland.lua`); Omarchy core changes in this repo (they are
-the Discussion's job).
+post-process shader; Omarchy core changes in this repo (they are the
+Discussion's job).
 
 ## Release gate
 
@@ -114,10 +118,9 @@ the Discussion's job).
   optional; when present, the install selects its Quickshell OSD and
   `style = "theme"`.
 - Transitions: glassy, opaque, glassy; film to film to stock; Files already
-  running; no animations on and off; a broken shader; a Hyprland update
-  (rebuild hook) and a failed rebuild.
-- Uninstall removes only what the install added (the load line, templates,
-  links, hook, Voxtype settings it changed) and keeps the user's own.
+  running; no animations on and off; a broken shader; a Hyprland update.
+- Uninstall removes only what the install added (the two config lines,
+  templates, links, Voxtype settings it changed) and keeps the user's own.
 - Same-frame motion and idle cost as in SPEC.md's acceptance.
 - README: what it is, one screenshot per film, install, the toggles,
   authoring; MIT licence; a note that the themes are fan homages, not

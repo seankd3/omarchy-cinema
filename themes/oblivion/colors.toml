@@ -39,3 +39,8 @@ bright_green = "#108054"
 bright_cyan = "#007a9b"
 bright_blue = "#3172bb"
 bright_magenta = "#875abc"
+
+# Frosted white glass (film.lua): the backdrop under the windows is near white
+# and film.lua keeps a light film's frost bright, so the glass never greys the
+# pane below the white the apps chose their dimmer text against.
+glass = "0.7"

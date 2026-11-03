@@ -37,3 +37,7 @@ bright_green = "#80ecc0"
 bright_cyan = "#98ece4"
 bright_blue = "#90acff"
 bright_magenta = "#ecaad0"
+
+# Clear glass (film.lua), so fsn's landscape reads through the windows; the
+# backdrop dims it there, and secondary text keeps 4.9:1 or better over it.
+glass = "0.4"
