@@ -170,11 +170,12 @@ vec3 afterimage(vec2 px, vec3 cyan, inout float lattice) {
     for (int i = 0; i < windowCount; i++) {
         vec2 v = windowVelocity(i);
         float speed = length(v);
+        // Only a moving window pays for its wake.
+        if (speed < 40.0) continue;
         vec3 tint = i == focusedIndex ? mix(cyan, HOT, 0.35) : cyan;
         float wash = 0.0;
         float k = min(speed / 1200.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
-        // Only a moving window pays for its wake.
-        for (int g = 1; g <= (speed < 40.0 ? 0 : 4); g++) {
+        for (int g = 1; g <= 4; g++) {
             vec4 ghost = windowRect(i);
             ghost.xy -= v * 0.04 * float(g);
             float d = rectDistance(px, ghost, windowRounding(i));

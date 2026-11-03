@@ -255,12 +255,12 @@ void wake(vec2 px, out float glow, out float blue, out float part) {
     for (int i = 0; i < windowCount; i++) {
         vec2 v = windowVelocity(i);
         float speed = length(v);
+        // Only a moving pane pays for its wake.
+        if (speed < 40.0) continue;
         float k = min(speed / 1200.0, 1.0) * windowAlpha(i) * smoothstep(0.0, 3.0, windowDistance(px, i));
         vec4 r = windowRect(i);
         vec2 tail = -v * 0.3;
-        // Only a moving pane pays for its wake.
-        int corners = speed < 40.0 ? 0 : 4;
-        for (int c = 0; c < corners; c++) {
+        for (int c = 0; c < 4; c++) {
             vec2 a = r.xy + r.zw * vec2(float(c & 1), float(c >> 1));
             float t = clamp(dot(px - a, tail) / max(dot(tail, tail), 1e-3), 0.0, 1.0);
             float dist = segment(px, a, a + tail);
@@ -268,7 +268,7 @@ void wake(vec2 px, out float glow, out float blue, out float part) {
             glow += exp(-dist / w) * (1.0 - t) * 1.2 * k;
             blue += exp(-dist / (w * 2.6)) * (1.0 - t) * 0.7 * k;
         }
-        for (int g = 1; g <= corners - 1; g++) {
+        for (int g = 1; g <= 3; g++) {
             vec4 ghost = r;
             ghost.xy -= v * 0.06 * float(g);
             float d = rectDistance(px, ghost, windowRounding(i));
