@@ -250,12 +250,12 @@ today's build.
 `plugin:backdrop:depth`: `0` today's look; `1` glass (parts 1 and 2, the
 world's answers and the frame); `2` physical (adds parts 3 to 5: glass
 through motion, tilt, wobble, 3D switches); `3` space (adds a standing
-perspective: windows sit at depths by `z` and lean with the pointer through
-the same transformer, so text is never quite flat). Default `2`. A key
+perspective: windows sit at depths by `z` through the same transformer, so
+text is never quite flat; nothing leans with the pointer, taste sheet 2). Default `2`. A key
 binding cycles it, so Sean can compare them on his own desktop.
 
 The space tier is a visual experiment Sean asked for: input stays on
-Hyprland's flat geometry, so its lean is bounded to keep every drawn edge
+Hyprland's flat geometry, so its tilt is bounded to keep every drawn edge
 within 16 px of where the window lies flat, and a window with a popup open
 stands flat. It keeps a transformer active at rest, so its idle cost is
 measured on its own and is not held to the budget above.

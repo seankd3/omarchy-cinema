@@ -17,9 +17,8 @@
 // gold caustic, further and softer as focus lifts the pane, and a lifted
 // pane glows brighter against the sky. The cloud deck flows round each pane,
 // bending and curling at its edges, and piles up white against them where it
-// catches the sun. The viewer leans toward the pointer and the deck shifts a
-// few px, near rows more than far ones; the sky and the moon stay put.
-// Moving a pane is where the sky shines: the pane pulls the deck after it,
+// catches the sun. The view never moves with the pointer, which only gathers
+// a little sunlight. Moving a pane is where the sky shines: the pane pulls the deck after it,
 // draws vapour trails from its corners and parts the cloud behind it; when it
 // lands a pressure wave runs out with a bright crest and the sun flashes gold
 // off its edges, gone within 1.2 s. Under each pane the glass catches a sheen that slides as the pane
@@ -278,10 +277,9 @@ vec4 backdrop(vec2 px) {
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
     near = clamp(near, 0.0, 1.0);
 
-    // The viewer leans toward the pointer, a few px, and a dragged pane pulls
-    // the deck after it, more; the sky and the sun stay put.
-    float lean = (pointer.x / resolution.x - 0.5) * 10.0
-        + (focusedIndex < 0 ? 0.0 : windowVelocity(focusedIndex).x * 0.012);
+    // A dragged pane pulls the deck after it, near rows more than far ones;
+    // the sky and the sun stay put.
+    float lean = focusedIndex < 0 ? 0.0 : windowVelocity(focusedIndex).x * 0.012;
     vec3 col = px.y < horizon ? sky(px, horizon, sun) : cloudDeck(px + flow, horizon, sun, lean);
     // The sun itself: a soft white disc in a wide warm bloom, hazy at dawn.
     float ds = length(px - sun);

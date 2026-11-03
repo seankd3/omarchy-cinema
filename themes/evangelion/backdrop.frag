@@ -11,8 +11,8 @@
 // each window casts a shadow on the honeycomb, further and softer as focus
 // lifts it, and the light lies on its glass. Each is edged by its own AT
 // field, which catches the light passing behind the glass. The honeycomb is
-// nearer than the far lattice, so it shifts a few pixels more as the pointer
-// moves and a window is dragged. The field is calm while you work and shines
+// nearer than the far lattice, so it shifts a few pixels more as a window is
+// dragged; the view never moves with the pointer. The field is calm while you work and shines
 // when windows move (Sean, 2026-10-29: "just don't make it too flashy ...
 // Unless like I'm moving windows round or whatever, then you can really make
 // things shine"): a moving window sets the honeycomb rippling and lighting
@@ -158,11 +158,9 @@ vec4 backdrop(vec2 px) {
     vec2 centre = focused.xy + focused.zw * 0.5;
     vec3 light = vec3(0.0);
 
-    // The pointer and a dragged window move the viewpoint: the honeycomb, the
-    // nearer layer, shifts against them by a few pixels, the far lattice by a
-    // third of that.
-    vec2 drag = focusedIndex >= 0 ? windowVelocity(focusedIndex) : vec2(0.0);
-    vec2 view = (pointer.xy - resolution * 0.5) * 0.006 + drag * 0.003;
+    // A dragged window moves the viewpoint: the honeycomb, the nearer layer,
+    // shifts against it by a few pixels, the far lattice by a third of that.
+    vec2 view = focusedIndex >= 0 ? windowVelocity(focusedIndex) * 0.003 : vec2(0.0);
 
     // Far behind: slow purple haze and a lattice three times the size, offset
     // against the focused window so it reads as deeper than the near one.

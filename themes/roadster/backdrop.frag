@@ -13,9 +13,8 @@
 // and streaks toward the viewer, further and softer as focus lifts it. The
 // floor's lanes bow out round each window's foot, so the dots and the speed
 // streaks route round it, and the floor's own lines run from each foot's
-// corners toward the viewer. The viewer leans toward the pointer and the
-// floor shifts a few px, near rows more than far ones. Moving a window is
-// where the cockpit shines: the window pulls the floor after it, throws speed
+// corners toward the viewer. The view never moves with the pointer, which
+// only lights the floor round it. Moving a window is where the cockpit shines: the window pulls the floor after it, throws speed
 // lines back from its trailing edge and a flight path marker rides ahead of
 // it; at touchdown its seams flash and a shock runs out over the floor, gone
 // within 1.2 s. Behind
@@ -253,11 +252,9 @@ vec4 backdrop(vec2 px) {
     if (below > 0.0) {
         float drive = cycle(16.0) * 16.0;
         float depth = CAMERA * resolution.y / below;
-        // The viewer leans toward the pointer, a few px, and a dragged window
-        // pulls the floor after it, more (in cells, so near rows shift
-        // more); the lanes bow round the windows' feet.
-        float lean = (pointer.x / resolution.x - 0.5) * 0.3
-            + (focusedIndex < 0 ? 0.0 : windowVelocity(focusedIndex).x * 0.0006);
+        // A dragged window pulls the floor after it (in cells, so near rows
+        // shift more); the lanes bow round the windows' feet.
+        float lean = focusedIndex < 0 ? 0.0 : windowVelocity(focusedIndex).x * 0.0006;
         vec2 fp = vec2(px.x - bend, px.y);
         vec2 cell = vec2((fp.x - resolution.x * 0.5) * CAMERA / below + lean, depth + drive);
         // The nearest dot projected back onto the screen, so every dot is

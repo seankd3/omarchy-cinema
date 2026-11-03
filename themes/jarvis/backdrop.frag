@@ -11,10 +11,10 @@
 // the light pooled in the seams on its far side, further and softer as focus
 // lifts it; the holograms (globe, rings) are light and cast no shadow. Holo
 // lines hold each window, running along its edges in the seams and
-// converging on its corners. The viewer leans toward the pointer and the
-// hologram, nearest, shifts a few px, the lattice behind it less. Moving a
-// window is where the workshop shines: the window pulls the hologram after
-// it, swings the rings like a carousel and leaves dashed afterimages over
+// converging on its corners. The view never moves with the pointer, which
+// only lights the lattice under it. Moving a window is where the workshop
+// shines: the window pulls the hologram after it and the lattice less,
+// swings the rings like a carousel and leaves dashed afterimages over
 // scanned light; when it lands a white-hot shock runs out through the
 // lattice and its seams flash, gone within 1.2 s. Behind each window the world draws the sheen on its glass, a
 // streak that slides as the window moves and the reactor's glow along its
@@ -72,19 +72,17 @@ float motes(vec2 px) {
 }
 
 // The globe: latitude and longitude every 15 degrees on a sphere of radius
-// `R`, tilted toward the viewer and turning once a minute. `look` (-1 to 1 on
-// each axis) turns it toward the pointer. The far side shows faintly through
-// the near one. `rim` is the glow at its edge.
-float globe(vec2 p, float R, vec2 look, out float rim) {
+// `R`, tilted toward the viewer and turning once a minute. The far side
+// shows faintly through the near one. `rim` is the glow at its edge.
+float globe(vec2 p, float R, out float rim) {
     vec2 q = p / R;
     float q2 = dot(q, q);
     rim = 0.0;
     if (q2 > 1.0) return 0.0;
     float z = sqrt(1.0 - q2);
     rim = pow(1.0 - z, 3.0);
-    float spin = cycle(60.0) * TAU + look.x * 0.25;
-    float tilt = 0.4 - look.y * 0.1;
-    float ct = cos(tilt), st = sin(tilt);
+    float spin = cycle(60.0) * TAU;
+    const float ct = cos(0.4), st = sin(0.4);
     float step_ = TAU / 24.0;
     float lines = 0.0;
     for (int side = 0; side < 2; side++) {
@@ -250,13 +248,11 @@ vec4 backdrop(vec2 px) {
     vec3 answered = answers(px, cyan, lattice);
     answered += after;
     lattice += swept;
-    // The world as the viewer leaning toward the pointer sees it, a few px,
-    // and as a dragged window pulls it, more: the hologram, nearest, moves
+    // The world as a dragged window pulls it: the hologram, nearest, moves
     // most; the lattice and the dust behind it less. Never the windows.
-    vec2 lean = pointer.xy / resolution - 0.5;
     vec2 pulled = focusedIndex < 0 ? vec2(0.0) : windowVelocity(focusedIndex);
-    vec2 world = px + lean * 3.0 + pulled * 0.003;
-    vec2 holoAt = px + lean * 8.0 + pulled * 0.01;
+    vec2 world = px + pulled * 0.003;
+    vec2 holoAt = px + pulled * 0.01;
 
     // Everything is centred on the focused window and sized to it.
     vec2 c = focused.xy + focused.zw * 0.5;
@@ -268,7 +264,6 @@ vec4 backdrop(vec2 px) {
     // The rings swing with the focused window as it moves, like a carousel
     // pushed round, and settle back when it stops.
     float swing = focusedIndex < 0 ? 0.0 : clamp(windowVelocity(focusedIndex).x * 0.00016, -0.4, 0.4);
-    vec2 look = clamp((pointer.xy - c) / max(reach, 1.0), -1.0, 1.0);
     float hand = exp(-length(px - pointer.xy) / 170.0);
 
     // Deep navy, lifted around the globe and darker toward the corners.
@@ -279,7 +274,7 @@ vec4 backdrop(vec2 px) {
     light += cyan * 0.015 * hand;
 
     float rim;
-    float g = globe(p, Rg, look, rim);
+    float g = globe(p, Rg, rim);
     light += cyan * (g * 0.5 + rim * 0.35);
     light += cyan * 0.1 * exp(-max(r - Rg, 0.0) / (Rg * 0.12)) * step(Rg, r);
 

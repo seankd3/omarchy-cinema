@@ -13,8 +13,8 @@
 // The windows stand in the rain (specs/depth.md): each shelters the rain
 // below it, deeper and softer as focus lifts it, and the rain's light lies
 // on its glass. The near columns shift a few pixels more than the far ones
-// as the pointer moves and a window is dragged, and the rain is a little
-// brighter under the pointer. The code is calm while you work and shines
+// as a window is dragged; the view never moves with the pointer, and the
+// rain is only a little brighter under it. The code is calm while you work and shines
 // when windows move (Sean, 2026-10-29: "just don't make it too flashy ...
 // Unless like I'm moving windows round or whatever, then you can really make
 // things shine"): a moving window drags the rain beside it along and leaves
@@ -186,11 +186,9 @@ vec4 backdrop(vec2 px) {
     near = clamp(near, 0.0, 1.0);
     float nearFocus = exp(-max(seen.focus, 0.0) / 160.0);
 
-    // The pointer and a dragged window move the viewpoint, so the near
-    // columns shift a few pixels more than the far ones.
-    vec2 drag = focusedIndex >= 0 ? windowVelocity(focusedIndex) : vec2(0.0);
-    float view = (pointer.x - resolution.x * 0.5) * 0.007 + drag.x * 0.003;
-    float shift = view + pull;
+    // A dragged window moves the viewpoint, so the near columns shift a few
+    // pixels more than the far ones.
+    float shift = (focusedIndex >= 0 ? windowVelocity(focusedIndex).x * 0.003 : 0.0) + pull;
 
     // Three depths: far columns small, dim and slow; near ones large and fast.
     // No agents, no rain.

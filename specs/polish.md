@@ -27,6 +27,13 @@ under the landing's wave; 6.3 or more in the other moments), Oblivion 4.17
 streams), Evangelion 4.69 5.05 5.26, Roadster 5.38 5.60 5.60. Near 4.5 the
 model is not enough; a judge through Hyprland's own blur is the next step.
 
+## Batch 2 (asked by Sean first)
+
+- **Taste. The view does not move with the pointer** (taste sheet 2):
+  Jarvis, Oblivion, Evangelion, the Matrix and Roadster lose their pointer
+  lean, keeping the pointer's light and a dragged window's pull. Done:
+  `films/still-view`.
+
 ## Ranked
 
 1. **Performance. A window's frame runs only over its ring.** The frame pass
