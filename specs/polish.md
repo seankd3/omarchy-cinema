@@ -50,16 +50,33 @@ the worktree's scratch/.
    (tools/smoothness, three interleaved rounds, at load 70 to 90) cannot see
    it: Jarvis 12.78 and 12.80 ms a frame, Oblivion 11.99 and 11.84. Done:
    `polish/still-wakes`.
-4. **Performance, waits for plugin/. Each window's distance at a pixel,
-   measured once.** `nearestWindow`, `windowGlow`, `windowOver` and each
-   film's own loops (Jarvis's `windows()`, its wake, its edge lines) measure
-   the same rounded-rect distance to every window again. The shape: the
-   contract measures it once a pixel and the helpers and films read it,
-   while each film's per-window answers (shadows, wakes, flow) stay its own.
-   To be measured on Jarvis before any loop is claimed; the draw rate at rest
-   is the smoothness lane's.
-5. **Elegance, waits for plugin/.** `glowLine` is copied in six films and
-   `segment` in three, with one constant apart: contract helpers.
+4. **Performance. Each pixel meets the windows once.** Done:
+   `perf/window-pass`. On Tron every further loop over the three windows
+   cost a draw 0.2 to 0.65 ms (the window under the pixel alone 0.65), a
+   recent impulse's `windowAt` another loop per pixel, and the texture each
+   look fetched about 0.4 ms. Now the contract reads and measures each window
+   once (`window()`, `see()`), each film folds its own answers into one loop,
+   and an impulse names its window. The windows stay a texture: as uniforms
+   they drew 0.3 ms faster but capped a monitor at 128 windows.
+   `tools/gpu-bench` against its first commit, ms a draw, before and after:
+
+   | film | rest | drag | land | open | frames |
+   |---|---|---|---|---|---|
+   | Jarvis | 7.90 6.72 | 8.27 6.94 | 9.35 7.67 | 7.79 6.22 | 3.19 2.58 |
+   | Tron Legacy | 5.15 3.15 | 6.39 4.23 | 5.96 3.53 | 4.92 2.99 | 5.72 3.28 |
+   | Oblivion | 5.91 5.23 | 6.31 5.61 | 6.32 5.50 | 5.94 5.18 | 3.41 3.06 |
+   | Evangelion | 7.59 6.71 | 8.14 7.25 | 9.01 7.56 | 7.97 6.58 | 3.23 2.65 |
+   | Roadster | 6.98 5.64 | 6.94 5.43 | 8.95 6.82 | 7.03 5.23 | 2.81 2.47 |
+   | The Matrix | 6.72 5.59 | 7.38 6.08 | 8.10 6.46 | 7.51 5.88 | 3.25 2.66 |
+   | Jurassic Park | 8.59 7.66 | 9.16 8.14 | 11.23 9.57 | 10.18 9.16 | 4.40 4.03 |
+
+   Frames are the three windows' frame passes, each drawn over the whole
+   screen (about 1.3 ms of that is the early-out floor). Still over the
+   1.5 ms budget; measured next: windows past 400 px skipped (Roadster -0.9,
+   Evangelion -0.4, not pixel-exact), Jurassic Park's trace (7.0 ms with no
+   windows at all).
+5. **Elegance.** `glowLine` (six films, its halo a film's own), `segment`
+   (three) and `around` (two): contract helpers. Done: `perf/window-pass`.
 6. **Packaging, waits for plugin/. The engine package.** PKGBUILD for x86_64
    and aarch64 pinned to its Hyprland, the engine reading its own shaders,
    the plugin reading `glass` from `colors.toml`. Deletes install's per-SDK
@@ -69,8 +86,8 @@ the worktree's scratch/.
    before its theme-set hooks run, so the first application of a cloned film
    needs a step before that (or an Omarchy change, for the Discussion).
    Install's icon loop stays until one exists.
-7. **Docs, waits for plugin/.** contract.glsl says Hyprland's border and
-   shadow are off for a film with `frame()`; since 70ce3d6 both stay on.
+7. **Docs.** contract.glsl said Hyprland's border and shadow are off for a
+   film with `frame()`; since 70ce3d6 both stay on. Done: `perf/window-pass`.
 8. **Taste.** Jurassic Park's labels, Jarvis's glass: specs/taste-sheet.md.
 9. **Elegance, next.** The seven `gtk.css` share 22 selectors but each
    film's rules differ (Roadster's brackets, Oblivion's soft frames), so they

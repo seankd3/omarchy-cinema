@@ -37,7 +37,8 @@ at `render.pre` (live windows with renderWindow's full fade alpha and their
 rounding, plus windows fading out after closing) and, when it differs from what
 it last drew, damages the whole monitor and marks the blur cache dirty, so this
 very frame redraws the backdrop and the glass. Windows reach the shader as a
-float texture, so there is no window limit.
+float texture, so there is no window limit, and each pixel reads and measures
+each window once (contract.glsl's `window()`).
 
 **Cheap at rest, native when it can be.** The backdrop's own motion runs at
 the display's rate when any mains or USB-C supply is online and at 30 a second

@@ -243,7 +243,7 @@ Two kinds of change, two rules, for every fact above:
 At rest (no window moving, no impulse alive, pointer and voice still) the
 plugin does exactly what it does today. Per-pixel cost (shadows, the impulse
 loop) is a budget, measured, not assumed: each film's backdrop at most 1.5 ms
-a frame at 2880 x 1800 on the N1X, and idle power at rest within 10% of
+a frame at 2880 x 1800 on the N1X (`tools/gpu-bench`), and idle power at rest within 10% of
 today's build.
 
 ### 7. Tiers, to try all three
