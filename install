@@ -98,19 +98,6 @@ fi
 template=~/.config/omarchy/themed/voxtype-osd.toml.tpl
 [[ -e $template ]] || install -m 644 "$here/osd/voxtype-osd.toml.tpl" "$template"
 
-# The applied theme was copied before this ran and may lack its popup, and
-# Voxtype's OSD will not start on a style that is not there: give it what
-# Omarchy gives it at the next switch.
-current=~/.local/state/omarchy/current/theme
-applied=~/.config/omarchy/themes/$(cat ~/.local/state/omarchy/current/theme.name 2>/dev/null)
-if [[ -d $current ]]; then
-  if [[ -f $applied/voxtype-osd.toml ]]; then
-    install -m 644 "$applied"/voxtype-osd.toml "$applied"/voxtype-osd-*.qml "$applied"/FilmOsd.qml "$current/"
-  elif [[ ! -f $current/voxtype-osd.toml ]]; then
-    install -m 644 "$template" "$current/voxtype-osd.toml"
-  fi
-fi
-
 # Voxtype's settings for that, changed only where they differ: its style is
 # the applied theme, drawn by its Quickshell OSD, and nothing pins it to one
 # look (a plugin path wins over the style; a palette other than Omarchy's
@@ -178,3 +165,8 @@ mkdir -p "${hook%/*}"
 printf '#!/bin/bash\n# Writes the applied theme as Google Chrome'"'"'s.\nexec %q\n' "$here/browser/chrome-theme" >"$hook"
 chmod 755 "$hook"
 "$here/browser/chrome-theme" || echo "browser/chrome-theme failed: Chrome keeps the look it has" >&2
+
+# The applied theme is Omarchy's copy from its last switch, made before this
+# install: refresh it, as Omarchy's own installers do, so it has what this
+# install changed (film values, popup, icons).
+omarchy-theme-refresh || echo "omarchy-theme-refresh failed: the applied theme catches up at the next switch" >&2
