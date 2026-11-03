@@ -36,6 +36,9 @@ if ! grep -qx 'require("default.hypr.omarchy")' "$hypr"; then
   echo "$hypr does not load Omarchy's defaults as require(\"default.hypr.omarchy\"); add these lines after them, then run install again: $plugin $film" >&2
   exit 1
 fi
+# The build takes minutes; it comes before the check below, so nothing
+# separates that check from the edit it allows.
+[[ $other == /usr/lib/omarchy-cinema/ ]] && make -s -C "$here/plugin" install
 # Native code first loads at a login: Hyprland reloads its config whenever
 # the file changes, and loads the plugins it names, so the plugin's line is
 # added only while no Hyprland of this user's runs (from a TTY, before the
@@ -46,7 +49,6 @@ if ! grep -qxF "$plugin" "$hypr" && { pgrep -u "$UID" -x Hyprland >/dev/null || 
   echo "$hypr does not load the engine yet; while Hyprland runs it would load at once. Log out, add this line after require(\"default.hypr.omarchy\") from a TTY (or run install there), then log in: $plugin" >&2
   exit 1
 fi
-[[ $other == /usr/lib/omarchy-cinema/ ]] && make -s -C "$here/plugin" install
 for line in "$film" "$plugin"; do
   grep -qxF "$line" "$hypr" || sed -i "/^require(\"default.hypr.omarchy\")\$/a $line" "$hypr"
 done
