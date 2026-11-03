@@ -20,14 +20,13 @@ const vec2 HALO = vec2(0.25, 6.0); // how the Grid's lines glow (glowLine)
 
 // The floor under the point, in floor units: x across, z away from the viewer.
 // The viewer glides forward a cell every two seconds; eight cells per sixteen
-// seconds, so the hourly wrap moves the floor by whole cells.
-//
-// The viewer stands a little toward the pointer, so the floor shifts with it,
-// near rows more than far ones: perspective is the parallax.
+// seconds, so the hourly wrap moves the floor by whole cells. The viewer
+// stands on the middle line, so the Grid is symmetrical whatever the pointer
+// does (Sean, 2026-11-03: "I liked how it stayed symmetrical").
 vec2 floorAt(vec2 px, float horizon) {
     float dy = max(px.y - horizon, 0.5);
     float depth = 140.0 * resolution.y / dy;
-    float x = (px.x - resolution.x * 0.5) * depth / resolution.y + (pointer.x / resolution.x - 0.5) * 20.0;
+    float x = (px.x - resolution.x * 0.5) * depth / resolution.y;
     return vec2(x, depth + cycle(16.0) * 8.0 * CELL);
 }
 
