@@ -124,9 +124,11 @@ uniform mat3 proj;
 uniform vec4 area;
 in vec2 pos;
 out vec2 v_px;
+out vec2 v_uv;
 void main() {
     gl_Position = vec4(proj * vec3(pos, 1.0), 1.0);
     v_px = area.xy + pos * area.zw;
+    v_uv = gl_Position.xy * 0.5 + 0.5;
 }
 )";
 
@@ -144,8 +146,9 @@ void main() {
     using Rect = std::array<float, 4>;
 
     // A window as the backdrop sees it: where it is drawn, how faded, how round,
-    // how it moves, how far it is lifted toward the viewer and how deep in the
-    // stack it sits (0 on top).
+    // how it moves, how far it is lifted toward the viewer, how deep in the
+    // stack it sits (0 on top) and whether the world shows through it only as
+    // a veil (main-backdrop.glsl).
     struct SShape {
         Rect                 rect{};
         float                alpha    = 1;
@@ -153,6 +156,7 @@ void main() {
         std::array<float, 2> velocity{};
         float                lift  = 0;
         float                depth = 0;
+        bool                 veiled = false;
         uint64_t             id    = 0; // the window's stable id, kept by its fadeout; 0 for none
         bool                 operator==(const SShape&) const = default;
     };
@@ -231,7 +235,13 @@ void main() {
         GLuint id = 0;
         GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
         GLint  feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
-        GLint  pointer, impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder;
+        GLint  pointer, impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder, coarse, coarsePass;
+    };
+
+    // A monitor's world behind veiled windows, drawn at half its size.
+    struct SCoarse {
+        GLuint texture = 0, fbo = 0;
+        int    width = 0, height = 0;
     };
 
     // What the film's programs draw with: the unit square and the textures,
@@ -241,6 +251,7 @@ void main() {
         uint64_t feedUploaded   = 0; // the feed change in the texture
         bool     glyphsUploaded = false;
         SProgram backdrop, frame;
+        std::unordered_map<MONITORID, SCoarse> coarse;
     };
 
     struct SState {
@@ -252,6 +263,9 @@ void main() {
         uint64_t                                generation = 1;
         uint64_t                                compiled   = 0;
         bool                                    framed     = false; // the film's shader defines frame()
+        // The film's glass shows its world only as a veil (colors.toml's
+        // behind_glass = "veil"), so under frost it is drawn coarse.
+        bool                                    veil       = false;
         SGpu                                    gpu;
         // Frames a second of the backdrop's own motion, plugged in and on
         // battery; 0 is the display's own rate. Sean: "keep it native? or
@@ -396,9 +410,12 @@ void main() {
         g->framed         = std::regex_search(shader, FRAME);
 
         static const std::regex PALETTE(R"re(^\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})")re");
+        static const std::regex VEIL(R"re(^\s*behind_glass\s*=\s*"veil")re");
         std::istringstream      colors(readFile(dir + "/colors.toml"));
         g->backgrounds.clear();
+        g->veil = false;
         for (std::string line; std::getline(colors, line);) {
+            g->veil = g->veil || std::regex_search(line, VEIL);
             std::smatch match;
             if (!std::regex_search(line, match, PALETTE))
                 continue;
@@ -448,6 +465,10 @@ void main() {
         for (const auto texture : {gpu.data, gpu.feed, gpu.glyphs})
             if (texture)
                 glDeleteTextures(1, &texture);
+        for (const auto& [id, coarse] : gpu.coarse) {
+            glDeleteFramebuffers(1, &coarse.fbo);
+            glDeleteTextures(1, &coarse.texture);
+        }
         gpu = {};
     }
 
@@ -506,6 +527,8 @@ void main() {
         p.frameWindow   = at("frameWindow");
         p.frameAlpha    = at("frameAlpha");
         p.frameBorder   = at("frameBorder");
+        p.coarse        = at("coarse");
+        p.coarsePass    = at("coarsePass");
         return true;
     }
 
@@ -733,8 +756,14 @@ void main() {
                 addImpulse(position + monitor->m_position + size / 2.0, std::clamp(float(std::hypot(motion.velocity[0], motion.velocity[1]) / 3000.0), 0.25F, 1.F),
                            IMPULSE_LAND, w);
             const bool still = g->depth->value() == 0;
+            // The frost hides a half-resolution world at Hyprland's blur size
+            // 3 and up, two passes (specs/smoothness.md), and only while the
+            // whole window and its blur are present.
+            static auto BLUR_SIZE   = CConfigValue<Config::INTEGER>("decoration:blur:size");
+            static auto BLUR_PASSES = CConfigValue<Config::INTEGER>("decoration:blur:passes");
+            const bool  veiled      = g->veil && *BLUR_SIZE >= 3 && *BLUR_PASSES >= 2 && drawn.fadeAlpha >= 1.F && w->shouldBlur(drawn);
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(),
-                                    still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, w->metadata().stableID()});
+                                    still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, veiled, w->metadata().stableID()});
             if (pinned) {
                 stacking.push_back(1e9 + order);
                 continue;
@@ -759,7 +788,7 @@ void main() {
                 scene.focusedIndex = scene.shapes.size();
             // Only a fadeout already running when the plugin loaded has none.
             const auto window = closed != g->closed.end() ? closed->second : SClosed{float(*ROUNDING)};
-            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(), window.rounding, {}, 0, 0, window.id});
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(), window.rounding, {}, 0, 0, false, window.id});
             const auto plane = fadeout->plane();
             stacking.push_back(drawOrder(workspace,
                                          plane == Desktop::FADEOUT_PLANE_WINDOW_TILED            ? TILED_FADEOUTS :
@@ -844,7 +873,7 @@ void main() {
     }
 
     // Uploads the shapes, three texels each: (x, y, w, h), (alpha, rounding,
-    // lift, depth) and (velocity x, y).
+    // lift, depth) and (velocity x, y, veiled).
     // Fills the texture bound on the active unit from `data`, with the
     // unpack state set plainly and put back after, since Hyprland's own
     // uploads rely on what they set.
@@ -887,7 +916,8 @@ void main() {
             at[6] = shapes[i].lift;
             at[7] = shapes[i].depth;
             at[8] = shapes[i].velocity[0];
-            at[9] = shapes[i].velocity[1];
+            at[9]  = shapes[i].velocity[1];
+            at[10] = shapes[i].veiled;
         }
         upload(GL_RGBA32F, width, height, GL_RGBA, GL_FLOAT, data.data(), GL_NEAREST);
     }
@@ -1118,9 +1148,9 @@ vec4 cinemaGlass(vec4 c) {{
 
     // Everything the contract gives a film, for program `p`, drawing `area`
     // (logical px) placed by `proj` on `monitor`. The textures are on units
-    // 5, 6 and 7: the lettering, the feed and the windows.
+    // 4 to 7: the coarse world, the lettering, the feed and the windows.
     void setUniforms(const SProgram& p, const PHLMONITOR& monitor, const SScene& scene, const SAnswer& answer, const Mat3x3& proj, const CBox& area,
-                     std::chrono::steady_clock::time_point now) {
+                     std::chrono::steady_clock::time_point now, int coarsePass = 0) {
         const bool  lettered = !g->glyphPixels.empty();
         const float presence = feedPresence(now);
         glUseProgram(p.id);
@@ -1137,6 +1167,8 @@ vec4 cinemaGlass(vec4 c) {{
         glUniform1i(p.windowCount, scene.shapes.size());
         glUniform1i(p.focusedIndex, scene.focusedIndex);
         glUniform1f(p.focusAlpha, scene.focusAlpha);
+        glUniform1i(p.coarse, 4);
+        glUniform1i(p.coarsePass, coarsePass);
         glUniform1i(p.glyphsUniform, 5);
         glUniform1i(p.feedUniform, 6);
         glUniform1i(p.feedCount, lettered && presence > 0 && g->gpu.feedUploaded ? int(g->feedCount) : 0);
@@ -1170,39 +1202,45 @@ vec4 cinemaGlass(vec4 c) {{
     // program or texture unit it believes is still current, so a pass holds
     // one of these from its first GL call to its last, uploads included, and
     // leaves all it changes as it found it: the program, the vertex array,
-    // the textures on the films' units 5 to 7 and the active unit.
+    // the textures on the films' units 4 to 7 and the active unit.
     struct SGuest {
         GLint                program = 0, vao = 0, unit = 0;
-        std::array<GLint, 3> textures{};
+        std::array<GLint, 4> textures{};
         SGuest() {
             glGetIntegerv(GL_CURRENT_PROGRAM, &program);
             glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
             glGetIntegerv(GL_ACTIVE_TEXTURE, &unit);
-            for (int i = 0; i < 3; i++) {
-                glActiveTexture(GL_TEXTURE5 + i);
+            for (int i = 0; i < 4; i++) {
+                glActiveTexture(GL_TEXTURE4 + i);
                 glGetIntegerv(GL_TEXTURE_BINDING_2D, &textures[i]);
             }
         }
         ~SGuest() {
             glBindVertexArray(vao);
             glUseProgram(program);
-            for (int i = 0; i < 3; i++) {
-                glActiveTexture(GL_TEXTURE5 + i);
+            for (int i = 0; i < 4; i++) {
+                glActiveTexture(GL_TEXTURE4 + i);
                 glBindTexture(GL_TEXTURE_2D, textures[i]);
             }
             glActiveTexture(unit);
         }
     };
 
-    // Draws the square with program state already set, once per damaged rect.
-    void drawSquare(Render::CRenderContext& ctx, const std::function<void()>& set) {
+    // Binds the film's textures, sets the program's state with `set` and
+    // binds the square.
+    void prepare(GLuint coarse, const std::function<void()>& set) {
         auto& gpu = g->gpu;
-        for (int unit = 0; unit < 3; unit++) {
-            glActiveTexture(GL_TEXTURE5 + unit);
-            glBindTexture(GL_TEXTURE_2D, std::array{gpu.glyphs, gpu.feed, gpu.data}[unit]);
+        for (int unit = 0; unit < 4; unit++) {
+            glActiveTexture(GL_TEXTURE4 + unit);
+            glBindTexture(GL_TEXTURE_2D, std::array{coarse, gpu.glyphs, gpu.feed, gpu.data}[unit]);
         }
         set();
         glBindVertexArray(gpu.vao);
+    }
+
+    // Draws the square once per damaged rect.
+    void drawSquare(Render::CRenderContext& ctx, const std::function<void()>& set, GLuint coarse = 0) {
+        prepare(coarse, set);
         ctx.m_data.damage.forEachRect([&ctx](const auto& rect) {
             g_pHyprOpenGL->scissor(ctx, &rect, ctx.m_data.transformDamage);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -1241,7 +1279,43 @@ vec4 cinemaGlass(vec4 c) {{
             }
             const auto now  = std::chrono::steady_clock::now();
             const auto proj = g_pHyprRenderer->projectBoxToTarget(ctx, CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y});
-            drawSquare(ctx, [&] { setUniforms(gpu.backdrop, monitor, m_scene, m_answer, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}, now); });
+            const auto set  = [&](int pass) {
+                return [&, pass] { setUniforms(gpu.backdrop, monitor, m_scene, m_answer, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}, now, pass); };
+            };
+            if (!std::ranges::any_of(m_scene.shapes, &SShape::veiled)) {
+                drawSquare(ctx, set(0));
+                return {};
+            }
+            // The world behind the veiled windows, at half the monitor's
+            // size, on the same projection, so v_uv finds it again.
+            auto&     coarse = gpu.coarse[monitor->m_id];
+            const int width = (monitor->m_transformedSize.x + 1) / 2, height = (monitor->m_transformedSize.y + 1) / 2;
+            if (coarse.width != width || coarse.height != height) {
+                if (!coarse.fbo) {
+                    glGenTextures(1, &coarse.texture);
+                    glGenFramebuffers(1, &coarse.fbo);
+                }
+                glActiveTexture(GL_TEXTURE4);
+                glBindTexture(GL_TEXTURE_2D, coarse.texture);
+                upload(GL_RGB10_A2, width, height, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, nullptr, GL_LINEAR);
+                coarse.width  = width;
+                coarse.height = height;
+            }
+            GLint draw = 0, read = 0;
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+            glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+            std::array<GLint, 4> viewport{};
+            glGetIntegerv(GL_VIEWPORT, viewport.data());
+            glBindFramebuffer(GL_FRAMEBUFFER, coarse.fbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.texture, 0);
+            glViewport(0, 0, width, height);
+            g_pHyprOpenGL->disableScissor();
+            prepare(0, set(1));
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
+            glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+            drawSquare(ctx, set(2), coarse.texture);
             return {};
         }
 

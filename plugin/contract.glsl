@@ -36,7 +36,8 @@ uniform vec3 foreground;
 uniform vec4 focused;
 uniform vec4 reserved;
 // Three texels a window, 256 to a row: (x, y, w, h), (alpha, rounding,
-// lift, depth) and (velocity x, y). Read them through the window functions.
+// lift, depth) and (velocity x, y, veiled). Read them through the window
+// functions; `veiled` is the plugin's own (main-backdrop.glsl).
 uniform sampler2D windowData;
 uniform int windowCount;
 uniform int focusedIndex;
