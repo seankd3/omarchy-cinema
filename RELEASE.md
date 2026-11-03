@@ -124,17 +124,16 @@ Sean is logged out (from a TTY), never in a running session:
    `~/.local/lib/omarchy-cinema` lines; remove `~/.local/lib/omarchy-cinema`
    and `~/.config/omarchy/hooks/post-update.d/omarchy-cinema-rebuild`, the old
    rebuild after `omarchy update`, which the pin replaces. Then log in.
-3. From then on `./install` sees the packaged engine in `hyprland.lua` and
-   leaves it alone: it neither builds the plugin nor adds the local `film.lua`
-   line, and still links the themes and the rest.
+3. From then on `./install` sees the package and leaves its engine alone: it
+   builds no plugin, and stops without changing anything while `hyprland.lua`
+   still loads the other engine; it still links the themes and the rest.
 4. The themes stay links into the checkout until films ship on their own; a
    contract change then needs the package rebuilt and a login before a theme
    switch, and the notice says so if it is missed.
 
-Open, the next change: `./install` adds `film.lua`'s line but never the
-plugin's load line (on main too), though the release gate below says it does;
-Sean's config has it by hand. A fresh user's first load must come at a login,
-not at install's own theme refresh, which reloads the config.
+On a fresh config `./install` adds both engine lines after Omarchy's
+defaults, and then skips its theme refresh (a config reload) and asks for a
+login, so the plugin first loads at a login.
 
 **The pin for other users, without blocking `omarchy update`.** An exact
 `hyprland=` dependency makes pacman stop a whole `omarchy update` when Omarchy

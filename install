@@ -11,27 +11,41 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 
 hypr=~/.config/hypr/hyprland.lua
-# The engine the session loads: the package's once hyprland.lua loads it
-# (RELEASE.md, "Packaging"), and this install leaves it alone; otherwise this
-# checkout's, built and installed here.
-if grep -qF '"/usr/lib/omarchy-cinema/backdrop.so"' "$hypr"; then
+# The engine this session loads, one of two: the package's once it is
+# installed (RELEASE.md, "Packaging"), which this install leaves alone, or
+# else this checkout's, built and installed here. The Hyprland config loads
+# its plugin once a session and then runs its film.lua just after Omarchy's
+# defaults, where a theme's own hyprland.lua runs, so a film theme holds no
+# Lua, which `omarchy theme install` drops.
+if [[ -e /usr/lib/omarchy-cinema/backdrop.so ]]; then
+  plugin='hl.plugin.load("/usr/lib/omarchy-cinema/backdrop.so")'
   film='dofile("/usr/lib/omarchy-cinema/film.lua")()'
+  other=.local/lib/omarchy-cinema/
 else
-  make -s -C "$here/plugin" install
+  plugin='hl.plugin.load(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/backdrop.so")'
   film='dofile(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/film.lua")()'
+  other=/usr/lib/omarchy-cinema/
 fi
-# The film themes' Hyprland setup, installed with the plugin. The user's
-# Hyprland config runs it just after Omarchy's defaults, where a theme's own
-# hyprland.lua runs, so a film theme holds no Lua, which `omarchy theme
-# install` drops.
-if ! grep -qxF "$film" "$hypr"; then
-  if grep -qx 'require("default.hypr.omarchy")' "$hypr"; then
-    sed -i "/^require(\"default.hypr.omarchy\")\$/a $film" "$hypr"
-  else
-    echo "$hypr does not load Omarchy's defaults as require(\"default.hypr.omarchy\"); add this line after them, then run install again: $film" >&2
-    exit 1
+# A config that still loads the other engine is switched logged out: a
+# config reload loads and unloads plugins to match it.
+if grep -v '^[[:space:]]*--' "$hypr" | grep -qF "$other"; then
+  echo "$hypr loads the engine in $other; switch it to this one logged out (RELEASE.md, \"Packaging\"), then run install again" >&2
+  exit 1
+fi
+[[ $other == /usr/lib/omarchy-cinema/ ]] && make -s -C "$here/plugin" install
+if ! grep -qx 'require("default.hypr.omarchy")' "$hypr"; then
+  echo "$hypr does not load Omarchy's defaults as require(\"default.hypr.omarchy\"); add these lines after them, then run install again: $plugin $film" >&2
+  exit 1
+fi
+# A plugin line added now loads at the next login, not at this install's
+# refresh below, which reloads the config: native code first loads at a login.
+login=false
+for line in "$film" "$plugin"; do
+  if ! grep -qxF "$line" "$hypr"; then
+    sed -i "/^require(\"default.hypr.omarchy\")\$/a $line" "$hypr"
+    [[ $line == "$plugin" ]] && login=true
   fi
-fi
+done
 
 # A link never replaces a real directory or file: the user's own theme of the
 # same name stays, and the install stops.
@@ -153,4 +167,8 @@ chmod 755 "$hook"
 # The applied theme is Omarchy's copy from its last switch, made before this
 # install: refresh it, as Omarchy's own installers do, so it has what this
 # install changed (film values, popup, icons).
-omarchy-theme-refresh || echo "omarchy-theme-refresh failed: the applied theme catches up at the next switch" >&2
+if $login; then
+  echo "Log in again to start the engine, then apply a film: omarchy theme set <film>"
+else
+  omarchy-theme-refresh || echo "omarchy-theme-refresh failed: the applied theme catches up at the next switch" >&2
+fi
