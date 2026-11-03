@@ -1463,30 +1463,29 @@ vec4 cinemaGlass(vec4 c) {{
             glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
             glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             frost(monitor, coarse);
-            // At full size where the world is seen as it is: not inside a
-            // window whose glass shows it only through the frost, which
-            // Hyprland composites opaque over all of it from that frost, not
-            // from a live blur of what is under it (Hyprland's own decision);
-            // its rounded corners and the pixel round its edge are drawn. Any
-            // other window may blur what is under it live, as far round it as
-            // Hyprland's blur reaches, so there the world stays whole.
-            CRegion seen = ctx.m_data.damage.copy(), live;
+            // At full size where the world is seen as it is; inside a window
+            // whose glass shows it only through the frost, Hyprland composites
+            // opaque over it, so there the half-size world is enough, and it
+            // is what a live blur of anything drawn over it may sample. Each
+            // window's rounded corners and the pixel round its edge are drawn
+            // at full size.
+            CRegion inside;
             for (const auto& shape : m_scene.shapes) {
-                const auto& windows = Desktop::windowState()->windows();
-                const auto  window  = std::ranges::find_if(windows, [&](const auto& w) { return w->metadata().stableID() == shape.id; });
-                const bool  cut     = shape.veiled && window != windows.end() && g_pHyprRenderer->shouldUseNewBlurOptimizations(ctx, nullptr, *window);
-                CBox inside = CBox{shape.rect[0], shape.rect[1], shape.rect[2], shape.rect[3]}.expand(cut ? -shape.rounding - 2.0 : 0.0).scale(monitor->m_scale);
-                ctx.m_data.renderModif.applyToBox(inside);
-                if (!cut) {
-                    live.add(inside);
+                if (!shape.veiled)
                     continue;
-                }
-                const double left = std::ceil(inside.x), top = std::ceil(inside.y);
-                seen.subtract(CBox{left, top, std::max(std::floor(inside.x + inside.w) - left, 0.0), std::max(std::floor(inside.y + inside.h) - top, 0.0)});
+                CBox box = CBox{shape.rect[0], shape.rect[1], shape.rect[2], shape.rect[3]}.expand(-shape.rounding - 2.0).scale(monitor->m_scale);
+                ctx.m_data.renderModif.applyToBox(box);
+                const double left = std::ceil(box.x), top = std::ceil(box.y);
+                inside.add(CBox{left, top, std::max(std::floor(box.x + box.w) - left, 0.0), std::max(std::floor(box.y + box.h) - top, 0.0)});
             }
-            g_pHyprRenderer->expandBlurDamage(live, 1.5F);
-            seen.add(live.intersect(ctx.m_data.damage));
-            drawSquare(ctx, seen, set);
+            drawSquare(ctx, ctx.m_data.damage.copy().subtract(inside), set);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, coarse.fbo);
+            inside.intersect(ctx.m_data.damage).forEachRect([&](const auto& rect) {
+                g_pHyprOpenGL->scissor(ctx, &rect, ctx.m_data.transformDamage);
+                glBlitFramebuffer(0, 0, width, height, 0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+            });
+            g_pHyprOpenGL->disableScissor();
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
             return {};
         }
 
