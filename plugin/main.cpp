@@ -1467,18 +1467,25 @@ vec4 cinemaGlass(vec4 c) {{
             // window whose glass shows it only through the frost, which
             // Hyprland composites opaque over all of it from that frost, not
             // from a live blur of what is under it (Hyprland's own decision);
-            // its rounded corners and the pixel round its edge are drawn.
-            CRegion seen = ctx.m_data.damage.copy();
+            // its rounded corners and the pixel round its edge are drawn. Any
+            // other window may blur what is under it live, as far round it as
+            // Hyprland's blur reaches, so there the world stays whole.
+            CRegion seen = ctx.m_data.damage.copy(), live;
             for (const auto& shape : m_scene.shapes) {
                 const auto& windows = Desktop::windowState()->windows();
                 const auto  window  = std::ranges::find_if(windows, [&](const auto& w) { return w->metadata().stableID() == shape.id; });
-                if (!shape.veiled || window == windows.end() || !g_pHyprRenderer->shouldUseNewBlurOptimizations(ctx, nullptr, *window))
-                    continue;
-                CBox inside = CBox{shape.rect[0], shape.rect[1], shape.rect[2], shape.rect[3]}.expand(-shape.rounding - 2.0).scale(monitor->m_scale);
+                const bool  cut     = shape.veiled && window != windows.end() && g_pHyprRenderer->shouldUseNewBlurOptimizations(ctx, nullptr, *window);
+                CBox inside = CBox{shape.rect[0], shape.rect[1], shape.rect[2], shape.rect[3]}.expand(cut ? -shape.rounding - 2.0 : 0.0).scale(monitor->m_scale);
                 ctx.m_data.renderModif.applyToBox(inside);
+                if (!cut) {
+                    live.add(inside);
+                    continue;
+                }
                 const double left = std::ceil(inside.x), top = std::ceil(inside.y);
                 seen.subtract(CBox{left, top, std::max(std::floor(inside.x + inside.w) - left, 0.0), std::max(std::floor(inside.y + inside.h) - top, 0.0)});
             }
+            g_pHyprRenderer->expandBlurDamage(live, 1.5F);
+            seen.add(live.intersect(ctx.m_data.damage));
             drawSquare(ctx, seen, set);
             return {};
         }
