@@ -39,8 +39,10 @@ fi
 # Native code first loads at a login: Hyprland reloads its config whenever
 # the file changes, and loads the plugins it names, so the plugin's line is
 # added only while no Hyprland of this user's runs (from a TTY, before the
-# first login). film.lua's line is Lua, and may come at any time.
-if ! grep -qxF "$plugin" "$hypr" && compgen -G "${XDG_RUNTIME_DIR:-/run/user/$UID}/hypr/*/.socket.sock" >/dev/null; then
+# first login): no Hyprland process of the user's, nor its socket in the
+# runtime directory, which is a sandbox's own. film.lua's line is Lua, and
+# may come at any time.
+if ! grep -qxF "$plugin" "$hypr" && { pgrep -u "$UID" -x Hyprland >/dev/null || compgen -G "${XDG_RUNTIME_DIR:-/run/user/$UID}/hypr/*/.socket.sock" >/dev/null; }; then
   echo "$hypr does not load the engine yet; while Hyprland runs it would load at once. Log out, add this line after require(\"default.hypr.omarchy\") from a TTY (or run install there), then log in: $plugin" >&2
   exit 1
 fi
