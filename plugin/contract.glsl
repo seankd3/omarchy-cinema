@@ -243,14 +243,16 @@ float around(vec2 px, vec4 rect) {
 // when there is none.
 vec4 impulseRect(int k) {
     int i = impulseWindows[k];
-    return i < 0 ? vec4(impulses[k].xy, 0.0, 0.0) : windowTexel(3 * i);
+    return i < 0 ? vec4(impulses[k].xy, 0.0, 0.0) : window(impulses[k].xy, i).rect;
 }
 
 // The distance from px to the window impulse k happened to, rounded as it
 // is, or to its point when there is none.
 float impulseDistance(vec2 px, int k) {
     int i = impulseWindows[k];
-    return rectDistance(px, impulseRect(k), i < 0 ? 0.0 : windowTexel(3 * i + 1).y);
+    if (i < 0) return length(px - impulses[k].xy);
+    Window w = window(px, i);
+    return rectDistance(px, w.rect, w.rounding);
 }
 
 // The outward normal of a rounded rect's edge nearest px.

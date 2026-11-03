@@ -308,7 +308,11 @@ vec4 backdrop(vec2 px) {
                    clamp(horizon + size * 0.5, focused.y + 0.7 * size, focused.y + focused.w - 0.7 * size));
     vec2 reach = abs(px - at) - vec2(1.4, 0.7) * size;
     if (size > 8.0 && max(reach.x, reach.y) < 24.0) {
-        float on = focusedIndex < 0 ? inside : 1.0 - smoothstep(-1.0, 1.0, seen.focus);
+        float on = inside;
+        if (focusedIndex >= 0) {
+            Window f = window(px, focusedIndex);
+            on = 1.0 - smoothstep(-1.0, 1.0, rectDistance(px, f.rect, f.rounding));
+        }
         float shown = mix(1.0, 0.35 * focusAlpha * on, present);
         vec2 d = wedge(px, at, size);
         light += mix(red, WHITE, 0.65) * glowLine(d.x, 1.3) * shown;
