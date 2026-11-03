@@ -57,17 +57,38 @@ o.transparent_window({ tag = "terminal" }, "0.999 0.999")
 o.window({ tag = "chromium-based-browser" }, { opacity = "1 1" })
 o.window({ tag = "firefox-based-browser" }, { opacity = "1 1" })
 
+-- Room around and between the windows for the backdrop's light to play in
+-- (Sean, 2026-10-28: "more space between windows and the edge of the screen to
+-- give more breathing room for the effects", then "double it, preportional"),
+-- in proportion to the screen: 64 px for each 1440 of the smallest screen's
+-- shorter side, the side a column of windows runs out of (64 on his 2304x1440,
+-- 48 at 1920x1080, 34 at 1366x768).
+local function room()
+  local short
+  for _, m in ipairs(hl.get_monitors()) do
+    local side = math.min(m.width, m.height) / m.scale
+    short = math.min(short or side, side)
+  end
+  return math.floor((short or 1440) * 64 / 1440 + 0.5)
+end
+local function space(gaps)
+  -- gaps_in is each window's side of the gap, so half of gaps_out makes the
+  -- space between windows match the screen's edge.
+  hl.config({ general = { gaps_out = gaps, gaps_in = gaps // 2 } })
+end
+-- Hyprland loads its config before it knows its screens, so the room follows
+-- them as they come and change, while the gaps are still film.lua's: the
+-- user's config and the toggles load after it and win.
+local gaps = room()
+space(gaps)
+hl.on("monitor.layout_changed", function()
+  if hl.get_config("general.gaps_out").top == gaps and room() ~= gaps then
+    gaps = room()
+    space(gaps)
+  end
+end)
+
 hl.config({
-  general = {
-    -- Room around and between the windows for the backdrop's light to play in
-    -- (Sean, 2026-10-28: "more space between windows and the edge of the
-    -- screen to give more breathing room for the effects").
-    -- gaps_in is each window's side of the gap, so half of gaps_out makes the
-    -- space between windows match the screen's edge. Doubled to 64 (Sean,
-    -- 2026-10-28: "increase the panel spacing double it, preportional").
-    gaps_out = 64,
-    gaps_in = 32,
-  },
   -- The windows glow in the film's light.
   decoration = {
     shadow = { enabled = true, range = 22, render_power = 3, color = glow("40"), color_inactive = glow("10") },

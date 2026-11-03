@@ -45,9 +45,9 @@ model is not enough; a judge through Hyprland's own blur is the next step.
    in, as the other five do; the second look was discarded beyond 6 px and
    smeared a grid line meeting the edge into a streak along it. Frames 3.26 to
    2.27 ms over the whole screen. Done: `films/tron-frame`.
-4. **Practicality. Gaps on a small screen** (taste sheet 1): 64 px round and
-   between the windows leave nine windows at 1920x1080 too small for a
-   terminal.
+4. **Practicality. Gaps scale with the screen** (taste sheet 1): 64 px for
+   each 1440 of the smallest screen's shorter side, following the screens as
+   they change while the gaps are still film.lua's. Done: `films/gaps`.
 5. **Robustness. The glass's contrast condition is derived by hand three
    times.** The Matrix (0.19 a channel, on its light before the film's
    curve), Evangelion (0.36, the same way) and Roadster (0.6, 0.3, 0.3 on the
