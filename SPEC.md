@@ -46,9 +46,11 @@ on battery (`plugin:backdrop:fps`, default 0 = the display's rate;
 30"). Time follows the real clock. A tick redraws the whole monitor and its
 glass, so what moves behind the glass moves with the backdrop around it
 (Sean, 2026-11-02: the glass trailing a fifth of a second behind showed).
-Hyprland blurs again only when a window on screen shows glass. Idle on
-workspace 1, measured 2026-10-28 on a busy machine with the glass at 5 a
-second: about +6 W native, +3 W at 30. Time stands still with
+Hyprland blurs again only when a window on screen or an xray layer shows
+glass. Idle on workspace 1, measured 2026-10-28 on a busy machine with the
+glass at 5 a second: about +6 W native, +3 W at 30. On 2026-11-02, Tron
+Legacy with two glass terminals in the hidden desktop, three interleaved
+rounds: GPU 2.75 W with the glass at 5 a second, 2.76 W at every tick. Time stands still with
 animations off, the session locked, or every monitor asleep or fullscreen.
 
 **Theme switch.** `omarchy-theme-set` swaps `current/theme` and reloads

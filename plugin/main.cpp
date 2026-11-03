@@ -1450,8 +1450,8 @@ vec4 cinemaGlass(vec4 c) {{
                 continue;
             seen = true;
             // The glass is the backdrop blurred, so it moves with it. Made
-            // dirty before the frame, the blur runs only when a window shows
-            // glass (Hyprland 0.57.0 src/render/GLRenderer.cpp:386).
+            // dirty before the frame, the blur runs only when a window or an
+            // xray layer shows glass (Hyprland 0.57.0 src/render/GLRenderer.cpp:386).
             g_pHyprRenderer->damageMonitor(monitor);
             monitor->m_blurFBDirty = true;
         }
