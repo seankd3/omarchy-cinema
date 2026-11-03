@@ -1177,9 +1177,9 @@ vec4 cinemaShade(vec3 rgb) {{
 }}
 // A pixel composited over the frost (pix plus k of frost), held so that
 // muted text keeps 4.5:1 (WCAG) on it: one past that, as the display shows
-// it in whole 8-bit levels, moves in linear light toward the same pixel with
-// its own background shade (the theme's background for anything else) in
-// place of the frost, dimming in its own hue on a dark theme, until it meets
+// it in whole 8-bit levels, moves in linear light toward its background
+// shade drawn solid (a pixel of anything else, toward itself with the
+// theme's background in place of the frost), dimming in its own hue on a dark theme, until it meets
 // 4.5:1 on a whole level. Where that shade, drawn solid, is itself short of
 // 4.5:1, it goes as far as the shade: the glass never reads worse than the
 // theme drawn solid. Text drawn opaque has no frost to hold.
@@ -1191,7 +1191,7 @@ vec4 cinemaHold(vec4 pix, vec4 frost, float k) {{
     float y     = cinemaLuminance(shown);
     if ((y - limit) * side <= 0.0) return c;
     vec4  own  = cinemaShade(pix.a > 0.0 ? pix.rgb / pix.a : CINEMA_BACKGROUND);
-    vec3  safe = pix.rgb + (own.w <= 2.5 / 255.0 ? own.rgb : CINEMA_BACKGROUND) * k;
+    vec3  safe = own.w <= 2.5 / 255.0 ? own.rgb * (pix.a + k) : pix.rgb + CINEMA_BACKGROUND * k;
     float s    = cinemaLuminance(safe);
     vec3  held = mix(cinemaLinear(safe), cinemaLinear(shown), (s - limit) * side < 0.0 ? (limit - s) / (y - s) : 0.0);
     held       = mix(held * 12.92, 1.055 * pow(held, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, held)) * 255.0;

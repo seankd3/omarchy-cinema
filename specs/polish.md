@@ -50,9 +50,10 @@ model is not enough; a judge through Hyprland's own blur is the next step.
    they change while the gaps are still film.lua's. Done: `films/gaps`.
 5. **Robustness. The glass holds muted text's contrast for any palette.**
    The Matrix, Evangelion and Roadster each derived by hand how bright their
-   world may be behind the glass; now the plugin's glass step holds Hyprland's
-   frost so the theme's glass over it keeps muted text at 4.5:1, in the
-   palette's direction. Their limits, BLUR_REACH and their derivations went.
+   world may be behind the glass; now the plugin's glass step holds each
+   pixel Hyprland composites over its frost so muted text keeps 4.5:1, in the
+   palette's direction, or, where the theme's own shade is short of that, no
+   less than on that shade drawn solid. Their limits, BLUR_REACH and their derivations went.
    Done: `films/contrast`.
 6. **Elegance, next contract version. The contract's per-field readers repeat
    window().** `windowDepth` has no caller; `windowDistance` only the

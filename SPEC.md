@@ -100,12 +100,13 @@ gets solid windows and a notice. Glassy mode's 0.75 fade on Files is replaced
 by the same glass. The session's `film.lua` sets glow, glass and frost from
 the film's `colors.toml`: a film theme holds no Lua.
 
-The same step holds the frost to the palette, so a film draws its world at
-full strength behind the glass: where the theme's glass over Hyprland's frost
-would leave `colors.toml`'s muted text under 4.5:1 (WCAG), the frost moves
-toward the theme's background in linear light until it does not, dimming in
-its own hue on a dark theme. The bar, blurred in the same shader, is held the
-same way.
+The same step holds the glass to the palette, so a film draws its world at
+full strength behind it: where a pixel composited over Hyprland's frost
+would leave `colors.toml`'s muted text under 4.5:1 (WCAG), it moves toward
+its background shade drawn solid in linear light until it does not, dimming
+in its own hue on a dark theme; where that shade itself gives muted less than
+4.5:1 (Oblivion's darker shades), the glass reads as the shade drawn solid,
+never worse. The bar, blurred in the same shader, is held the same way.
 
 **Files.** Each film theme ships `gtk.css` (libadwaita variables and Nautilus
 selectors) and its folder icons (`tools/folders.py` writes an icon theme,
