@@ -697,14 +697,15 @@ void main() {
     // Whether Hyprland draws all of window w's rect frosted, as the world
     // behind it was measured to hide a half-resolution world
     // (specs/smoothness.md): the window untransformed (no wobble, motion blur
-    // or other transformer) and fully present, its surface drawn and blurred
-    // whole (a visible or blur region of the client's own covers all of it, as
-    // foot's blur region does), by Hyprland's Kawase blur (variant 0) at
-    // size 3 or more, two passes or more, at full
-    // strength (not proportional to alpha, nor faded with opacity), with
-    // nothing amplifying it (contrast and brightness at most 1). How much of
-    // the frost shows (glass, an app's own alpha) does not matter: with clear
-    // glass the half resolution was measured as hidden too.
+    // or other transformer), its surface drawn and blurred whole (a visible or
+    // blur region of the client's own covers all of it, as foot's blur region
+    // does), by Hyprland's Kawase blur (variant 0) at size 3 or more, two
+    // passes or more, prepared as measured (contrast 1, brightness at most
+    // 1), and drawn at full strength: Hyprland draws the blur at
+    // (ignore_opacity ? fade : alpha * fade) * the surface's overall opacity
+    // (0.57.0 src/render/OpenGL.cpp:1955). How much of the frost shows (glass,
+    // an app's own alpha) does not matter: with clear glass the half
+    // resolution was measured as hidden too.
     bool frosted(const PHLWINDOW& w, const Render::SWindowRenderPresentation& drawn) {
         static auto VARIANT      = CConfigValue<Config::INTEGER>("decoration:blur:variant");
         static auto SIZE         = CConfigValue<Config::INTEGER>("decoration:blur:size");
@@ -714,10 +715,13 @@ void main() {
         static auto CONTRAST     = CConfigValue<Config::FLOAT>("decoration:blur:contrast");
         static auto BRIGHTNESS   = CConfigValue<Config::FLOAT>("decoration:blur:brightness");
         const auto  surface      = w->wlSurface();
+        if (!surface || !surface->resource())
+            return false;
         // A region the client set (none is all of it) that covers all of `size`.
-        const auto whole = [](const CRegion& region, const Vector2D& size) { return region.empty() || CRegion(CBox{{}, size}).subtract(region).empty(); };
-        return *VARIANT == 0 && *SIZE >= 3 && *PASSES >= 2 && !*PROPORTIONAL && *IGNORE_ALPHA && *CONTRAST <= 1.F && *BRIGHTNESS <= 1.F && drawn.fadeAlpha >= 1.F &&
-            !w->effects().hasActiveTransformers() && w->shouldBlur(drawn) && surface && surface->resource() &&
+        const auto  whole    = [](const CRegion& region, const Vector2D& size) { return region.empty() || CRegion(CBox{{}, size}).subtract(region).empty(); };
+        const float strength = (*IGNORE_ALPHA ? drawn.fadeAlpha : drawn.alpha * drawn.fadeAlpha) * surface->m_overallOpacity;
+        return *VARIANT == 0 && *SIZE >= 3 && *PASSES >= 2 && !*PROPORTIONAL && *CONTRAST == 1.F && *BRIGHTNESS <= 1.F && strength >= 1.F &&
+            !w->effects().hasActiveTransformers() && w->shouldBlur(drawn) &&
             (!surface->m_hasBackgroundEffect || whole(surface->m_blurRegion, surface->getViewporterCorrectedSize())) &&
             whole(surface->m_visibleRegion, surface->resource()->m_current.bufferSize);
     }
