@@ -1,12 +1,16 @@
 // omarchy-cinema contract 3
 // The Matrix: the code, and the code is what the agents on this machine are
 // writing (specs/agent-rain.md). Their text rains down the black screen in
-// mirrored glyphs, in three depths, nearer columns larger, brighter and
-// faster, each stream led by a white-hot head carrying the newest characters
-// and leaving a fading phosphor tail. When no agent is running there is no
+// mirrored glyphs, each stream led by a white-hot head carrying the newest
+// characters and leaving a fading phosphor tail. The rain stands at three
+// distances round the windows, nearer columns larger, brighter and faster:
+// the far rain out of focus, soft streaks whose letters are lost in the air;
+// the mid rain at the windows' own depth; the near rain in front of them, so
+// their glass shows only the rain behind it, and only that falls in their
+// shadow. When no agent is running there is no
 // rain: it drains away, leaving the black, the windows' glow and the line
 // under the bar. The rain parts round the
-// windows: behind the glass it falls dim, drops flare where they strike a
+// windows: drops flare where they strike a
 // window's top edge, and streams run down its sides, brightest beside the
 // focused window. The gaps between windows glow faintly green.
 //
@@ -92,6 +96,16 @@ vec3 rain(vec2 px, vec4 depth, float layer, float shift) {
     vec4 d = drop(id, layer, depth.z, depth.w);
     if (d.x == 0.0) return vec3(0.0);
     return column(at, depth.xy, id * 3.1 + layer * 101.0, d.y, d.x, d.z, d.w);
+}
+
+// The same depth seen out of focus: each glyph a soft dot of its light, the
+// letters lost. The tail's light (x) and the head's (y).
+vec2 blurred(vec2 px, vec4 depth, float layer, float shift) {
+    vec2 at = vec2(px.x + shift, px.y) / depth.xy + vec2(layer * 0.37, 0.0);
+    vec4 d = drop(floor(at.x), layer, depth.z, depth.w);
+    if (d.x == 0.0) return vec2(0.0);
+    vec2 c = 1.0 - abs(fract(at) - 0.5) * 2.0;
+    return drops(px.y, depth.y, d.y, d.x, d.z, d.w).xy * c.x * c.y;
 }
 
 // The near rain's glyph cell holding px, its columns shifted `shift` across:
@@ -190,30 +204,32 @@ vec4 backdrop(vec2 px) {
     // pixels more than the far ones.
     float shift = (focusedIndex >= 0 ? windowVelocity(focusedIndex).x * 0.003 : 0.0) + pull;
 
-    // Three depths: far columns small, dim and slow; near ones large and fast.
+    // Three distances: far columns small, slow and out of focus; near ones
+    // large and fast, in front of the windows, so never behind their glass.
     // No agents, no rain.
-    vec3 far = vec3(0.0), mid = vec3(0.0), close = vec3(0.0);
+    vec2 far = vec2(0.0);
+    vec3 mid = vec3(0.0), close = vec3(0.0);
     if (feedPresence > 0.0) {
-        far = rain(px, FAR_RAIN, 2.0, shift * 0.2) * feedPresence;
+        far = blurred(px, FAR_RAIN, 2.0, shift * 0.2) * feedPresence;
         mid = rain(px, MID_RAIN, 1.0, shift * 0.5) * feedPresence;
-        close = rain(px, NEAR_RAIN, 0.0, shift) * feedPresence;
+        if (open > 0.0) close = rain(px, NEAR_RAIN, 0.0, shift) * feedPresence * open;
     }
     // The far rain is cooler and dimmer, as if seen through more air; the
     // heads are white-hot at every depth.
-    vec3 code = green * vec3(0.55, 0.75, 0.7) * (far.x * 0.3 + far.z * 0.04)
-        + green * (mid.x * 0.62 + mid.z * 0.06)
-        + green * (close.x * 1.0 + close.z * 0.1)
-        + HEAD * (far.y * 0.4 + mid.y * 0.9 + close.y * 1.6);
+    vec3 behind = green * vec3(0.55, 0.75, 0.7) * (far.x * 0.3 + far.y * 0.35)
+        + green * (mid.x * 0.62 + mid.z * 0.06) + HEAD * mid.y * 0.9;
+    vec3 front = green * (close.x * 1.0 + close.z * 0.1) + HEAD * close.y * 1.6;
 
     // Out in the open the rain is brightest round the focused window, a
     // little brighter under the pointer, in a moving window's wake, where
-    // something just happened and as you speak, and sheltered below the
-    // windows.
+    // something just happened and as you speak; the rain behind the windows
+    // is sheltered below them.
     vec4 answer = answers(px, nearCell(px, shift));
     vec2 toPointer = px - pointer.xy;
     float touch = exp(-dot(toPointer, toPointer) / (2.0 * 90.0 * 90.0));
     float shade = 1.0 - 0.75 * shadow;
-    vec3 light = code * mix(1.0, (1.0 + 0.6 * nearFocus) * (1.0 + 0.35 * touch + 2.5 * wake + answer.y + 0.3 * voice) * shade, open);
+    float lit = (1.0 + 0.6 * nearFocus) * (1.0 + 0.35 * touch + 2.5 * wake + answer.y + 0.3 * voice);
+    vec3 light = behind * mix(1.0, lit * shade, open) + front * lit;
     light += green * 0.16 * wake * open;
 
     // The rain parts round the windows: drops flare where they strike a
