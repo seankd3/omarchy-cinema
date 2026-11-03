@@ -71,24 +71,37 @@ local function room()
   end
   return math.floor((short or 1440) * 64 / 1440 + 0.5)
 end
--- Hyprland loads its config before it knows its screens, so when they come or
--- change the room, the config loads again: the user's config and the toggles
--- then still load after this and win. Omarchy saves a screen's settings before
--- it applies them, so loading again keeps them.
 local gaps = room()
+-- Which gaps are still film.lua's: none of the config after it has set them.
+local ours = { gaps_out = true, gaps_in = true }
+-- gaps_in is each window's side of the gap, so half of gaps_out makes the
+-- space between windows match the screen's edge.
+local function space(config)
+  config({ general = { gaps_out = ours.gaps_out and gaps or nil, gaps_in = ours.gaps_in and gaps // 2 or nil } })
+end
+space(hl.config)
+
+-- Hyprland loads its config before it knows its screens, so the gaps that are
+-- still film.lua's follow the screens as they come and change. The user's
+-- config, the toggles and anything later set gaps through hl.config, which
+-- notes it; Lua starts afresh at every load, and so does this.
+local config = hl.config
+function hl.config(values)
+  local general = type(values) == "table" and values.general
+  if type(general) == "table" then
+    ours.gaps_out = ours.gaps_out and general.gaps_out == nil
+    ours.gaps_in = ours.gaps_in and general.gaps_in == nil
+  end
+  return config(values)
+end
 hl.on("monitor.layout_changed", function()
   if room() ~= gaps then
-    hl.dispatch(hl.dsp.reload_config())
+    gaps = room()
+    space(config)
   end
 end)
 
 hl.config({
-  general = {
-    -- gaps_in is each window's side of the gap, so half of gaps_out makes the
-    -- space between windows match the screen's edge.
-    gaps_out = gaps,
-    gaps_in = gaps // 2,
-  },
   -- The windows glow in the film's light.
   decoration = {
     shadow = { enabled = true, range = 22, render_power = 3, color = glow("40"), color_inactive = glow("10") },
