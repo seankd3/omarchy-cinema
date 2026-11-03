@@ -77,12 +77,6 @@ using namespace Render::GL;
 
 namespace {
 
-    // The glass shows the backdrop through Hyprland's cached blur, and the
-    // blur is the costly part of a frame. So a tick redraws the whole monitor
-    // over the cached blur, and the blur itself is refreshed five times a
-    // second: the whole frame always agrees with itself, and the glass trails
-    // by at most a fifth of a second of slow motion, blurred.
-    constexpr double GLASS_EVERY = 0.2; // seconds
     constexpr double FOCUS_EASE  = 0.32; // seconds
     // A window's and the pointer's velocity ease over this long, so one late
     // frame does not spike them.
@@ -172,7 +166,7 @@ void main() {
     };
 
     // What the world answers besides the windows: a change here redraws the
-    // backdrop and leaves the glass on its own refresh (specs/depth.md, part 6).
+    // backdrop, and the glass follows at the next tick (specs/depth.md, part 6).
     struct SAnswer {
         std::array<float, 4> pointer{}; // x, y, velocity x, y
         uint64_t             impulses = 0; // the impulse ring's generation
@@ -265,7 +259,7 @@ void main() {
         // Seconds of the backdrop's own motion, wrapping hourly, advanced by
         // the clock while the backdrop is seen.
         float                                   time = 0;
-        std::chrono::steady_clock::time_point   lastTick, lastGlass, lastPowerCheck;
+        std::chrono::steady_clock::time_point   lastTick, lastPowerCheck;
         wl_event_source*                        timer = nullptr;
         std::unordered_map<MONITORID, SMonitor> monitors;
         std::unordered_map<uint64_t, SMotion>   motion; // each window's, by stable id
@@ -1450,18 +1444,17 @@ vec4 cinemaGlass(vec4 c) {{
         if (!*ANIMATIONS || g_pSessionLockManager->isSessionLocked())
             return 0;
 
-        const bool glass = now - g->lastGlass >= std::chrono::duration<double>(GLASS_EVERY);
-        bool       seen  = false;
+        bool seen = false;
         for (const auto& monitor : State::monitorState()->monitors()) {
             if (!monitor->m_enabled || !monitor->m_dpmsStatus || covered(monitor))
                 continue;
             seen = true;
+            // The glass is the backdrop blurred, so it moves with it. Made
+            // dirty before the frame, the blur runs only when a window shows
+            // glass (Hyprland 0.57.0 src/render/GLRenderer.cpp:386).
             g_pHyprRenderer->damageMonitor(monitor);
-            if (glass)
-                monitor->m_blurFBDirty = true;
+            monitor->m_blurFBDirty = true;
         }
-        if (glass)
-            g->lastGlass = now;
         if (seen)
             g->time = std::fmod(g->time + elapsed, 3600.F);
         return 0;
@@ -1494,7 +1487,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(handle, g->glass);
     HyprlandAPI::addConfigValueV2(handle, g->depth);
     g->plugged  = plugged();
-    g->lastTick = g->lastGlass = g->lastPowerCheck = std::chrono::steady_clock::now();
+    g->lastTick = g->lastPowerCheck = std::chrono::steady_clock::now();
     g->timer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onTick, nullptr);
     openFeed();
     readTheme();

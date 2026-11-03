@@ -43,11 +43,12 @@ float texture, so there is no window limit.
 the display's rate when any mains or USB-C supply is online and at 30 a second
 on battery (`plugin:backdrop:fps`, default 0 = the display's rate;
 `plugin:backdrop:battery_fps`, default 30; Sean: "keep it native? or atleast
-30"). Time follows the real clock. A tick redraws the whole monitor over
-Hyprland's cached blur, and the blur itself refreshes every 0.2 s, so the whole
-frame always agrees with itself and only the glass trails, by at most a fifth
-of a second of slow, blurred motion. Idle on workspace 1, measured 2026-10-28
-on a busy machine: about +6 W native, +3 W at 30. Time stands still with
+30"). Time follows the real clock. A tick redraws the whole monitor and its
+glass, so what moves behind the glass moves with the backdrop around it
+(Sean, 2026-11-02: the glass trailing a fifth of a second behind showed).
+Hyprland blurs again only when a window on screen shows glass. Idle on
+workspace 1, measured 2026-10-28 on a busy machine with the glass at 5 a
+second: about +6 W native, +3 W at 30. Time stands still with
 animations off, the session locked, or every monitor asleep or fullscreen.
 
 **Theme switch.** `omarchy-theme-set` swaps `current/theme` and reloads

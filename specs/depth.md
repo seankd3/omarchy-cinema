@@ -111,7 +111,7 @@ age).
     measured again within ceil(windows / 8) backdrop frames: every frame with
     up to 8 windows, a quarter of a second for 60 windows at 30 fps. A colour that changed by more
     than 1/255 on any channel is an answer that changed (part 6): the monitor
-    draws again, and the glass follows on its own refresh. With animations off,
+    draws again, and the glass follows at the next tick. With animations off,
     when the world holds still, its light holds still too (last colours stay).
     A window not yet measured, with no buffer, or closed and fading has black,
     or keeps its last colour while it fades.
@@ -237,8 +237,8 @@ Two kinds of change, two rules, for every fact above:
 - **The windows changed** (geometry, fade, lift, a switch frame): damage the
   monitor and the glass in this frame, as today.
 - **Only the world's answer changed** (pointer, an impulse alive, voice):
-  damage the monitor in this frame, and leave the glass on its 0.2 s
-  refresh. A pointer move schedules a frame for its monitor, so the light
+  damage the monitor in this frame, and leave the glass to the next
+  tick. A pointer move schedules a frame for its monitor, so the light
   follows the cursor in the same frame.
 At rest (no window moving, no impulse alive, pointer and voice still) the
 plugin does exactly what it does today. Per-pixel cost (shadows, the impulse
