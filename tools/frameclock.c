@@ -7,11 +7,11 @@
 //
 //   frameclock <socket-name> <width>x<height> [log]
 //
-// With a log, it writes the vblank grid ("p <period ns> <epoch ns>"), each
-// wakeup on it with the vblanks it covers ("v <ns> <count>"), and each commit
-// of a buffer ("c <ns>"), on CLOCK_MONOTONIC, appending a line at a time so
-// other writers can share the file (tools/smoothness reads it; a vblank it has
-// no line for means the log stopped, not that a frame was missed).
+// With a log, it writes the vblank grid ("p <period ns> <epoch ns>"), the
+// vblanks passed so far at each wakeup on it ("v <count>"), and each commit of
+// a buffer ("c <ns>"), on CLOCK_MONOTONIC, appending a line at a time so other
+// writers can share the file (tools/smoothness reads it; a vblank past the
+// last count means the log stopped, not that a frame was missed).
 //
 // Every object a client makes is accepted through one dispatcher that reads
 // the protocol's own message tables: a request creates the objects its
@@ -53,6 +53,7 @@ static struct {
     struct wl_list toplevels; // xdg_toplevel objects (their xdg_surface as user data), configured every beat
     struct wl_event_source *beat;
     int log;                  // -1 without a log
+    uint64_t vblanks;         // passed since the grid's epoch
 } fc;
 
 // A surface's state between commits: its frame callbacks and attached buffer.
@@ -124,8 +125,9 @@ static int answer(int fd, uint32_t mask, void *unused) {
     uint64_t expirations;
     if (read(fd, &expirations, sizeof expirations) < 0)
         return 0;
+    fc.vblanks += expirations;
     char line[64];
-    snprintf(line, sizeof line, "v %lld %llu\n", monotonic(), (unsigned long long)expirations);
+    snprintf(line, sizeof line, "v %llu\n", (unsigned long long)fc.vblanks);
     note(line);
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
