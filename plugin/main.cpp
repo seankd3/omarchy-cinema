@@ -212,10 +212,11 @@ void main() {
         float                                 alphaFrom = 0;
         std::chrono::steady_clock::time_point focusMoved;
         bool                                  seen = false;
-        // When the world last moved here, and whether the frame being drawn
-        // was asked for.
+        // When the world last moved here, whether the frame being drawn was
+        // asked for, and what asks for a frame a capped rate makes due later.
         std::chrono::steady_clock::time_point moved;
         bool                                  asked = false;
+        wl_event_source*                      due   = nullptr;
     };
 
     // One of the film's programs, the backdrop's or the frame's, and where its
@@ -265,10 +266,9 @@ void main() {
         wl_event_source*                        glassIdle = nullptr;
         bool                                    plugged = true;
         // Seconds of the backdrop's own motion, wrapping hourly, and when it
-        // last moved on any monitor.
+        // last moved on any monitor; none once it stood still everywhere.
         float                                   time = 0;
         std::chrono::steady_clock::time_point   moved, lastPowerCheck;
-        wl_event_source*                        timer = nullptr; // asks for frames a capped rate makes due later
         std::unordered_map<MONITORID, SMonitor> monitors;
         std::unordered_map<uint64_t, SMotion>   motion; // each window's, by stable id
         std::deque<SImpulse>                    impulses;
@@ -317,7 +317,6 @@ void main() {
     UP<SState> g;
 
     void applyGlass();
-    void wake();
 
     std::string themeDir() {
         const char* state = getenv("XDG_STATE_HOME");
@@ -410,7 +409,6 @@ void main() {
 
         readGlyphs(dir + "/glyphs.png");
         g->generation++;
-        wake();
         // The glass waits for the rest of the config to load (plugin:backdrop:
         // glass comes later in the theme), so it is applied from the loop.
         if (!g->glassIdle)
@@ -611,13 +609,6 @@ void main() {
         forgetImpulses();
         g->voice    = 0;
         g->speaking = false;
-    }
-
-    // A change that stops the answers lets go of what is pending, so turning
-    // depth or animations off and on again brings nothing back.
-    void settleAnswers() {
-        if (g && !answering())
-            letGo();
     }
 
     void forgetImpulses() {
@@ -828,7 +819,7 @@ void main() {
         // starts still if it comes back.
         std::erase_if(g->motion, [&](const auto& entry) { return now - entry.second.seen > std::chrono::seconds(10); });
         if (!answering()) {
-            settleAnswers();
+            letGo();
             return {{float(monitor->m_size.x / 2.0), float(monitor->m_size.y / 2.0), 0.F, 0.F}, g->impulseGeneration, 0.F};
         }
         const auto at = Pointer::mgr()->untransformedPosition() - monitor->m_position;
@@ -1424,32 +1415,52 @@ vec4 cinemaGlass(vec4 c) {{
         g->monitors[monitor->m_id].asked = true;
     }
 
-    // Starts the world on every monitor it moves on, after what may start it
-    // without a frame: a theme read or config reload, a capped frame due. Any
-    // frame shown starts it too.
-    void wake() {
-        if (!g || g->source.empty())
+    // While the world moves nowhere, time stands still: the next frame it
+    // moves in starts from there.
+    void standStill() {
+        if (std::ranges::none_of(State::monitorState()->monitors(), moves))
+            g->moved = {};
+    }
+
+    // After anything that may start or stop the world without a frame (a
+    // theme read or config change, a window going fullscreen, a monitor going
+    // to sleep): answers let go if the world no longer answers, so turning
+    // depth or animations off and on again brings nothing back, and the world
+    // starts where it moves and stands still where it does not.
+    void settle() {
+        if (!g)
             return;
+        if (!answering())
+            letGo();
+        if (!g->source.empty())
+            for (const auto& monitor : State::monitorState()->monitors())
+                if (moves(monitor))
+                    ask(monitor);
+        standStill();
+    }
+
+    int onDue(void* id) {
         for (const auto& monitor : State::monitorState()->monitors())
-            if (moves(monitor))
+            if (monitor->m_id == MONITORID(intptr_t(id)) && moves(monitor))
                 ask(monitor);
+        return 0;
     }
 
     // A frame shown where the world moves asks for the next: at once, or,
-    // with a capped rate, once the last frame it moved in started that long ago.
+    // with a capped rate, once the last frame it moved in here started that
+    // long ago. Any frame shown starts the world again.
     void onPresented(const PHLMONITOR& monitor) {
-        if (!g || !moves(monitor))
+        if (!g)
             return;
-        const auto wait = std::chrono::duration<double, std::milli>(g->monitors[monitor->m_id].moved + interval() - std::chrono::steady_clock::now()).count();
+        if (!moves(monitor))
+            return standStill();
+        auto&      state = g->monitors[monitor->m_id];
+        const auto wait  = std::chrono::duration<double, std::milli>(state.moved + interval() - std::chrono::steady_clock::now()).count();
         if (wait < 1)
-            ask(monitor);
-        else
-            wl_event_source_timer_update(g->timer, int(std::ceil(wait)));
-    }
-
-    int onDue(void*) {
-        wake();
-        return 0;
+            return ask(monitor);
+        if (!state.due)
+            state.due = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onDue, reinterpret_cast<void*>(intptr_t(monitor->m_id)));
+        wl_event_source_timer_update(state.due, int(std::ceil(wait)));
     }
 
     void onPre(PHLMONITOR monitor) {
@@ -1457,16 +1468,12 @@ vec4 cinemaGlass(vec4 c) {{
             return;
         auto& state = g->monitors[monitor->m_id];
         // A frame asked for moves the world on to now, as it starts drawing
-        // just after the vblank before the one it is shown at; a gap while the
-        // world stood still counts as a tenth of a second at most.
-        if (state.asked) {
-            state.asked     = false;
-            state.moved     = std::chrono::steady_clock::now();
-            const auto step = std::chrono::duration<float>(state.moved - g->moved).count();
-            if (step > 0) {
-                g->time  = std::fmod(g->time + std::min(step, 0.1F), 3600.F);
-                g->moved = state.moved;
-            }
+        // just after the vblank before the one it is shown at.
+        if (std::exchange(state.asked, false) && moves(monitor)) {
+            const auto now = std::chrono::steady_clock::now();
+            if (g->moved != std::chrono::steady_clock::time_point{})
+                g->time = std::fmod(g->time + std::chrono::duration<float>(now - g->moved).count(), 3600.F);
+            g->moved = state.moved = now;
         }
         state.pending = readScene(monitor, state);
         state.answer  = readAnswer(monitor, state);
@@ -1519,7 +1526,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(handle, g->depth);
     g->plugged        = plugged();
     g->lastPowerCheck = std::chrono::steady_clock::now();
-    g->timer          = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onDue, nullptr);
     openFeed();
     readTheme();
     claimFadeouts();
@@ -1580,20 +1586,20 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (!g)
             return;
         readTheme();
-        settleAnswers();
+        settle();
     });
-    static auto REFRESHED = Event::bus()->m_events.config.props_refreshed.listen([](bool) { settleAnswers(); });
+    static auto REFRESHED = Event::bus()->m_events.config.props_refreshed.listen([](bool) { settle(); });
     // Every way the world stops answering lets pending answers go when it
     // happens, whether or not a frame is drawn then: a config change, the
     // session locking, a window going fullscreen, a monitor going to sleep.
     // Hyprland announces a lock before it marks the session locked, so the
     // lock lets go at once instead of asking whether the world still answers.
     static auto LOCKED     = g_pSessionLockManager->m_events.lock.listen([] { letGo(); });
-    static auto FULLSCREEN = Event::bus()->m_events.window.fullscreen.listen([](PHLWINDOW) { settleAnswers(); });
+    static auto FULLSCREEN = Event::bus()->m_events.window.fullscreen.listen([](PHLWINDOW) { settle(); });
     const auto  watch = [](const PHLMONITOR& monitor) {
         if (!g || !monitor)
             return;
-        g->watches.push_back(monitor->m_events.dpmsChanged.listen([] { settleAnswers(); }));
+        g->watches.push_back(monitor->m_events.dpmsChanged.listen([] { settle(); }));
         g->watches.push_back(monitor->m_events.presented.listen([ref = PHLMONITORREF{monitor}](const Time::steady_tp&) {
             if (const auto monitor = ref.lock())
                 onPresented(monitor);
@@ -1602,13 +1608,15 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     for (const auto& monitor : State::monitorState()->monitors())
         watch(monitor);
     static auto ADDED = Event::bus()->m_events.monitor.added.listen([watch](PHLMONITOR monitor) { watch(monitor); });
+    settle();
 
     return {"backdrop", "Draws the current Omarchy theme's backdrop between the wallpaper and the windows.", "Sean", "0.2"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
-    if (g->timer)
-        wl_event_source_remove(g->timer);
+    for (const auto& [id, state] : g->monitors)
+        if (state.due)
+            wl_event_source_remove(state.due);
     closeFeed();
     if (g->glassIdle)
         wl_event_source_remove(g->glassIdle);
