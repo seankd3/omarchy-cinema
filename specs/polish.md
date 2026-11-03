@@ -48,19 +48,22 @@ model is not enough; a judge through Hyprland's own blur is the next step.
 4. **Practicality. Gaps on a small screen** (taste sheet 1): 64 px round and
    between the windows leave nine windows at 1920x1080 too small for a
    terminal.
-5. **Robustness, next contract version. The glass's contrast condition is
-   derived by hand three times.** The Matrix (0.19 a channel, on its light
-   before the film's curve), Evangelion (0.36, the same way) and Roadster
-   (0.6, 0.3, 0.3 on the finished colour, a red bias that turns a white
-   flash red behind text) each work out from colors.toml's muted,
-   background and glass and Omarchy's blur brightness how bright the world
-   behind the glass may be for muted text to keep 4.5:1. A copied film with
-   a new palette keeps the old numbers. Shape: the condition has one home,
-   the luminance the finished colour behind the glass may reach, which the
-   plugin derives from the theme it reads and the contract gives; each film
-   keeps its own way of holding to it (scaling its light, or Roadster's red
-   bias). Deletes the three derivations; the Matrix's outer 4 px (Evidence)
-   is its own question.
+5. **Robustness. The glass's contrast condition is derived by hand three
+   times.** The Matrix (0.19 a channel, on its light before the film's
+   curve), Evangelion (0.36, the same way) and Roadster (0.6, 0.3, 0.3 on the
+   finished colour, a red bias that turns a white flash red behind text) each
+   work out from colors.toml's muted, background and glass and Omarchy's blur
+   brightness how bright the world behind the glass may be for muted text to
+   keep 4.5:1; Jarvis, Tron and Oblivion hold none. A copied film with a new
+   palette keeps the old numbers. The condition is on the composited glass,
+   and the plugin's own glass step in Hyprland's window shader is where the
+   glass is composited (SPEC.md, "Glass"): held to the limit there, the
+   glass keeps muted text at 4.5:1 under every film, every palette and any
+   light the frost gathers from outside the window, and the three films'
+   limits, BLUR_REACH and their derivations go. What it changes: a colour
+   too bright behind the glass dims toward the limit in its own hue, so
+   Roadster's white flashes stay white (a look question, with stills, before
+   building). The Matrix's outer 4 px (Evidence) is the same case.
 6. **Elegance, next contract version. The contract's per-field readers repeat
    window().** `windowDepth` has no caller; `windowDistance` only the
    backdrop main's. The films share answers' geometry, each in its own ink:
@@ -68,7 +71,7 @@ model is not enough; a judge through Hyprland's own blur is the next step.
    Roadster), opening as a ring settling from 60 px over 0.7 s (Jarvis,
    Oblivion; Roadster's brackets close from 60 to 12 px over 0.6 s, their
    own), focus as a 30 px warm swell over 0.9 s (all three). Helpers for what
-   is shared. Each is a contract change, so they go together, with 5.
+   is shared. Each is a contract change, so they go together.
 7. **Robustness, other drivers.** Derivatives in control flow that differs
    within a 2x2 quad are undefined in GLSL: Oblivion's `dFdy` in the cloud
    deck (under the horizon branch, and the whole backdrop() under the veil's

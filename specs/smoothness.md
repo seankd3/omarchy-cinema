@@ -119,8 +119,9 @@ within one run.
   "performance" platform profile, with "Reliability" the active clock reason
   and no power cap or thermal slowdown active (driver 615.78). Load did not
   raise it, so it is not the driver idling down under a light load; what
-  sets the limit is not known. The timings seen in these specs ran at 734 to
-  760 MHz, about a quarter of the rated clock. There 64 vec4 multiply-adds a pixel cost
+  sets the limit is not known. The batch's sampled benches ran at 754 MHz and
+  perf/gpu-2's at 734 to 760, about a quarter of the rated clock; the other
+  timings here were not sampled. There 64 vec4 multiply-adds a pixel cost
   0.66 ms over the 0.35 ms empty pass, so the budget is about 110 of them.
 - The bench shares the GPU with Sean's session, whose Hyprland drew at 65
   to 72% of the GPU at moments of the same morning; a time query counts the
