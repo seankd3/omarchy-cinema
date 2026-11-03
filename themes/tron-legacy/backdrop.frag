@@ -218,8 +218,8 @@ vec4 backdrop(vec2 px) {
 }
 
 // Each window's edge (specs/depth.md, part 2): a slab of glass standing on the
-// Grid. Its outer six pixels bend the world behind them outward, the way the
-// side of a thick pane does, and its rim is a crisp line of the window's own
+// Grid. Its outer six pixels show the world from behind them, the way the
+// side of a thick pane bends it, and its rim is a crisp line of the window's own
 // light, brighter toward the horizon it is lit from and as focus lifts it;
 // orange on the focused window, as the circuit is.
 vec4 frame(vec2 px, int i) {
@@ -231,13 +231,14 @@ vec4 frame(vec2 px, int i) {
     float lift = windowLift(i);
     vec3 tint = i == focusedIndex ? ORANGE : accent;
     float edge = (1.0 - smoothstep(0.0, 6.0, d)) * smoothstep(-2.0, 0.0, d);
-    vec3 bent = backdrop(px - n * 16.0 * edge).rgb * 1.15;
     float toward = 0.6 + 0.4 * clamp(-n.y, 0.0, 1.0);
-    // Light passing behind the window, a cycle or a wave, catches its rim.
-    vec3 behind = backdrop(px - n * 10.0).rgb;
+    // One look at the world 10 px in behind the glass: what the edge bends
+    // into view, and light passing behind the window, a cycle or a wave,
+    // which catches its rim.
+    vec3 behind = d < 12.0 ? backdrop(px - n * 10.0).rgb : background;
     float passing = smoothstep(0.15, 0.6, dot(behind, vec3(0.3, 0.5, 0.2)));
     float rim = glowLine(abs(d - 0.5), 1.0, HALO) * toward * (0.8 + 0.8 * lift + 1.6 * passing);
     float a = clamp(max(edge * 0.9, rim), 0.0, 1.0);
-    vec3 col = bent * edge * 0.9 + tint * rim;
+    vec3 col = behind * 1.15 * edge * 0.9 + tint * rim;
     return vec4(col, a) * windowAlpha(i);
 }
