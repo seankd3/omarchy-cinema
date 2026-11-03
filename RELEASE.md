@@ -109,23 +109,32 @@ and folder icons have no staging point yet (specs/polish.md, item 6), so the
 package ships the plugin and `film.lua` only, and `./install`'s popup and icon
 steps stay.
 
-**The switch on Sean's machine** (not done; each step waits on Sean):
+**The switch on Sean's machine** (not done; each step waits on Sean). Hyprland
+reads `hyprland.lua` again at every config reload, a theme switch included,
+and loads and unloads plugins to match it, so the config is changed only while
+Sean is logged out (from a TTY), never in a running session:
 
 1. Build and install the package (`makepkg -si` in a clone). From then on
    pacman refuses a Hyprland update until the package is rebuilt for it (see
-   below), which is what keeps the next login from loading a plugin its
-   Hyprland refuses.
-2. In `~/.config/hypr/hyprland.lua`, load `/usr/lib/omarchy-cinema/backdrop.so`
-   and run `/usr/lib/omarchy-cinema/film.lua` in place of the two
-   `~/.local/lib/omarchy-cinema` lines; then remove `~/.local/lib/omarchy-cinema`.
-   It takes effect at the next login (never load or unload in a running
-   Hyprland).
-3. Remove `~/.config/omarchy/hooks/post-update.d/omarchy-cinema-rebuild`, the
-   old rebuild after `omarchy update`; the pin replaces it. `./install` no
-   longer writes it.
+   below), which keeps the next login from loading a plugin its Hyprland
+   refuses.
+2. Logged out: in `~/.config/hypr/hyprland.lua`, load
+   `"/usr/lib/omarchy-cinema/backdrop.so"` and run
+   `dofile("/usr/lib/omarchy-cinema/film.lua")()` in place of the two
+   `~/.local/lib/omarchy-cinema` lines; remove `~/.local/lib/omarchy-cinema`
+   and `~/.config/omarchy/hooks/post-update.d/omarchy-cinema-rebuild`, the old
+   rebuild after `omarchy update`, which the pin replaces. Then log in.
+3. From then on `./install` sees the packaged engine in `hyprland.lua` and
+   leaves it alone: it neither builds the plugin nor adds the local `film.lua`
+   line, and still links the themes and the rest.
 4. The themes stay links into the checkout until films ship on their own; a
    contract change then needs the package rebuilt and a login before a theme
    switch, and the notice says so if it is missed.
+
+Open, the next change: `./install` adds `film.lua`'s line but never the
+plugin's load line (on main too), though the release gate below says it does;
+Sean's config has it by hand. A fresh user's first load must come at a login,
+not at install's own theme refresh, which reloads the config.
 
 **The pin for other users, without blocking `omarchy update`.** An exact
 `hyprland=` dependency makes pacman stop a whole `omarchy update` when Omarchy

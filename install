@@ -10,13 +10,20 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 
-make -s -C "$here/plugin" install
+hypr=~/.config/hypr/hyprland.lua
+# The engine the session loads: the package's once hyprland.lua loads it
+# (RELEASE.md, "Packaging"), and this install leaves it alone; otherwise this
+# checkout's, built and installed here.
+if grep -qF '"/usr/lib/omarchy-cinema/backdrop.so"' "$hypr"; then
+  film='dofile("/usr/lib/omarchy-cinema/film.lua")()'
+else
+  make -s -C "$here/plugin" install
+  film='dofile(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/film.lua")()'
+fi
 # The film themes' Hyprland setup, installed with the plugin. The user's
 # Hyprland config runs it just after Omarchy's defaults, where a theme's own
 # hyprland.lua runs, so a film theme holds no Lua, which `omarchy theme
 # install` drops.
-film='dofile(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/film.lua")()'
-hypr=~/.config/hypr/hyprland.lua
 if ! grep -qxF "$film" "$hypr"; then
   if grep -qx 'require("default.hypr.omarchy")' "$hypr"; then
     sed -i "/^require(\"default.hypr.omarchy\")\$/a $film" "$hypr"

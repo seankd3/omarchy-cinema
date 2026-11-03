@@ -5,8 +5,8 @@
 // backdrop(): the colour of one point of the screen.
 //
 // The line above is the contract's version. A film's backdrop.frag says the
-// version it was written for with the same line, and the plugin draws only a
-// film written for its own. A change to what a film is given or can call is
+// version it was written for with the same line as its first, and the plugin
+// draws only a film written for its own. A change to what a film is given or can call is
 // a new version, and the films that ship move to it in the same change.
 //
 // Lengths are logical pixels from the screen's top left. The windows are the

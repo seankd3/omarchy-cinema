@@ -258,6 +258,7 @@ void main() {
     struct SState {
         HANDLE                                  handle = nullptr;
         std::string                             source; // the theme's shader, empty when it has none
+        std::string                             refused; // the film last refused for its contract, said once
         std::array<float, 3>                    accent{1, 1, 1}, background{0, 0, 0}, foreground{1, 1, 1};
         // The colours the theme paints backgrounds in: these turn to glass,
         // keeping `glass` of themselves (colors.toml's, 0.85 without one).
@@ -402,13 +403,17 @@ void main() {
         cairo_surface_destroy(image);
     }
 
-    // The shader and its palette, both from the theme Omarchy has just applied.
-    // The contract version a shader says it was written for (contract.glsl's
-    // first comment line), empty when it says none.
+    // The contract version a shader says it was written for, as digits, empty
+    // when it says none: its first line, after #version in the contract's own
+    // case, is "// omarchy-cinema contract N" and nothing else.
     std::string contractOf(std::string_view shader) {
-        static const std::regex VERSION(R"(^// omarchy-cinema contract (\d+)[ \t]*$)", std::regex::multiline);
+        static const std::regex VERSION(R"(// omarchy-cinema contract ([1-9][0-9]*)[ \t\r]*)");
+        const auto first = [](std::string_view text) { return text.substr(0, text.find('\n')); };
+        auto       line  = first(shader);
+        if (line.starts_with("#version"))
+            line = first(shader.substr(std::min(line.size() + 1, shader.size())));
         std::match_results<std::string_view::const_iterator> match;
-        return std::regex_search(shader.begin(), shader.end(), match, VERSION) ? match[1].str() : "";
+        return std::regex_match(line.begin(), line.end(), match, VERSION) ? match[1].str() : "";
     }
 
     // How much of a window's background a colors.toml's glass keeps: one
@@ -426,18 +431,30 @@ void main() {
     // The theme's shader, palette and glass. A shader written for another
     // contract than this build's is not compiled: it would not draw what its
     // film means, so the plugin says why and draws nothing.
+    // The theme's shader, palette and glass, from the theme Omarchy has just
+    // applied. Any backdrop.frag makes the theme a film (as film.lua decides);
+    // one written for another contract than this build's, or for none, is not
+    // compiled: it would not draw what its film means, so the plugin says why,
+    // once for each such shader, and draws nothing.
     void readTheme() {
         const auto        dir     = themeDir();
+        const bool        film    = std::filesystem::exists(dir + "/backdrop.frag");
         auto              shader  = readFile(dir + "/backdrop.frag");
         static const auto ours    = contractOf(CONTRACT);
         const auto        written = contractOf(shader);
-        if (!shader.empty() && written != ours) {
-            const auto said = written.empty() ? std::string("does not say which contract it is written for") : std::format("is written for contract {}", written);
-            const auto fix  = !written.empty() && std::stoul(written) > std::stoul(ours) ? "log in again to run the engine installed now, or update omarchy-cinema" : "update the theme";
-            HyprlandAPI::addNotification(g->handle, std::format("[backdrop] this theme's backdrop.frag {}, and this engine draws contract {}: {}", said, ours, fix),
-                                         CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+        if (film && written != ours) {
+            if (shader != g->refused) {
+                // Digits without leading zeros: the longer is the larger.
+                const bool newer = written.size() != ours.size() ? written.size() > ours.size() : written > ours;
+                const auto said  = written.empty() ? std::string("does not say which contract it is written for") : std::format("is written for contract {}", written);
+                const auto fix   = newer ? "log in again to run the engine installed now, or update omarchy-cinema" : "update the theme";
+                HyprlandAPI::addNotification(g->handle, std::format("[backdrop] this theme's backdrop.frag {}, and this engine draws contract {}: {}", said, ours, fix),
+                                             CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+            }
+            g->refused = shader;
             shader.clear();
-        }
+        } else
+            g->refused.clear();
         g->source         = shader.empty() ? "" : std::string(CONTRACT) + "\n#line 1\n" + shader;
         static const std::regex FRAME(R"(\bvec4\s+frame\s*\()");
         g->framed         = std::regex_search(shader, FRAME);
