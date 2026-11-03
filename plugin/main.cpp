@@ -11,9 +11,11 @@
 // Hyprland advances its animations, then emits render.pre, then reads the
 // frame's damage. At render.pre the plugin reads the windows as they will be
 // drawn; if they differ from what it last drew, it damages the whole monitor
-// and the glass, so this same frame draws the new backdrop. Otherwise the
-// backdrop's own motion asks for frames: at the display's rate plugged in, 30
-// a second on battery (plugin:backdrop:fps, plugin:backdrop:battery_fps).
+// and the glass, so this same frame draws the new backdrop. The backdrop's own
+// motion runs on the display's frames: each frame shown asks for the next, and
+// the frames it asked for move the world on by their own time. Plugged in that
+// is every vblank, on battery 30 a second
+// (plugin:backdrop:fps, plugin:backdrop:battery_fps).
 //
 // A backdrop can also draw text: the cinema-feed service sends the newest
 // plaintext of the agents on this machine to a datagram socket the plugin owns,
@@ -166,7 +168,8 @@ void main() {
     };
 
     // What the world answers besides the windows: a change here redraws the
-    // backdrop, and the glass follows at the next tick (specs/depth.md, part 6).
+    // backdrop, and the glass follows in the next frame the world moves in
+    // (specs/depth.md, part 6).
     struct SAnswer {
         std::array<float, 4> pointer{}; // x, y, velocity x, y
         uint64_t             impulses = 0; // the impulse ring's generation
@@ -209,6 +212,10 @@ void main() {
         float                                 alphaFrom = 0;
         std::chrono::steady_clock::time_point focusMoved;
         bool                                  seen = false;
+        // When the world last moved here, and whether the frame being drawn
+        // was asked for.
+        std::chrono::steady_clock::time_point moved;
+        bool                                  asked = false;
     };
 
     // One of the film's programs, the backdrop's or the frame's, and where its
@@ -251,16 +258,17 @@ void main() {
         // How far the windows' depth goes (specs/depth.md, "Tiers"): 0 is the
         // backdrop alone, with no answers, no frames and no facts moving.
         SP<Config::Values::CIntValue>           depth;
-        // Each monitor's sleep and wake, which can pass without a frame.
-        std::vector<CHyprSignalListener>        sleeps;
+        // Each monitor's frames shown, and its sleep and wake, which can pass
+        // without a frame.
+        std::vector<CHyprSignalListener>        watches;
         std::string                             glassShader; // the surface shader in use, empty for Hyprland's own
         wl_event_source*                        glassIdle = nullptr;
         bool                                    plugged = true;
-        // Seconds of the backdrop's own motion, wrapping hourly, advanced by
-        // the clock while the backdrop is seen.
+        // Seconds of the backdrop's own motion, wrapping hourly, and when it
+        // last moved on any monitor.
         float                                   time = 0;
-        std::chrono::steady_clock::time_point   lastTick, lastPowerCheck;
-        wl_event_source*                        timer = nullptr;
+        std::chrono::steady_clock::time_point   moved, lastPowerCheck;
+        wl_event_source*                        timer = nullptr; // asks for frames a capped rate makes due later
         std::unordered_map<MONITORID, SMonitor> monitors;
         std::unordered_map<uint64_t, SMotion>   motion; // each window's, by stable id
         std::deque<SImpulse>                    impulses;
@@ -309,6 +317,7 @@ void main() {
     UP<SState> g;
 
     void applyGlass();
+    void wake();
 
     std::string themeDir() {
         const char* state = getenv("XDG_STATE_HOME");
@@ -401,10 +410,7 @@ void main() {
 
         readGlyphs(dir + "/glyphs.png");
         g->generation++;
-
-        // The backdrop's clock runs only while the theme has a backdrop; 0
-        // disarms the timer.
-        wl_event_source_timer_update(g->timer, g->source.empty() ? 0 : 1);
+        wake();
         // The glass waits for the rest of the config to load (plugin:backdrop:
         // glass comes later in the theme), so it is applied from the loop.
         if (!g->glassIdle)
@@ -582,14 +588,20 @@ void main() {
     bool covered(PHLMONITOR monitor);
     void forgetImpulses();
 
-    // Whether the world answers the desktop now, read at the moment it is
-    // asked: depth on, animations on, the session unlocked and some monitor
-    // showing the world. Nothing is collected while it does not.
-    bool answering() {
+    // Whether the world moves on this monitor now: a theme with a backdrop,
+    // animations on (Hyprland's animations:enabled is the one authority), the
+    // session unlocked, and the monitor awake and not showing a fullscreen
+    // window. Time stands still while it moves on no monitor.
+    bool moves(const PHLMONITOR& monitor) {
         static auto ANIMATIONS = CConfigValue<Config::INTEGER>("animations:enabled");
-        if (!g || g->source.empty() || g->depth->value() == 0 || !*ANIMATIONS || g_pSessionLockManager->isSessionLocked())
-            return false;
-        return std::ranges::any_of(State::monitorState()->monitors(), [](const auto& m) { return m->m_enabled && m->m_dpmsStatus && !covered(m); });
+        return g && !g->source.empty() && *ANIMATIONS && !g_pSessionLockManager->isSessionLocked() && monitor->m_enabled && monitor->m_dpmsStatus && !covered(monitor);
+    }
+
+    // Whether the world answers the desktop now, read at the moment it is
+    // asked: depth on and the world moving on some monitor. Nothing is
+    // collected while it does not.
+    bool answering() {
+        return g && g->depth->value() != 0 && std::ranges::any_of(State::monitorState()->monitors(), moves);
     }
 
     // Lets go of everything pending: impulses and the last voice reading.
@@ -1381,10 +1393,81 @@ vec4 cinemaGlass(vec4 c) {{
             HyprlandAPI::addWindowDecoration(g->handle, window, makeShared<CFrameDecoration>(window));
     }
 
+    // Plugged in: any mains or USB-C supply online.
+    bool plugged() {
+        std::error_code error;
+        for (const auto& supply : std::filesystem::directory_iterator("/sys/class/power_supply", error)) {
+            const auto type = readFile(supply.path() / "type");
+            if ((type.starts_with("Mains") || type.starts_with("USB")) && readFile(supply.path() / "online").starts_with("1"))
+                return true;
+        }
+        return false;
+    }
+
+    // The least time between the frames the world moves in; 0 is every frame.
+    std::chrono::duration<double> interval() {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - g->lastPowerCheck > std::chrono::seconds(2)) {
+            g->plugged        = plugged();
+            g->lastPowerCheck = now;
+        }
+        const auto rate = (g->plugged ? g->fps : g->batteryFps)->value();
+        return std::chrono::duration<double>(rate > 0 ? 1.0 / rate : 0.0);
+    }
+
+    // Asks for the monitor's next frame with the world moved on, glass
+    // included: made dirty before render.pre, the blur runs only when a window
+    // or an xray layer shows glass (Hyprland 0.57.0 src/render/GLRenderer.cpp:386).
+    void ask(const PHLMONITOR& monitor) {
+        g_pHyprRenderer->damageMonitor(monitor);
+        monitor->m_blurFBDirty           = true;
+        g->monitors[monitor->m_id].asked = true;
+    }
+
+    // Starts the world on every monitor it moves on, after what may start it
+    // without a frame: a theme read or config reload, a capped frame due. Any
+    // frame shown starts it too.
+    void wake() {
+        if (!g || g->source.empty())
+            return;
+        for (const auto& monitor : State::monitorState()->monitors())
+            if (moves(monitor))
+                ask(monitor);
+    }
+
+    // A frame shown where the world moves asks for the next: at once, or,
+    // with a capped rate, once the last frame it moved in started that long ago.
+    void onPresented(const PHLMONITOR& monitor) {
+        if (!g || !moves(monitor))
+            return;
+        const auto wait = std::chrono::duration<double, std::milli>(g->monitors[monitor->m_id].moved + interval() - std::chrono::steady_clock::now()).count();
+        if (wait < 1)
+            ask(monitor);
+        else
+            wl_event_source_timer_update(g->timer, int(std::ceil(wait)));
+    }
+
+    int onDue(void*) {
+        wake();
+        return 0;
+    }
+
     void onPre(PHLMONITOR monitor) {
         if (!g || g->source.empty())
             return;
-        auto& state   = g->monitors[monitor->m_id];
+        auto& state = g->monitors[monitor->m_id];
+        // A frame asked for moves the world on to now, as it starts drawing
+        // just after the vblank before the one it is shown at; a gap while the
+        // world stood still counts as a tenth of a second at most.
+        if (state.asked) {
+            state.asked     = false;
+            state.moved     = std::chrono::steady_clock::now();
+            const auto step = std::chrono::duration<float>(state.moved - g->moved).count();
+            if (step > 0) {
+                g->time  = std::fmod(g->time + std::min(step, 0.1F), 3600.F);
+                g->moved = state.moved;
+            }
+        }
         state.pending = readScene(monitor, state);
         state.answer  = readAnswer(monitor, state);
         if (state.pending != state.drawn)
@@ -1406,58 +1489,6 @@ vec4 cinemaGlass(vec4 c) {{
         state.drawn    = state.pending;
         state.answered = state.answer;
         Render::IHyprRenderer::addPassElement(ctx, makeUnique<CBackdropPass>(event.monitor, state.pending, state.answer));
-    }
-
-    // Plugged in: any mains or USB-C supply online.
-    bool plugged() {
-        std::error_code error;
-        for (const auto& supply : std::filesystem::directory_iterator("/sys/class/power_supply", error)) {
-            const auto type = readFile(supply.path() / "type");
-            if ((type.starts_with("Mains") || type.starts_with("USB")) && readFile(supply.path() / "online").starts_with("1"))
-                return true;
-        }
-        return false;
-    }
-
-    // The backdrop's own motion. Time stands still while there is nothing to
-    // see it on: animations off, the session locked, or every monitor asleep
-    // or showing a fullscreen window. readTheme starts and stops the timer.
-    int onTick(void*) {
-        if (!g)
-            return 0;
-        const auto now = std::chrono::steady_clock::now();
-        if (now - g->lastPowerCheck > std::chrono::seconds(2)) {
-            g->plugged        = plugged();
-            g->lastPowerCheck = now;
-        }
-
-        float fastest = 0;
-        for (const auto& monitor : State::monitorState()->monitors())
-            fastest = std::max(fastest, monitor->m_refreshRate);
-        const auto setting = (g->plugged ? g->fps : g->batteryFps)->value();
-        const auto rate    = setting > 0 ? float(setting) : std::max(fastest, 1.F);
-        wl_event_source_timer_update(g->timer, std::max(1, int(1000 / rate)));
-
-        const float elapsed = std::min(std::chrono::duration<float>(now - g->lastTick).count(), 0.1F);
-        g->lastTick         = now;
-        static auto ANIMATIONS = CConfigValue<Config::INTEGER>("animations:enabled");
-        if (!*ANIMATIONS || g_pSessionLockManager->isSessionLocked())
-            return 0;
-
-        bool seen = false;
-        for (const auto& monitor : State::monitorState()->monitors()) {
-            if (!monitor->m_enabled || !monitor->m_dpmsStatus || covered(monitor))
-                continue;
-            seen = true;
-            // The glass is the backdrop blurred, so it moves with it. Made
-            // dirty before the frame, the blur runs only when a window or an
-            // xray layer shows glass (Hyprland 0.57.0 src/render/GLRenderer.cpp:386).
-            g_pHyprRenderer->damageMonitor(monitor);
-            monitor->m_blurFBDirty = true;
-        }
-        if (seen)
-            g->time = std::fmod(g->time + elapsed, 3600.F);
-        return 0;
     }
 
 } // namespace
@@ -1486,9 +1517,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                          Config::Values::SIntValueOptions{.min = 0, .max = 3});
     HyprlandAPI::addConfigValueV2(handle, g->glass);
     HyprlandAPI::addConfigValueV2(handle, g->depth);
-    g->plugged  = plugged();
-    g->lastTick = g->lastPowerCheck = std::chrono::steady_clock::now();
-    g->timer = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onTick, nullptr);
+    g->plugged        = plugged();
+    g->lastPowerCheck = std::chrono::steady_clock::now();
+    g->timer          = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onDue, nullptr);
     openFeed();
     readTheme();
     claimFadeouts();
@@ -1559,13 +1590,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // lock lets go at once instead of asking whether the world still answers.
     static auto LOCKED     = g_pSessionLockManager->m_events.lock.listen([] { letGo(); });
     static auto FULLSCREEN = Event::bus()->m_events.window.fullscreen.listen([](PHLWINDOW) { settleAnswers(); });
-    const auto  watchSleep = [](const PHLMONITOR& monitor) {
-        if (g && monitor)
-            g->sleeps.push_back(monitor->m_events.dpmsChanged.listen([] { settleAnswers(); }));
+    const auto  watch = [](const PHLMONITOR& monitor) {
+        if (!g || !monitor)
+            return;
+        g->watches.push_back(monitor->m_events.dpmsChanged.listen([] { settleAnswers(); }));
+        g->watches.push_back(monitor->m_events.presented.listen([ref = PHLMONITORREF{monitor}](const Time::steady_tp&) {
+            if (const auto monitor = ref.lock())
+                onPresented(monitor);
+        }));
     };
     for (const auto& monitor : State::monitorState()->monitors())
-        watchSleep(monitor);
-    static auto ADDED = Event::bus()->m_events.monitor.added.listen([watchSleep](PHLMONITOR monitor) { watchSleep(monitor); });
+        watch(monitor);
+    static auto ADDED = Event::bus()->m_events.monitor.added.listen([watch](PHLMONITOR monitor) { watch(monitor); });
 
     return {"backdrop", "Draws the current Omarchy theme's backdrop between the wallpaper and the windows.", "Sean", "0.2"};
 }

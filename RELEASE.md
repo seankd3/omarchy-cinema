@@ -37,7 +37,7 @@ already have.
    - *No animations*: the backdrop holds still and costs nothing: Hyprland's
      `animations:enabled` is the one authority for decorative time and focus
      easing, so with it off the plugin stops waking and redraws only when
-     windows change (today the timer keeps rearming; to fix).
+     windows change (since specs/smoothness.md, nothing asks for frames).
    - *No gaps*, *Corners*: apply to the cinema spacing and rounding.
    - *Glassy bar*: the bar's glass.
    Finer values are Hyprland keys (`plugin:backdrop:fps`, `battery_fps`, the
