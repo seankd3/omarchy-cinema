@@ -33,6 +33,7 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/window/Window.hpp>
+#include <hyprland/src/desktop/view/window/WindowEffectsController.hpp>
 #include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
@@ -693,21 +694,27 @@ void main() {
 
     // The windows Hyprland draws on this monitor in this frame, and those
     // fading out after closing, where they are drawn; and where attention is.
-    // Whether Hyprland frosts all of window w as the half-resolution world was
-    // measured to be hidden by (specs/smoothness.md): its own Kawase blur
-    // (variant 0) at size 3 or more, two passes or more, at full strength
-    // (not proportional to the window's alpha, nor faded by its opacity, nor
-    // clipped to a region the client asked for), with the window and its blur
-    // fully present. Anything else sees the world at full resolution.
+    // Whether Hyprland draws all of window w's rect frosted, as the world
+    // behind it was measured to hide a half-resolution world
+    // (specs/smoothness.md): the window untransformed (no wobble, motion blur
+    // or other transformer) and fully present, its surface drawn whole (no
+    // visible or blur region of the client's own), blurred by Hyprland's
+    // Kawase blur (variant 0) at size 3 or more, two passes or more, at full
+    // strength (not proportional to alpha, nor faded with opacity), with
+    // nothing amplifying it (contrast and brightness at most 1). How much of
+    // the frost shows (glass, an app's own alpha) does not matter: with clear
+    // glass the half resolution was measured as hidden too.
     bool frosted(const PHLWINDOW& w, const Render::SWindowRenderPresentation& drawn) {
         static auto VARIANT      = CConfigValue<Config::INTEGER>("decoration:blur:variant");
         static auto SIZE         = CConfigValue<Config::INTEGER>("decoration:blur:size");
         static auto PASSES       = CConfigValue<Config::INTEGER>("decoration:blur:passes");
         static auto PROPORTIONAL = CConfigValue<Config::INTEGER>("decoration:blur:proportional");
         static auto IGNORE_ALPHA = CConfigValue<Config::INTEGER>("decoration:blur:ignore_opacity");
+        static auto CONTRAST     = CConfigValue<Config::FLOAT>("decoration:blur:contrast");
+        static auto BRIGHTNESS   = CConfigValue<Config::FLOAT>("decoration:blur:brightness");
         const auto  surface      = w->wlSurface();
-        return *VARIANT == 0 && *SIZE >= 3 && *PASSES >= 2 && !*PROPORTIONAL && *IGNORE_ALPHA && drawn.fadeAlpha >= 1.F && w->shouldBlur(drawn) &&
-            !(surface && surface->m_hasBackgroundEffect);
+        return *VARIANT == 0 && *SIZE >= 3 && *PASSES >= 2 && !*PROPORTIONAL && *IGNORE_ALPHA && *CONTRAST <= 1.F && *BRIGHTNESS <= 1.F && drawn.fadeAlpha >= 1.F &&
+            !w->effects().hasActiveTransformers() && w->shouldBlur(drawn) && surface && !surface->m_hasBackgroundEffect && surface->m_visibleRegion.empty();
     }
 
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {

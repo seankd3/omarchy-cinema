@@ -138,7 +138,12 @@ so is every frame. Inside, the worst pixel and the pixels at 2 levels or
 more, of about 4 million: Jarvis 4.8 and at most 2344, Jurassic Park 2.25 and
 8, Evangelion 2.25 and 22, Roadster 1.7 and none, Oblivion under 1. At 1:1,
 the worst spot of each beside main's cannot be told apart, nor can Jarvis's
-glass in the hidden desktop.
+glass in the hidden desktop. With clear glass and no dimming, the most any
+compositing can let through, the worst is Jarvis's 16 levels on a blurred
+line core and 3 to 6 for the rest, and at 1:1 it still cannot be told apart:
+so the glass amount, an app's own alpha and the blur's brightness only make
+it smaller, and what decides is that Hyprland frosts the whole window
+untransformed with nothing amplifying the frost (frosted() in main.cpp).
 
 Not kept: Tron's grid at half resolution differs by up to 15 levels at the
 horizon, where its far rows are finer than a half-size pixel, and blending
