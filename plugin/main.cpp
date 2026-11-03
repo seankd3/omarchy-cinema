@@ -259,7 +259,7 @@ void main() {
         HANDLE                                  handle = nullptr;
         std::string                             source; // the theme's shader, empty when it has none
         std::optional<std::string>              refused; // the theme and contract last refused, said once
-        std::array<float, 3>                    accent{1, 1, 1}, background{0, 0, 0}, foreground{1, 1, 1};
+        std::array<float, 3>                    accent{1, 1, 1}, background{0, 0, 0}, foreground{1, 1, 1}, muted{1, 1, 1};
         // The colours the theme paints backgrounds in: these turn to glass,
         // keeping `glass` of themselves (colors.toml's, 0.85 without one).
         std::vector<std::array<float, 3>>       backgrounds;
@@ -353,6 +353,12 @@ void main() {
         if (file)
             buffer << file.rdbuf();
         return buffer.str();
+    }
+
+    // A colour's relative luminance, as WCAG measures contrast.
+    float luminance(const std::array<float, 3>& c) {
+        const auto linear = [](float v) { return v <= 0.04045F ? v / 12.92F : std::pow((v + 0.055F) / 1.055F, 2.4F); };
+        return 0.2126F * linear(c[0]) + 0.7152F * linear(c[1]) + 0.0722F * linear(c[2]);
     }
 
     std::array<float, 3> hexColor(const std::string& hex) {
@@ -475,6 +481,8 @@ void main() {
                 g->accent = value;
             else if (name == "foreground")
                 g->foreground = value;
+            else if (name == "muted")
+                g->muted = value;
             if (name == "background")
                 g->background = value;
             if (name == "background" || name == "dark_background" || name == "darker_background" || name == "lighter_background")
@@ -1141,17 +1149,49 @@ void main() {
         std::string source{found->second};
         const std::string output = "layout(location = 0) out vec4 fragColor;";
         const std::string read   = "#if USE_DISCARD && !USE_BLUR";
+        const std::string frost  = "texture(blurredBG, blurUV)";
         const auto        at     = source.find(output);
-        if (at == std::string::npos || source.find(output, at + 1) != std::string::npos || source.find(read) == std::string::npos) {
+        if (at == std::string::npos || source.find(output, at + 1) != std::string::npos || source.find(read) == std::string::npos ||
+            source.find(frost) == std::string::npos) {
             HyprlandAPI::addNotification(g->handle, "[backdrop] this Hyprland's window shader has changed shape; windows stay solid", CHyprColor{1.0, 0.6, 0.2, 1.0}, 10000);
             return "";
         }
+        const auto vec3 = [](const std::array<float, 3>& c) { return std::format("vec3({:.6f}, {:.6f}, {:.6f})", c[0], c[1], c[2]); };
         std::string keys;
         for (const auto& c : g->backgrounds)
-            keys += std::format("{}vec3({:.6f}, {:.6f}, {:.6f})", keys.empty() ? "" : ", ", c[0], c[1], c[2]);
+            keys += (keys.empty() ? "" : ", ") + vec3(c);
+        // Muted text keeps 4.5:1 (WCAG) on the glass where the pane's
+        // luminance is no more than this for a palette whose muted is lighter
+        // than its background, no less for one whose muted is darker; where
+        // the background itself is short of that, as far as the background.
+        const float background = luminance(g->background), muted = luminance(g->muted);
+        const float side       = muted > background ? 1.F : -1.F;
+        const float limit      = side > 0 ? std::max(background, (muted + 0.05F) / 4.5F - 0.05F) : std::min(background, 4.5F * (muted + 0.05F) - 0.05F);
         source.insert(at, std::format(R"(// omarchy-cinema glass: see the backdrop plugin.
 const vec3  CINEMA_BACKGROUNDS[{}] = vec3[]({});
 const float CINEMA_GLASS = {:.4f};
+const vec3  CINEMA_BACKGROUND = {};
+const float CINEMA_LIMIT = {:.6f}, CINEMA_SIDE = {:.1f};
+vec3 cinemaLinear(vec3 c) {{
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}}
+float cinemaLuminance(vec3 c) {{
+    return dot(cinemaLinear(c), vec3(0.2126, 0.7152, 0.0722));
+}}
+// The frost behind the glass, held so that the theme's glass over it keeps
+// muted text at 4.5:1: where the pane would pass the limit, it moves toward
+// the background in linear light, dimming in its own hue on a dark theme,
+// until it meets it.
+vec4 cinemaFrost(vec4 frost) {{
+    vec3  under = CINEMA_BACKGROUND * CINEMA_GLASS;
+    vec3  pane  = under + frost.rgb * (1.0 - CINEMA_GLASS);
+    float y     = cinemaLuminance(pane);
+    if ((y - CINEMA_LIMIT) * CINEMA_SIDE <= 0.0) return frost;
+    float b    = cinemaLuminance(CINEMA_BACKGROUND);
+    vec3  held = mix(cinemaLinear(CINEMA_BACKGROUND), cinemaLinear(pane), (CINEMA_LIMIT - b) / (y - b));
+    held       = mix(held * 12.92, 1.055 * pow(held, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, held));
+    return vec4((held - under) / (1.0 - CINEMA_GLASS), frost.a);
+}}
 vec4 cinemaGlass(vec4 c) {{
     // Nothing to judge where the app drew nothing.
     if (c.a <= 0.0) return c;
@@ -1176,8 +1216,11 @@ vec4 cinemaGlass(vec4 c) {{
 }}
 
 )",
-                                         g->backgrounds.size(), keys, glass, g->backgrounds.size()));
+                                         g->backgrounds.size(), keys, glass, vec3(g->background), limit, side, g->backgrounds.size()));
         source.insert(source.find(read), "#if USE_BLUR\n    pixColor = cinemaGlass(pixColor);\n#endif\n\n");
+        const auto held = "cinemaFrost(" + frost + ")";
+        for (auto found = source.find(frost); found != std::string::npos; found = source.find(frost, found + held.size()))
+            source.replace(found, frost.size(), held);
         return source;
     }
 

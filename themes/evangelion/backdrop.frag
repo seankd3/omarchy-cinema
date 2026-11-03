@@ -30,16 +30,6 @@ const float CELL = 28.0; // honeycomb spacing in pixels: two cells span a gap
 // Where NERV's light comes from: above, a little to the left. Shadows fall
 // away from it and the frames are brightest facing it.
 const vec2 LIGHT = vec2(-0.34, -0.94);
-// The brightest any light is behind the glass, in every channel. colors.toml's
-// muted (#b38c72) keeps 4.5:1 over a glass of relative luminance 0.0268 or
-// less; glass 0.5 over #0c090e with Omarchy's 0.75 blur brightness stays under
-// that while the light behind it is at most 0.36 a channel, whatever its hue.
-const float UNDER_GLASS = 0.36;
-// How far outside a window Hyprland's blur (frost 3, two passes) gathers
-// light into the window's glass, in pixels: the field's answers are held to
-// the glass's limit that close to it, and the frame, drawn over the window
-// rather than blurred into it, carries the light at the edge.
-const float BLUR_REACH = 22.0;
 
 // The flat-topped hexagon of a honeycomb `size` pixels apart that holds px:
 // its centre (xy) and how far px is inside its edge (z), in pixels.
@@ -254,15 +244,11 @@ vec4 backdrop(vec2 px) {
     // A cell the field's answer or a moving window reaches burns whole, its
     // rim near white, and through the glass too, where its tile carries the
     // light. The answers are the field's own light, so the shadows only half
-    // dim them; within the blur's reach of a window they keep to the glass's
-    // limit.
+    // dim them.
     vec4 answer = answers(px, cell.xy);
     float burn = min(answer.a + stir, 3.0);
-    vec3 flare = ((mix(orange, WARM_LIGHT, 0.3) * rim * 0.45 + orange * tile * 0.3) * burn * mix(1.0, 0.7, glass)
-                  + answer.rgb * mix(1.0, 0.8, glass)) * (0.5 + 0.5 * shade);
-    float close = 1.0 - smoothstep(0.0, BLUR_REACH, nearest);
-    float flarePeak = max(flare.r, max(flare.g, flare.b));
-    light += flare * mix(1.0, min(1.0, UNDER_GLASS / max(flarePeak, 1e-4)), max(close, glass));
+    light += ((mix(orange, WARM_LIGHT, 0.3) * rim * 0.45 + orange * tile * 0.3) * burn * mix(1.0, 0.7, glass)
+              + answer.rgb * mix(1.0, 0.8, glass)) * (0.5 + 0.5 * shade);
 
     // The bar's lower edge: an orange line, and under it a strip of hazard
     // stripes that crawls along, lit where a bright run sweeps across.
@@ -278,11 +264,6 @@ vec4 backdrop(vec2 px) {
     }
 
     if (seen.over >= 0) light += sheen(px, seen.over);
-
-    // Behind the glass no channel goes over UNDER_GLASS, so the field passing
-    // behind muted text never takes it under 4.5:1.
-    float peak = max(light.r, max(light.g, light.b));
-    light *= mix(1.0, min(1.0, UNDER_GLASS / max(peak, 1e-4)), glass);
 
     // Bright light saturates toward white, as it does on film.
     return vec4(background + (1.0 - exp(-light * 1.3)), 1.0);

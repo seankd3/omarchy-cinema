@@ -48,26 +48,12 @@ model is not enough; a judge through Hyprland's own blur is the next step.
 4. **Practicality. Gaps scale with the screen** (taste sheet 1): 64 px for
    each 1440 of the smallest screen's shorter side, following the screens as
    they change while the gaps are still film.lua's. Done: `films/gaps`.
-5. **Robustness. The glass's contrast condition is derived by hand three
-   times.** The Matrix (0.19 a channel, on its light before the film's
-   curve), Evangelion (0.36, the same way) and Roadster (0.6, 0.3, 0.3 on the
-   finished colour, a red bias that turns a white flash red behind text) each
-   work out from colors.toml's muted, background and glass and Omarchy's blur
-   brightness how bright the world behind the glass may be for muted text to
-   keep 4.5:1; Jarvis, Tron and Oblivion hold none. A copied film with a new
-   palette keeps the old numbers. The condition is on the composited glass,
-   which Hyprland's window shader composites from its frost (`blurredBG`,
-   surface.frag) after the plugin's glass step there (SPEC.md, "Glass"). So
-   the step can hold the composited glass to muted text's 4.5:1 in the
-   palette's direction: no brighter than that for a dark film, no darker for
-   a light one (Oblivion keeps its light by hand today), for any palette
-   whose muted text reaches 4.5:1 on its own background. Then the three
-   window limits, BLUR_REACH and their derivations go; the bar is a layer,
-   not a window, so Evangelion's limit under the bar stays until the bar's
-   glass has the same step. What it changes: a colour too bright behind a
-   dark film's glass dims in its own hue, so Roadster's white flashes stay
-   white (a look question, with stills, before building). The Matrix's outer
-   4 px (Evidence) is the same case.
+5. **Robustness. The glass holds muted text's contrast for any palette.**
+   The Matrix, Evangelion and Roadster each derived by hand how bright their
+   world may be behind the glass; now the plugin's glass step holds Hyprland's
+   frost so the theme's glass over it keeps muted text at 4.5:1, in the
+   palette's direction. Their limits, BLUR_REACH and their derivations went.
+   Done: `films/contrast`.
 6. **Elegance, next contract version. The contract's per-field readers repeat
    window().** `windowDepth` has no caller; `windowDistance` only the
    backdrop main's. The films share answers' geometry, each in its own ink:

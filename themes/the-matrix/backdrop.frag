@@ -25,15 +25,6 @@
 // is a phosphor edge that catches the rain passing behind its glass.
 
 const vec3 HEAD = vec3(0.78, 1.0, 0.84);
-// The brightest the rain is behind the glass. colors.toml's muted (#5c9a6c)
-// keeps 4.5:1 over a background of relative luminance 0.0199 or less; glass
-// 0.2 over #020804 with Omarchy's 0.75 blur brightness stays under that while
-// the rain behind is at most 0.19 in every channel.
-const float UNDER_GLASS = 0.19;
-// How far outside a window Hyprland's blur (frost 1, two passes) gathers
-// light into the window's glass, in pixels: the answers keep to the glass's
-// limit that close to a window.
-const float BLUR_REACH = 10.0;
 // Where the light comes from: above, with the rain, a little to the right.
 const vec2 LIGHT = vec2(0.12, -0.99);
 // Periods (seconds) a drop takes to fall one repeat, four to a depth from the
@@ -219,8 +210,7 @@ vec4 backdrop(vec2 px) {
     // Out in the open the rain is brightest round the focused window, a
     // little brighter under the pointer, in a moving window's wake, where
     // something just happened and as you speak, and sheltered below the
-    // windows. Behind the glass it keeps its shape but not its glare (the
-    // limit below).
+    // windows.
     vec4 answer = answers(px, nearCell(px, shift));
     vec2 toPointer = px - pointer.xy;
     float touch = exp(-dot(toPointer, toPointer) / (2.0 * 90.0 * 90.0));
@@ -266,12 +256,9 @@ vec4 backdrop(vec2 px) {
     }
 
     // The answers' own glow, with or without rain, and a landing's glyphs,
-    // only while there is rain, read only where a landing reaches; within the
-    // blur's reach of a window they keep to the glass's limit.
+    // only while there is rain, read only where a landing reaches.
     float ink = answer.z > 0.0 && feedCount > 0 ? nearInk(px, shift) : 0.0;
-    vec3 glow = green * answer.x + (green * answer.z * 1.2 + HEAD * min(answer.w, 2.0) * 1.4) * ink * feedPresence;
-    float glowPeak = max(glow.r, max(glow.g, glow.b));
-    light += glow * mix(1.0, min(1.0, UNDER_GLASS / max(glowPeak, 1e-4)), max(inside, 1.0 - smoothstep(0.0, BLUR_REACH, nearest)));
+    light += green * answer.x + (green * answer.z * 1.2 + HEAD * min(answer.w, 2.0) * 1.4) * ink * feedPresence;
 
     // The gaps between windows glow faintly green, a little more as you
     // speak, and less in the windows' shelter.
@@ -300,12 +287,6 @@ vec4 backdrop(vec2 px) {
         light += mix(green, HEAD, 0.6) * trail * glowLine(abs(below), 1.6) * 1.4;
         light += green * 0.03 * step(below, 0.0);
     }
-
-    // Behind the glass the rain keeps its shape but not its glare: no channel
-    // goes over UNDER_GLASS, so a drop passing behind secondary text never
-    // takes it under 4.5:1 (Sol, 2026-10-28).
-    float peak = max(light.r, max(light.g, light.b));
-    light *= mix(1.0, min(1.0, UNDER_GLASS / max(peak, 1e-4)), inside);
 
     return vec4(background + (1.0 - exp(-light * 1.3)), 1.0);
 }

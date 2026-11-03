@@ -31,11 +31,6 @@
 // while you work.
 
 const vec3 WHITE = vec3(1.0, 0.94, 0.94);
-// The brightest the scene is behind the glass, a channel each. With the glass
-// at 0.55 over #070404 and Omarchy's 0.75 blur brightness, colors.toml's muted
-// (#a08a8a) keeps 4.8:1 over anything up to this: red lines keep their colour,
-// a white flash turns red behind the text.
-const vec3 UNDER_GLASS = vec3(0.6, 0.3, 0.3);
 const float CAMERA = 15.0; // the eye's height over the floor, in grid cells
 
 // Distance to four corner brackets around a rect pushed out by `gap`, each
@@ -356,10 +351,8 @@ vec4 backdrop(vec2 px) {
         light += red * 0.05 * step(px.y, reserved.x);
     }
 
-    // Bright light saturates toward white, as it does on film; behind the
-    // glass no channel goes past UNDER_GLASS, so secondary text keeps 4.5:1.
-    vec3 col = background + (1.0 - exp(-light * 1.3));
-    return vec4(mix(col, min(col, UNDER_GLASS), inside), 1.0);
+    // Bright light saturates toward white, as it does on film.
+    return vec4(background + (1.0 - exp(-light * 1.3)), 1.0);
 }
 
 // Each window's edge (specs/depth.md, part 2): a cockpit display's bezel. A
