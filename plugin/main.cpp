@@ -432,12 +432,9 @@ void main() {
         static const auto ours    = contractOf(CONTRACT);
         const auto        written = contractOf(shader);
         if (!shader.empty() && written != ours) {
-            const auto fix = written.empty() ? std::string("its backdrop.frag says no contract; update the theme") :
-                std::stoul(written) > std::stoul(ours)                                ? std::string("log in again to run the engine installed now, or update omarchy-cinema") :
-                                                                                        std::string("update the theme");
-            HyprlandAPI::addNotification(g->handle,
-                                         std::format("[backdrop] this theme is written for contract {}, and this engine draws contract {}: {}",
-                                                     written.empty() ? "?" : written, ours, fix),
+            const auto said = written.empty() ? std::string("does not say which contract it is written for") : std::format("is written for contract {}", written);
+            const auto fix  = !written.empty() && std::stoul(written) > std::stoul(ours) ? "log in again to run the engine installed now, or update omarchy-cinema" : "update the theme";
+            HyprlandAPI::addNotification(g->handle, std::format("[backdrop] this theme's backdrop.frag {}, and this engine draws contract {}: {}", said, ours, fix),
                                          CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
             shader.clear();
         }
