@@ -693,6 +693,23 @@ void main() {
 
     // The windows Hyprland draws on this monitor in this frame, and those
     // fading out after closing, where they are drawn; and where attention is.
+    // Whether Hyprland frosts all of window w as the half-resolution world was
+    // measured to be hidden by (specs/smoothness.md): its own Kawase blur
+    // (variant 0) at size 3 or more, two passes or more, at full strength
+    // (not proportional to the window's alpha, nor faded by its opacity, nor
+    // clipped to a region the client asked for), with the window and its blur
+    // fully present. Anything else sees the world at full resolution.
+    bool frosted(const PHLWINDOW& w, const Render::SWindowRenderPresentation& drawn) {
+        static auto VARIANT      = CConfigValue<Config::INTEGER>("decoration:blur:variant");
+        static auto SIZE         = CConfigValue<Config::INTEGER>("decoration:blur:size");
+        static auto PASSES       = CConfigValue<Config::INTEGER>("decoration:blur:passes");
+        static auto PROPORTIONAL = CConfigValue<Config::INTEGER>("decoration:blur:proportional");
+        static auto IGNORE_ALPHA = CConfigValue<Config::INTEGER>("decoration:blur:ignore_opacity");
+        const auto  surface      = w->wlSurface();
+        return *VARIANT == 0 && *SIZE >= 3 && *PASSES >= 2 && !*PROPORTIONAL && *IGNORE_ALPHA && drawn.fadeAlpha >= 1.F && w->shouldBlur(drawn) &&
+            !(surface && surface->m_hasBackgroundEffect);
+    }
+
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {
         const auto now = std::chrono::steady_clock::now();
         SScene     scene;
@@ -756,14 +773,9 @@ void main() {
                 addImpulse(position + monitor->m_position + size / 2.0, std::clamp(float(std::hypot(motion.velocity[0], motion.velocity[1]) / 3000.0), 0.25F, 1.F),
                            IMPULSE_LAND, w);
             const bool still = g->depth->value() == 0;
-            // The frost hides a half-resolution world at Hyprland's blur size
-            // 3 and up, two passes (specs/smoothness.md), and only while the
-            // whole window and its blur are present.
-            static auto BLUR_SIZE   = CConfigValue<Config::INTEGER>("decoration:blur:size");
-            static auto BLUR_PASSES = CConfigValue<Config::INTEGER>("decoration:blur:passes");
-            const bool  veiled      = g->veil && *BLUR_SIZE >= 3 && *BLUR_PASSES >= 2 && drawn.fadeAlpha >= 1.F && w->shouldBlur(drawn);
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(),
-                                    still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, veiled, w->metadata().stableID()});
+                                    still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, g->veil && frosted(w, drawn),
+                                    w->metadata().stableID()});
             if (pinned) {
                 stacking.push_back(1e9 + order);
                 continue;
@@ -1697,7 +1709,16 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         watch(monitor);
         settle();
     });
-    static auto REMOVED = Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR) { settle(); });
+    // A monitor that leaves takes its coarse world with it.
+    static auto REMOVED = Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) {
+        if (const auto coarse = g->gpu.coarse.find(monitor->m_id); coarse != g->gpu.coarse.end()) {
+            g_pHyprOpenGL->makeEGLCurrent();
+            glDeleteFramebuffers(1, &coarse->second.fbo);
+            glDeleteTextures(1, &coarse->second.texture);
+            g->gpu.coarse.erase(coarse);
+        }
+        settle();
+    });
 
     return {"backdrop", "Draws the current Omarchy theme's backdrop between the wallpaper and the windows.", "Sean", "0.2"};
 }

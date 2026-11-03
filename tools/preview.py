@@ -174,7 +174,8 @@ def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses
             target = ctx.fbo
             size = tuple((n + 1) // 2 for n in target.size)
             if coarse.get("size") != size:
-                coarse.update(size=size, texture=ctx.texture(size, 4))
+                # GL_RGB10_A2, the plugin's own
+                coarse.update(size=size, texture=ctx.texture(size, 4, internal_format=0x8059))
                 coarse["fb"] = ctx.framebuffer([coarse["texture"]])
             coarse["fb"].use()
             program["coarsePass"].value = 1
