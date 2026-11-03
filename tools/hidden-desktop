@@ -2,7 +2,7 @@
 # Runs a command on a Hyprland desktop that is never on screen: Sean's desktop
 # with this checkout installed, logged in inside a sandbox.
 #
-#   tools/hidden-desktop [--size WxH] [--scale S] [--theme SLUG] [--out DIR] <command> [args...]
+#   tools/hidden-desktop [--size WxH] [--scale S] [--theme SLUG] [--plugin SO] [--out DIR] <command> [args...]
 #
 # The sandbox has Sean's configuration (~/.config, ~/.local, ~/.cache) and
 # this checkout as copies whose changes are thrown away, and none of his other
@@ -14,7 +14,9 @@
 # command ends, every process it started ends with it.
 #
 # In it, this checkout's ./install runs, --theme SLUG is applied as Omarchy
-# applies a theme before any session runs, and Hyprland logs in with
+# applies a theme before any session runs (--plugin SO, a build of the plugin
+# under this checkout's plugin/build, is installed in place of the
+# checkout's own), and Hyprland logs in with
 # tools/hidden-desktop.lua on tools/frameclock, a compositor with no screen
 # that asks for each next frame. The command then runs against that Hyprland
 # (WAYLAND_DISPLAY and HYPRLAND_INSTANCE_SIGNATURE are its) on a private
@@ -36,8 +38,8 @@ if [[ ${1:-} == --inside ]]; then
   # The desktop's own output goes to the log; the command's goes where it was
   # going.
   exec >&3 2>&4 3>&- 4>&-
-  size=$2 theme=$3 out=$4
-  shift 4
+  size=$2 theme=$3 out=$4 plugin=$5
+  shift 5
   run=$XDG_RUNTIME_DIR
 
   # What a login finds: this checkout installed, and the theme applied the
@@ -47,6 +49,7 @@ if [[ ${1:-} == --inside ]]; then
     printf '%s\nhidden-desktop: ./install failed\n' "$said" >&2
     exit 1
   fi
+  [[ -n $plugin ]] && install -m 755 "$plugin" ~/.local/lib/omarchy-cinema/backdrop.so
   if [[ -n $theme ]]; then
     OMARCHY_THEME_HEADLESS=1 omarchy-theme-set "$theme"
     omarchy-theme-set-gnome
@@ -124,18 +127,19 @@ if [[ ${1:-} == --inside ]]; then
   exit
 fi
 
-size=2880x1800 scale=1.25 theme="" out=""
+size=2880x1800 scale=1.25 theme="" out="" plugin=""
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --size) size=$2 ;;
     --scale) scale=$2 ;;
     --theme) theme=$2 ;;
+    --plugin) plugin=$(realpath "$2") ;;
     --out) out=$(cd "$2" && pwd) ;;
     *) echo "hidden-desktop: unknown option $1" >&2; exit 2 ;;
   esac
   shift 2
 done
-(($#)) || { echo "usage: tools/hidden-desktop [--size WxH] [--scale S] [--theme SLUG] [--out DIR] <command> [args...]" >&2; exit 2; }
+(($#)) || { echo "usage: tools/hidden-desktop [--size WxH] [--scale S] [--theme SLUG] [--plugin SO] [--out DIR] <command> [args...]" >&2; exit 2; }
 
 build=$here/tools/build
 frameclock=$build/frameclock
@@ -185,5 +189,5 @@ cd "$here"
 # systemd-coredump, whose journal entry Omarchy's crash watcher turns into a
 # toast on Sean's screen, and a limit of one byte is the kernel's own "never
 # pipe this core".
-exec prlimit --core=1 bwrap "${sandbox[@]}" -- dbus-run-session -- "$here/tools/hidden-desktop" --inside "$size" "$theme" "$out" "$@" \
+exec prlimit --core=1 bwrap "${sandbox[@]}" -- dbus-run-session -- "$here/tools/hidden-desktop" --inside "$size" "$theme" "$out" "$plugin" "$@" \
   3>&1 4>&2 >"$log" 2>&1

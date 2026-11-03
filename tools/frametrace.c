@@ -4,8 +4,9 @@
 // in each frame can be read beside frameclock's commits (tools/smoothness).
 // The plugin itself is not changed: this watches the GL calls it makes.
 //
-// The backdrop's program is the one that has a `time` and a `windowData` but
-// no `frameWindow` (the frame's program has all three; Hyprland's have none).
+// The backdrop's program is the one with the plugin's vertex `area` (which
+// places every pixel, so no compiler drops it) and no `frameWindow` (only the
+// frame's program has that).
 
 #define _GNU_SOURCE
 #include <GLES3/gl32.h>
@@ -22,7 +23,7 @@
 static struct {
     GLuint program;
     GLint  time;
-    int    data, frame;
+    int    area, frame;
 } programs[PROGRAMS];
 static GLuint current;
 static int    out = -2;
@@ -41,8 +42,8 @@ GLint glGetUniformLocation(GLuint program, const GLchar* name) {
         programs[s] = (typeof(programs[s])){.program = program, .time = -1};
     if (!strcmp(name, "time"))
         programs[s].time = at;
-    else if (!strcmp(name, "windowData"))
-        programs[s].data = at >= 0;
+    else if (!strcmp(name, "area"))
+        programs[s].area = at >= 0;
     else if (!strcmp(name, "frameWindow"))
         programs[s].frame = at >= 0;
     return at;
@@ -61,7 +62,7 @@ void glUniform1f(GLint location, GLfloat value) {
     if (!next)
         next = dlsym(RTLD_NEXT, "glUniform1f");
     const int s = slot(current);
-    if (current && programs[s].program == current && programs[s].data && !programs[s].frame && location >= 0 && location == programs[s].time) {
+    if (current && programs[s].program == current && programs[s].area && !programs[s].frame && location >= 0 && location == programs[s].time) {
         if (out == -2) {
             const char* path = getenv("FRAMETRACE");
             out              = path ? open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644) : -1;
