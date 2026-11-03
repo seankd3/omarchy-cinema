@@ -38,8 +38,8 @@ const vec3 AGES[6] = vec3[](vec3(0.25, 0.72, 0.93), vec3(0.13, 0.66, 0.60), vec3
                             vec3(0.72, 0.64, 0.96), vec3(0.94, 0.74, 0.31), vec3(0.91, 0.32, 0.29));
 
 // Whether each block carries its file's name, and each directory its name
-// on the ground before it, as the film's do (Sean, 2026-10-29: "lets try lots
-// of stuff": backdrop-plain.frag is this landscape with no text).
+// on the ground before it, as the film's do; false draws the landscape with
+// no text (Sean, 2026-10-29: "lets try lots of stuff").
 const bool LABELS = true;
 const vec3 FILE_LABEL = vec3(0.97, 0.87, 0.95);
 const vec3 DIR_LABEL = vec3(0.66, 0.94, 0.90);
