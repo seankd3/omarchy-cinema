@@ -75,13 +75,9 @@ link() {
     exit 1
   fi
   ln -sfn "$1" "$2"
+  linked[$2]=1
 }
-
-# A film that left this checkout leaves its links behind, dangling: they go,
-# so Omarchy's theme list and GTK's icon themes show only films that exist.
-for old in ~/.config/omarchy/themes/* ~/.local/share/icons/*; do
-  [[ -L $old && ! -e $old && $(readlink "$old") == "$here/themes/"* ]] && rm "$old"
-done
+declare -A linked
 
 # Each theme's folder icons are an icon theme of their own. GTK finds it by
 # its directory name; the theme's icons.theme names it, and Omarchy sets it.
@@ -104,6 +100,13 @@ for theme in "$here"/themes/*/; do
   # Omarchy copies the theme on its own when it applies it.
   [[ -f $theme/voxtype-osd.toml ]] && install -m 644 "$here/osd/FilmOsd.qml" "$theme/FilmOsd.qml"
   link "$theme" ~/.config/omarchy/themes/"$(basename "$theme")"
+done
+
+# A link into themes/ that this run did not make is a film that left the
+# checkout or is no longer whole (its generated icons can outlive it): it
+# goes, so Omarchy's theme list and GTK's icon themes show only the films.
+for old in ~/.config/omarchy/themes/* ~/.local/share/icons/*; do
+  [[ -L $old && -z ${linked[$old]:-} && $(readlink "$old") == "$here/themes/"* ]] && rm "$old"
 done
 
 # GTK reads one stylesheet per user. It imports the applied theme's, which a
