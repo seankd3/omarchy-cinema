@@ -71,24 +71,24 @@ local function room()
   end
   return math.floor((short or 1440) * 64 / 1440 + 0.5)
 end
-local function space(gaps)
-  -- gaps_in is each window's side of the gap, so half of gaps_out makes the
-  -- space between windows match the screen's edge.
-  hl.config({ general = { gaps_out = gaps, gaps_in = gaps // 2 } })
-end
--- Hyprland loads its config before it knows its screens, so the room follows
--- them as they come and change, while the gaps are still film.lua's: the
--- user's config and the toggles load after it and win.
+-- Hyprland loads its config before it knows its screens, so when they come or
+-- change the room, the config loads again: the user's config and the toggles
+-- then still load after this and win. Omarchy saves a screen's settings before
+-- it applies them, so loading again keeps them.
 local gaps = room()
-space(gaps)
 hl.on("monitor.layout_changed", function()
-  if hl.get_config("general.gaps_out").top == gaps and room() ~= gaps then
-    gaps = room()
-    space(gaps)
+  if room() ~= gaps then
+    hl.dispatch(hl.dsp.reload_config())
   end
 end)
 
 hl.config({
+  general = {
+    -- gaps_in is each window's side of the gap, so half of gaps_out makes the
+    -- space between windows match the screen's edge.
+    gaps_out = gaps,
+    gaps_in = gaps // 2,
+  },
   -- The windows glow in the film's light.
   decoration = {
     shadow = { enabled = true, range = 22, render_power = 3, color = glow("40"), color_inactive = glow("10") },
