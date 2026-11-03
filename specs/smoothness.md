@@ -197,3 +197,39 @@ tools/smoothness at 1440x900, three rounds each, GPU a frame rendered: Jarvis
 
 CPU: Sean's Hyprland waited 0.04 ms a slice on average, so starvation is not
 a cause there; the hidden desktop's is its nice 19.
+
+## Frame budget (2026-11-03, films/frame-budget)
+
+**Sentence:** each frame draws the world once where it is seen and once,
+small, as the glass's frost, and Hyprland only composites.
+
+Sean, 12:25: hold 120 Hz at the GPU's 750 MHz, about 6 ms a frame at
+2880x1800. Measured with Sean at the machine, so at 1440x900 (a quarter of
+his pixels; full-size times below are four times these, which assumes the
+work is all per pixel) in the hidden desktop, three terminals, GPU timestamps
+between Hyprland's render stages (scratch, not shipped). Median ms a frame at
+rest, main against this:
+
+| film | backdrop | Hyprland's blur | windows | bar and top | whole frame |
+|---|---|---|---|---|---|
+| Jarvis | 1.16 / 0.91 | 0.96 / 0 | 0.80 / 0.53 | 1.61 / 0.51 | 4.64 / 1.98 |
+| Tron Legacy | 0.83 / 0.64 | 0.97 / 0 | 0.71 / 0.47 | 1.62 / 0.58 | 4.24 / 2.01 |
+| Oblivion | 1.18 / 1.11 | 0.96 / 0 | 0.87 / 0.72 | 1.77 / 0.63 | 4.90 / 2.58 |
+| The Matrix | 1.14 / 0.92 | 0.96 / 0 | 0.74 / 0.57 | 1.71 / 0.63 | 4.71 / 2.20 |
+| Evangelion | 1.24 / 1.16 | 0.96 / 0 | 0.83 / 0.68 | 1.61 / 0.28 | 4.76 / 2.59 |
+| Roadster | 1.09 / 1.01 | 0.96 / 0 | 0.77 / 0.60 | 1.71 / 0.72 | 4.64 / 2.40 |
+
+So at full size about 17 to 20 ms before (Sean measured 53 fps on Tron) and
+8 to 10 ms now. What it takes: Hyprland blurred the whole screen every frame
+the world moved, and blurred the bar again on its own: the bar's layer
+covers the whole screen. Now the backdrop draws the world at half size over
+the screen and blits its mipmap's level as soft as the film's frost into
+Hyprland's blur framebuffer, so Hyprland queues no blur; the bar reads the
+same frost (its layer rule's xray); inside a window that shows the world
+through the frost the full-size world is not drawn, since Hyprland's glass
+composites over all of it. Deleted: the veil (`behind_glass`), its two
+passes and its frost conditions. Blur off altogether came to 1.34 ms for Tron.
+
+After any config reload (a theme switch is one) Hyprland's blur in the same
+session cost about three times as much (Tron 4.24 to 11.0 ms, blur settings
+unchanged); with this the blur is not Hyprland's, so that does not apply.

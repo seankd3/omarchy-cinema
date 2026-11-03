@@ -108,6 +108,9 @@ hl.config({
   },
   render = { use_shader_blur_blend = true },
 })
+-- The bar frosts the world behind it from the same frost as the windows,
+-- the one the backdrop makes, not a blur of its own each frame.
+hl.layer_rule({ match = { namespace = "^omarchy-bar$" }, xray = true })
 
 -- A light frost: text on the glass is opaque, so nothing behind it competes,
 -- and the backdrop's lines should read through (Sean, 2026-10-28: "I don't

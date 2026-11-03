@@ -52,6 +52,8 @@
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/state/workspace/State.hpp>
 
+#include <hyprland/src/render/gl/GLFramebuffer.hpp>
+#include <hyprland/src/output/MonitorResources.hpp>
 #include <GLES3/gl32.h>
 #include <cairo/cairo.h>
 #include <fcntl.h>
@@ -236,13 +238,14 @@ void main() {
         GLuint id = 0;
         GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
         GLint  feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
-        GLint  pointer, impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder, coarse, coarsePass;
+        GLint  pointer, impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder;
     };
 
-    // A monitor's world behind veiled windows, drawn at half its size.
+    // A monitor's world at half its size, and its mipmap down to the level
+    // as soft as the film's frost (soft, a framebuffer on that level).
     struct SCoarse {
-        GLuint texture = 0, fbo = 0;
-        int    width = 0, height = 0;
+        GLuint texture = 0, fbo = 0, soft = 0;
+        int    width = 0, height = 0, levels = 0;
     };
 
     // What the film's programs draw with: the unit square and the textures,
@@ -267,9 +270,9 @@ void main() {
         uint64_t                                generation = 1;
         uint64_t                                compiled   = 0;
         bool                                    framed     = false; // the film's shader defines frame()
-        // The film's glass shows its world only as a veil (colors.toml's
-        // behind_glass = "veil"), so under frost it is drawn coarse.
-        bool                                    veil       = false;
+        // How far the glass blurs the world behind it (colors.toml's frost,
+        // as film.lua gives Hyprland's blur size; 3 without one).
+        float                                   frost      = 3.F;
         SGpu                                    gpu;
         // Frames a second of the backdrop's own motion, plugged in and on
         // battery; 0 is the display's own rate. Sean: "keep it native? or
@@ -456,17 +459,18 @@ void main() {
         g->framed         = std::regex_search(shader, FRAME);
 
         static const std::regex PALETTE(R"re(^\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})")re");
-        static const std::regex VEIL(R"re(^\s*behind_glass\s*=\s*"veil")re");
         static const std::regex GLASS(R"re(^\s*glass\s*=\s*"\s*([^"\s]*)\s*")re");
+        static const std::regex FROST(R"re(^\s*frost\s*=\s*"\s*([0-9.]+)\s*")re");
         std::istringstream      colors(readFile(dir + "/colors.toml"));
         g->backgrounds.clear();
-        g->veil  = false;
         g->glass = 0.85F;
+        g->frost = 3.F;
         for (std::string line; std::getline(colors, line);) {
-            g->veil = g->veil || std::regex_search(line, VEIL);
             std::smatch match;
             if (std::regex_search(line, match, GLASS))
                 g->glass = glassOf(match[1]);
+            if (std::regex_search(line, match, FROST))
+                g->frost = std::stof(match[1]);
             if (!std::regex_search(line, match, PALETTE))
                 continue;
             const auto name  = match[1].str();
@@ -518,6 +522,7 @@ void main() {
             if (texture)
                 glDeleteTextures(1, &texture);
         for (const auto& [id, coarse] : gpu.coarse) {
+            glDeleteFramebuffers(1, &coarse.soft);
             glDeleteFramebuffers(1, &coarse.fbo);
             glDeleteTextures(1, &coarse.texture);
         }
@@ -579,8 +584,6 @@ void main() {
         p.frameWindow   = at("frameWindow");
         p.frameAlpha    = at("frameAlpha");
         p.frameBorder   = at("frameBorder");
-        p.coarse        = at("coarse");
-        p.coarsePass    = at("coarsePass");
         return true;
     }
 
@@ -759,16 +762,13 @@ void main() {
     bool frosted(const PHLWINDOW& w, const Render::SWindowRenderPresentation& drawn) {
         static auto BLEND        = CConfigValue<Config::INTEGER>("render:use_shader_blur_blend");
         static auto VARIANT      = CConfigValue<Config::INTEGER>("decoration:blur:variant");
-        static auto SIZE         = CConfigValue<Config::INTEGER>("decoration:blur:size");
-        static auto PASSES       = CConfigValue<Config::INTEGER>("decoration:blur:passes");
         static auto PROPORTIONAL = CConfigValue<Config::INTEGER>("decoration:blur:proportional");
-        static auto CONTRAST     = CConfigValue<Config::FLOAT>("decoration:blur:contrast");
-        static auto BRIGHTNESS   = CConfigValue<Config::FLOAT>("decoration:blur:brightness");
+        static auto XRAY         = CConfigValue<Config::INTEGER>("decoration:blur:xray");
         const auto  surface      = w->wlSurface();
         const bool  whole        = surface && surface->resource() &&
             (surface->m_visibleRegion.empty() || CRegion(CBox{{}, surface->resource()->m_current.bufferSize}).subtract(surface->m_visibleRegion).empty());
-        return *BLEND && *VARIANT == 0 && *SIZE >= 3 && *PASSES >= 2 && !*PROPORTIONAL && *CONTRAST == 1.F && *BRIGHTNESS <= 1.F && w->shouldBlur(drawn) &&
-            !w->effects().hasActiveTransformers() && whole;
+        const bool  shared       = (!w->isFloating() && !w->onSpecialWorkspace()) || *XRAY;
+        return *BLEND && *VARIANT == 0 && !*PROPORTIONAL && shared && w->shouldBlur(drawn) && !w->effects().hasActiveTransformers() && whole;
     }
 
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {
@@ -835,7 +835,7 @@ void main() {
                            IMPULSE_LAND, w);
             const bool still = g->depth->value() == 0;
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(),
-                                    still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, g->veil && frosted(w, drawn),
+                                    still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F, frosted(w, drawn),
                                     w->metadata().stableID()});
             if (pinned) {
                 stacking.push_back(1e9 + order);
@@ -1183,11 +1183,18 @@ vec4 cinemaShade(vec3 rgb) {{
 // 4.5:1 on a whole level. Where that shade, drawn solid, is itself short of
 // 4.5:1, it goes as far as the shade: the glass never reads worse than the
 // theme drawn solid. Text drawn opaque has no frost to hold.
-vec4 cinemaHold(vec4 pix, vec4 frost, float k) {{
-    vec4  c     = pix + frost * k;
+#if USE_BLUR
+vec4 cinemaHold(vec4 pix, vec2 uv, float k) {{
+    if (k <= 0.0) return pix;
+    vec4  c     = pix + texture(blurredBG, uv) * k;
     float m     = cinemaLuminance(CINEMA_MUTED), side = sign(m - cinemaLuminance(CINEMA_BACKGROUND));
     float limit = side > 0.0 ? (m + 0.05) / 4.5 - 0.05 : 4.5 * (m + 0.05) - 0.05;
     vec3  shown = round(c.rgb * 255.0) / 255.0;
+    // A pixel with no frost in it, or every channel of it on the safe side of
+    // the grey that is exactly at the limit, is within it: most of the glass,
+    // and all of a layer's empty pixels, stop here.
+    float grey  = 1.055 * pow(max(limit, 0.0), 1.0 / 2.4) - 0.055;
+    if ((side > 0.0 ? max(max(shown.r, shown.g), shown.b) <= grey : min(min(shown.r, shown.g), shown.b) >= grey)) return c;
     float y     = cinemaLuminance(shown);
     if ((y - limit) * side <= 0.0) return c;
     vec4  own  = cinemaShade(pix.a > 0.0 ? pix.rgb / pix.a : CINEMA_BACKGROUND);
@@ -1197,6 +1204,7 @@ vec4 cinemaHold(vec4 pix, vec4 frost, float k) {{
     held       = mix(held * 12.92, 1.055 * pow(held, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, held)) * 255.0;
     return vec4((side > 0.0 ? floor(held) : ceil(held)) / 255.0, c.a);
 }}
+#endif
 vec4 cinemaGlass(vec4 c) {{
     // Nothing to judge where the app drew nothing.
     if (c.a <= 0.0) return c;
@@ -1221,7 +1229,7 @@ vec4 cinemaGlass(vec4 c) {{
         // The frost is held where Hyprland composites it, for the window's
         // pixel and, when it mirrors, the mirror's.
         static const std::regex COMPOSITE(R"((pixColor|mirrorColor) \+= (blurred\w+) \* (\w+);)");
-        source = std::regex_replace(source, COMPOSITE, "$1 = cinemaHold($1, $2, $3);");
+        source = std::regex_replace(source, COMPOSITE, "$1 = cinemaHold($1, blurUV, $3);");
         return source;
     }
 
@@ -1265,7 +1273,7 @@ vec4 cinemaGlass(vec4 c) {{
     // (logical px) placed by `proj` on `monitor`. The textures are on units
     // 4 to 7: the coarse world, the lettering, the feed and the windows.
     void setUniforms(const SProgram& p, const PHLMONITOR& monitor, const SScene& scene, const SAnswer& answer, const Mat3x3& proj, const CBox& area,
-                     std::chrono::steady_clock::time_point now, int coarsePass = 0) {
+                     std::chrono::steady_clock::time_point now) {
         const bool  lettered = !g->glyphPixels.empty();
         const float presence = feedPresence(now);
         glUseProgram(p.id);
@@ -1282,8 +1290,6 @@ vec4 cinemaGlass(vec4 c) {{
         glUniform1i(p.windowCount, scene.shapes.size());
         glUniform1i(p.focusedIndex, scene.focusedIndex);
         glUniform1f(p.focusAlpha, scene.focusAlpha);
-        glUniform1i(p.coarse, 4);
-        glUniform1i(p.coarsePass, coarsePass);
         glUniform1i(p.glyphsUniform, 5);
         glUniform1i(p.feedUniform, 6);
         glUniform1i(p.feedCount, lettered && presence > 0 && g->gpu.feedUploaded ? int(g->feedCount) : 0);
@@ -1343,24 +1349,49 @@ vec4 cinemaGlass(vec4 c) {{
 
     // Binds the film's textures, sets the program's state with `set` and
     // binds the square.
-    void prepare(GLuint coarse, const std::function<void()>& set) {
+    void prepare(const std::function<void()>& set) {
         auto& gpu = g->gpu;
         for (int unit = 0; unit < 4; unit++) {
             glActiveTexture(GL_TEXTURE4 + unit);
-            glBindTexture(GL_TEXTURE_2D, std::array{coarse, gpu.glyphs, gpu.feed, gpu.data}[unit]);
+            glBindTexture(GL_TEXTURE_2D, std::array{GLuint(0), gpu.glyphs, gpu.feed, gpu.data}[unit]);
         }
         set();
         glBindVertexArray(gpu.vao);
     }
 
     // Draws the square over each rect of `where`, a part of the damage.
-    void drawSquare(Render::CRenderContext& ctx, const CRegion& where, const std::function<void()>& set, GLuint coarse = 0) {
-        prepare(coarse, set);
+    void drawSquare(Render::CRenderContext& ctx, const CRegion& where, const std::function<void()>& set) {
+        prepare(set);
         where.forEachRect([&ctx](const auto& rect) {
             g_pHyprOpenGL->scissor(ctx, &rect, ctx.m_data.transformDamage);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         });
         g_pHyprOpenGL->disableScissor();
+    }
+
+    // The glass's frost: the coarse world softened through its mipmap into
+    // the framebuffer Hyprland's glass reads, so Hyprland need not blur the
+    // screen itself. `level` is the coarse world's level as soft as the
+    // film's frost.
+    void frost(PHLMONITOR monitor, const SCoarse& coarse) {
+        const auto resources = monitor->resources();
+        auto*      target    = resources ? dynamic_cast<Render::GL::CGLFramebuffer*>(resources->m_blurFB.get()) : nullptr;
+        if (!target || !target->isAllocated())
+            return;
+        GLint draw = 0, read = 0;
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+        if (coarse.levels > 1) {
+            glActiveTexture(GL_TEXTURE4);
+            glBindTexture(GL_TEXTURE_2D, coarse.texture);
+            glGenerateMipmap(GL_TEXTURE_2D);
+        }
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, coarse.soft);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target->getFBID());
+        glBlitFramebuffer(0, 0, std::max(coarse.width >> (coarse.levels - 1), 1), std::max(coarse.height >> (coarse.levels - 1), 1), 0, 0, target->m_size.x, target->m_size.y,
+                          GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
     }
 
     class CBackdropPass : public IPassElement {
@@ -1394,27 +1425,35 @@ vec4 cinemaGlass(vec4 c) {{
             }
             const auto now  = std::chrono::steady_clock::now();
             const auto proj = g_pHyprRenderer->projectBoxToTarget(ctx, CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y});
-            const auto set  = [&](int pass) {
-                return [&, pass] { setUniforms(gpu.backdrop, monitor, m_scene, m_answer, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}, now, pass); };
-            };
-            if (!std::ranges::any_of(m_scene.shapes, &SShape::veiled)) {
-                drawSquare(ctx, ctx.m_data.damage, set(0));
-                return {};
-            }
-            // The world behind the veiled windows, at half the monitor's
-            // size, on the same projection, so v_uv finds it again.
+            const auto set  = [&] { setUniforms(gpu.backdrop, monitor, m_scene, m_answer, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}, now); };
+            // The world at half the monitor's size over all of it, on the
+            // same projection, softened into the glass's frost (frost()).
             auto&     coarse = gpu.coarse[monitor->m_id];
             const int width = (monitor->m_transformedSize.x + 1) / 2, height = (monitor->m_transformedSize.y + 1) / 2;
-            if (coarse.width != width || coarse.height != height) {
-                if (!coarse.fbo) {
-                    glGenTextures(1, &coarse.texture);
-                    glGenFramebuffers(1, &coarse.fbo);
+            // As soft as the film's frost: Hyprland's blur of that size in
+            // two passes spreads a point over about twice its size, in the
+            // monitor's pixels, of which the coarse world has one in two.
+            const int levels = std::clamp(int(std::round(std::log2(std::max(2.0 * g->frost * monitor->m_scale, 1.0)))), 1, 6);
+            if (coarse.width != width || coarse.height != height || coarse.levels != levels) {
+                if (coarse.fbo) {
+                    glDeleteTextures(1, &coarse.texture);
+                    glDeleteFramebuffers(1, &coarse.fbo);
+                    glDeleteFramebuffers(1, &coarse.soft);
                 }
+                glGenTextures(1, &coarse.texture);
+                glGenFramebuffers(1, &coarse.fbo);
+                glGenFramebuffers(1, &coarse.soft);
                 glActiveTexture(GL_TEXTURE4);
                 glBindTexture(GL_TEXTURE_2D, coarse.texture);
-                upload(GL_RGB10_A2, width, height, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, nullptr, GL_LINEAR);
+                glTexStorage2D(GL_TEXTURE_2D, levels, GL_RGB10_A2, width, height);
+                GLint fb = 0;
+                glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fb);
+                glBindFramebuffer(GL_FRAMEBUFFER, coarse.soft);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.texture, levels - 1);
+                glBindFramebuffer(GL_FRAMEBUFFER, fb);
                 coarse.width  = width;
                 coarse.height = height;
+                coarse.levels = levels;
             }
             GLint draw = 0, read = 0;
             glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
@@ -1425,12 +1464,26 @@ vec4 cinemaGlass(vec4 c) {{
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.texture, 0);
             glViewport(0, 0, width, height);
             g_pHyprOpenGL->disableScissor();
-            prepare(0, set(1));
+            prepare(set);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
             glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-            drawSquare(ctx, ctx.m_data.damage, set(2), coarse.texture);
+            frost(monitor, coarse);
+            // At full size where the world is seen as it is: not inside a
+            // window whose glass shows it only through the frost, which
+            // Hyprland composites opaque over all of it; its rounded corners
+            // and the pixel round its edge are drawn.
+            CRegion seen = ctx.m_data.damage.copy();
+            for (const auto& shape : m_scene.shapes) {
+                if (!shape.veiled)
+                    continue;
+                CBox inside = CBox{shape.rect[0], shape.rect[1], shape.rect[2], shape.rect[3]}.expand(-shape.rounding - 2.0).scale(monitor->m_scale);
+                ctx.m_data.renderModif.applyToBox(inside);
+                const double left = std::ceil(inside.x), top = std::ceil(inside.y);
+                seen.subtract(CBox{left, top, std::max(std::floor(inside.x + inside.w) - left, 0.0), std::max(std::floor(inside.y + inside.h) - top, 0.0)});
+            }
+            drawSquare(ctx, seen, set);
             return {};
         }
 
@@ -1702,6 +1755,9 @@ vec4 cinemaGlass(vec4 c) {{
         auto& ctx = event.context->get();
         if (ctx.readOnlyEffects() || !program())
             return;
+        // The backdrop makes the glass's frost itself (frost()), so Hyprland's
+        // own blur of the screen is not queued after it.
+        event.monitor->m_blurFBDirty = false;
         auto& state    = g->monitors[event.monitor->m_id];
         state.drawn    = state.pending;
         state.answered = state.answer;
@@ -1822,6 +1878,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     static auto REMOVED = Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) {
         if (const auto coarse = g->gpu.coarse.find(monitor->m_id); coarse != g->gpu.coarse.end()) {
             g_pHyprOpenGL->makeEGLCurrent();
+            glDeleteFramebuffers(1, &coarse->second.soft);
             glDeleteFramebuffers(1, &coarse->second.fbo);
             glDeleteTextures(1, &coarse->second.texture);
             g->gpu.coarse.erase(coarse);

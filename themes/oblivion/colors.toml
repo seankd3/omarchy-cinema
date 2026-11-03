@@ -44,7 +44,3 @@ bright_magenta = "#875abc"
 # and film.lua keeps a light film's frost bright, so the glass never greys the
 # pane below the white the apps chose their dimmer text against.
 glass = "0.7"
-
-# Behind the glass the world shows only as a veil, so the plugin draws it
-# there at half resolution, which the frost hides (specs/smoothness.md).
-behind_glass = "veil"

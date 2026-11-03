@@ -75,15 +75,6 @@ def layout():
 OPEN, CLOSE, LAND, FOCUS, TYPE, VOICE = range(1, 7)
 
 
-def veiled(theme):
-    """Whether the film's glass shows its world only as a veil, and
-    film.lua's frost (Hyprland's blur size) hides a half-resolution world
-    behind it, as the plugin decides for a fully present, blurred window."""
-    text = (theme / "colors.toml").read_text()
-    frost = re.search(r'^frost\s*=\s*"([0-9.]+)"', text, re.M)
-    return re.search(r'^behind_glass\s*=\s*"veil"', text, re.M) is not None and float(frost[1] if frost else 3) >= 3
-
-
 def framed(theme):
     return re.search(r"\bvec4\s+frame\s*\(", (theme / "backdrop.frag").read_text()) is not None
 
@@ -133,12 +124,11 @@ def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses
         owners = [int(i[5]) for i in impulses] + [-1] * (32 - len(impulses))
         program["impulseWindows"].write(np.array(owners, dtype="i4").tobytes())
 
-    veil = frame is None and veiled(theme)
     data = np.zeros((max(3 * len(windows), 1), 4), dtype="f4")
     for i, rect in enumerate(windows):
         data[3 * i] = rect
         data[3 * i + 1] = (1.0, 0.0, 1.0 if i == focused else 0.0, float(len(windows) - 1 - i))
-        data[3 * i + 2] = (*(velocity[i] if velocity else (0.0, 0.0)), float(veil), 0.0)
+        data[3 * i + 2] = (*(velocity[i] if velocity else (0.0, 0.0)), 0.0, 0.0)
     window_data = ctx.texture((len(data), 1), 4, data.tobytes(), dtype="f4")
     window_data.filter = (moderngl.NEAREST, moderngl.NEAREST)
     textures = [window_data]
@@ -163,27 +153,9 @@ def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses
     quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
     vao = ctx.vertex_array(program, [(quad, "2f", "pos")])
 
-    # The plugin's draw (main-backdrop.glsl): with a veiled window, the world
-    # behind it first at half the target's size, then the whole target.
-    coarse = {}
-
     def draw():
         for unit, texture in enumerate(textures):
             texture.use(unit)
-        if veil and windows:
-            target = ctx.fbo
-            size = tuple((n + 1) // 2 for n in target.size)
-            if coarse.get("size") != size:
-                # GL_RGB10_A2, the plugin's own
-                coarse.update(size=size, texture=ctx.texture(size, 4, internal_format=0x8059))
-                coarse["fb"] = ctx.framebuffer([coarse["texture"]])
-            coarse["fb"].use()
-            program["coarsePass"].value = 1
-            vao.render(moderngl.TRIANGLE_STRIP)
-            target.use()
-            coarse["texture"].use(3)
-            program["coarse"].value = 3
-            program["coarsePass"].value = 2
         vao.render(moderngl.TRIANGLE_STRIP)
     return draw
 
