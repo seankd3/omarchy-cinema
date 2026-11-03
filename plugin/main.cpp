@@ -263,7 +263,7 @@ void main() {
         // without a frame.
         std::vector<CHyprSignalListener>        watches;
         std::string                             glassShader; // the surface shader in use, empty for Hyprland's own
-        wl_event_source*                        glassIdle = nullptr;
+        wl_event_source*                        settling = nullptr; // a settle() waiting for the loop
         bool                                    plugged = true;
         // Seconds of the backdrop's own motion, wrapping hourly, and when it
         // last moved on any monitor; none once it stood still everywhere.
@@ -316,7 +316,7 @@ void main() {
 
     UP<SState> g;
 
-    void applyGlass();
+    void settle();
 
     std::string themeDir() {
         const char* state = getenv("XDG_STATE_HOME");
@@ -409,15 +409,7 @@ void main() {
 
         readGlyphs(dir + "/glyphs.png");
         g->generation++;
-        // The glass waits for the rest of the config to load (plugin:backdrop:
-        // glass comes later in the theme), so it is applied from the loop.
-        if (!g->glassIdle)
-            g->glassIdle = wl_event_loop_add_idle(g_pCompositor->m_wlEventLoop, [](void*) {
-                if (!g)
-                    return;
-                g->glassIdle = nullptr;
-                applyGlass();
-            }, nullptr);
+        settle();
     }
 
     GLuint compileStage(GLenum stage, const std::string& source, std::string& log) {
@@ -1422,14 +1414,19 @@ vec4 cinemaGlass(vec4 c) {{
             g->moved = {};
     }
 
-    // After anything that may start or stop the world without a frame (a
-    // theme read or config change, a window going fullscreen, a monitor going
-    // to sleep): answers let go if the world no longer answers, so turning
-    // depth or animations off and on again brings nothing back, and the world
-    // starts where it moves and stands still where it does not.
-    void settle() {
+    // Once Hyprland has finished a change that may move the glass or start
+    // or stop the world (a theme read or config change, which sets
+    // plugin:backdrop:glass after the theme; a lock or a monitor leaving, both
+    // announced before Hyprland marks them; a window going fullscreen; a
+    // monitor coming, sleeping or waking): the glass the theme asks for;
+    // answers let go if the world no longer answers, so turning depth or
+    // animations off and on again brings nothing back; and the world started
+    // where it moves and standing still where it does not.
+    void settled(void*) {
         if (!g)
             return;
+        g->settling = nullptr;
+        applyGlass();
         if (!answering())
             letGo();
         if (!g->source.empty())
@@ -1437,6 +1434,11 @@ vec4 cinemaGlass(vec4 c) {{
                 if (moves(monitor))
                     ask(monitor);
         standStill();
+    }
+
+    void settle() {
+        if (g && !g->settling)
+            g->settling = wl_event_loop_add_idle(g_pCompositor->m_wlEventLoop, settled, nullptr);
     }
 
     int onDue(void* id) {
@@ -1586,15 +1588,15 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (!g)
             return;
         readTheme();
-        settle();
     });
     static auto REFRESHED = Event::bus()->m_events.config.props_refreshed.listen([](bool) { settle(); });
-    // Every way the world stops answering lets pending answers go when it
-    // happens, whether or not a frame is drawn then: a config change, the
-    // session locking, a window going fullscreen, a monitor going to sleep.
-    // Hyprland announces a lock before it marks the session locked, so the
-    // lock lets go at once instead of asking whether the world still answers.
-    static auto LOCKED     = g_pSessionLockManager->m_events.lock.listen([] { letGo(); });
+    // Every way the world starts or stops settles it, whether or not a frame
+    // is drawn then. A lock also lets the answers go at once, before Hyprland
+    // marks the session locked.
+    static auto LOCKED     = g_pSessionLockManager->m_events.lock.listen([] {
+        letGo();
+        settle();
+    });
     static auto FULLSCREEN = Event::bus()->m_events.window.fullscreen.listen([](PHLWINDOW) { settle(); });
     const auto  watch = [](const PHLMONITOR& monitor) {
         if (!g || !monitor)
@@ -1607,8 +1609,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     };
     for (const auto& monitor : State::monitorState()->monitors())
         watch(monitor);
-    static auto ADDED = Event::bus()->m_events.monitor.added.listen([watch](PHLMONITOR monitor) { watch(monitor); });
-    settle();
+    static auto ADDED   = Event::bus()->m_events.monitor.added.listen([watch](PHLMONITOR monitor) {
+        watch(monitor);
+        settle();
+    });
+    static auto REMOVED = Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR) { settle(); });
 
     return {"backdrop", "Draws the current Omarchy theme's backdrop between the wallpaper and the windows.", "Sean", "0.2"};
 }
@@ -1618,8 +1623,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
         if (state.due)
             wl_event_source_remove(state.due);
     closeFeed();
-    if (g->glassIdle)
-        wl_event_source_remove(g->glassIdle);
+    if (g->settling)
+        wl_event_source_remove(g->settling);
     if (!g->glassShader.empty())
         g_pHyprRenderer->reloadShaders("");
     g_pHyprRenderer->context().m_pass.removeAllOfType("CBackdropPass");

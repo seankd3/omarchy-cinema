@@ -27,14 +27,17 @@ before the one they are shown at. Time counts only while the world moves:
 when it moves on no monitor (animations off, locked, asleep, fullscreen),
 the clock forgets its last move, and the next moved frame starts from there.
 Nothing asks while it stands still, so the no-animations toggle stops all
-waking. Any frame shown, a config reload, a fullscreen change or a monitor's
-sleep and wake starts it again (`settle`).
+waking. Every event that may start or stop it (a theme read or config change,
+a lock, a window going fullscreen, a monitor coming, going, sleeping or
+waking) settles it once Hyprland has finished the change, from one idle
+callback that also applies the glass: Hyprland announces a lock and a
+monitor leaving before it marks them. Any frame shown starts it too.
 
 Deleted: the free-running timer, its rate arithmetic (fastest monitor, ms
 rounding), the 0.1 s clamp that stood in for pause accounting (and halved
 the speed at `fps = 5`), and the tick's own copy of "time stands still"
-(`answering` and the clock share `moves`; `settleAnswers` and the wake are
-one `settle`).
+(`answering` and the clock share `moves`), and the glass's own idle
+callback: `settleAnswers`, the wake and the glass are one `settle`.
 
 ## Measurement
 
@@ -76,7 +79,8 @@ the wait, read at Sean's 11 ms/s. At Sean's 2880x1800 the hidden Hyprland took
 4. A capped wait still took a frame off, so at `fps = 30` every vblank
    moved. Fixed: 30 rendered a second, 12.07 s of motion in 12.1 s.
 5. Review (Terra): per-monitor timers; the clock forgets its last move when
-   the world stops instead of clamping each step to 0.1 s. At `fps = 5`,
+   the world stops instead of clamping each step to 0.1 s; every stop,
+   lock and monitor removal included, settles from the loop. At `fps = 5`,
    main moves 6.0 s in 12.1 s, this 12.10 s. Animations off: both 0.000 s.
 6. Final, 8 rounds of main and 11 of this, fit against CPU wait:
 
