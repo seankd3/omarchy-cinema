@@ -270,9 +270,9 @@ vec2 edgeNormal(vec2 px, vec4 rect, float radius) {
 
 // The shadow window w casts on the world, `offset` away from its light and
 // `soft` wide, only outside the window itself, so the world seen through its
-// own glass stays lit: 1 in full shadow. It is exactly 0 inside the window
-// and further than `soft` from the shadow's rect, which is no nearer than
-// the window less the offset, and only the points between pay for it.
+// own glass stays lit: 1 in full shadow. It is exactly 0 from 2 px inside
+// the window in, and further than `soft` from the shadow's rect, which is no
+// nearer than the window less the offset; only the points between pay.
 float windowShadow(vec2 px, Window w, vec2 offset, float soft) {
     float edge = edgeDistance(w);
     if (edge <= -2.0 || edge - length(offset) >= soft) return 0.0;

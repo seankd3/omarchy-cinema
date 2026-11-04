@@ -479,15 +479,16 @@ knobs. A target is a ceiling; a film that meets one keeps climbing while its
 look holds. The target here: the whole frame while windows move at most 3 ms
 at 2880x1800, Hyprland's passes included.
 
-Where a film's draw goes while a window is dragged (offscreen, the
-storyboard's drag, 1440x900, the GPU shared with Sean's session, least
-contended of 15 to 25 rounds): the windows' answers are 38 to 60% of every
-film's draw (Jarvis 0.62 ms of 1.62 at rest, Tron 0.48 of 0.80, Evangelion
-0.84 of 1.61), a dragged window's wake 0.07 to 0.33 ms more. Inside them the
-cost is spread: no single part of Tron's window loop is over 0.1 ms, Jarvis's
-largest are its wake (21%), the shadows (13%) and its flat rings (12%), and
-Evangelion's its second meeting with the windows at each honeycomb cell
-(26%), its haze (15%) and its cells' swell (10%).
+Where a film's draw goes (films/pointer, scratch/batch6/abl.py: offscreen,
+tools/preview.py's storyboard, 1440x900, the GPU shared with Sean's session,
+least contended of 15 or 20 rounds; runs/abl-windows.txt, abl-parts.txt):
+the windows' answers at rest are 38 to 60% of every film's draw (Jarvis 0.63
+ms of 1.66, Tron 0.49 of 0.82, Evangelion 0.88 of 1.66), and a dragged
+window's wake adds 0.09 to 0.33 ms. Inside them the cost is spread: no part
+of Tron's window loop is over 0.1 ms; of Jarvis's drag, its wake is 19%, its
+flat rings 11% and the shadows 10%; of Evangelion's, its second meeting with
+the windows at each honeycomb cell 29%, its haze 13% and its cells' swell
+6%.
 
 Shape:
 - **The windows are a uniform block** (`Windows` in contract.glsl, three
@@ -496,16 +497,19 @@ Shape:
   buffer a frame in the backdrop pass and binds it for each of its draws; a
   scene holds the first 256 windows. Deleted: the window texture, its unit and
   DATA_WIDTH.
-- **A wake pays only where it reaches.** Each film's ghosts of a moving
-  window are drawn only outside the window and within a reach of where it
-  was over the last ghost's lag; past that, its light, bounded from the
-  film's own falloff and tone map, moves no point a twentieth of a display
-  level (a hundredth in Tron) per moving window, as each film's comment
-  shows.
+- **A wake pays only where it reaches** (Jarvis, Tron, the Matrix,
+  Evangelion). The ghosts of a moving window are drawn only outside the
+  window and within a reach of where it was over the last ghost's lag; past
+  that, their light, bounded from the film's own falloff and tone map, moves
+  no point a twentieth of a display level (a hundredth in Tron) per moving
+  window, as each film's comment shows. Oblivion's wake (0.09 ms) and
+  Roadster's speed lines, already drawn only behind the window, are as they
+  were.
 - **A shadow is drawn only where it is not 0.** contract.glsl's
-  windowShadow is exactly 0 inside the window and further than its softness
-  from the shadow's rect, which is no nearer than the window less the
-  offset; edgeDistance(w) gives the distance without the fade's push.
+  windowShadow (Jarvis, Oblivion, Roadster) is exactly 0 from 2 px inside
+  the window in and further than its softness from the shadow's rect, which
+  is no nearer than the window less the offset; edgeDistance(w) gives the
+  distance without the fade's push.
 
 Measured and not kept: keeping the nearest, focused and over windows in
 see() so a film need not meet them again after its loop (slower: the kept
@@ -515,8 +519,9 @@ frost's copy by resizing Hyprland's blur texture behind it (couples to
 Hyprland's internals).
 
 Look: scratch/batch6/same.py, the storyboard's four moments for every film,
-against films/pointer with the same SPEC.md as the rain's text: the worst
-pixel 0 levels of 255, Oblivion 1 at a few pixels.
+against films/pointer with the same SPEC.md as the rain's text
+(runs/same-final.txt): the worst pixel 0 levels of 255, Oblivion 1 at rest
+and landing, no pixel at 2 or more.
 
 The draw, ms (offscreen, 1440x900, 715 MHz, shared; scratch/batch6/runs/
 bench-final.txt), films/pointer against this:
@@ -532,8 +537,8 @@ bench-final.txt), films/pointer against this:
 
 In the hidden desktop at 1440x900, the focused window swapping left and
 back, interleaved (scratch/batch6/runs/m1, GPU shared with Sean's session,
-741 to 754 MHz), median ms a moving frame of the half-size and full-size
-world: Jarvis 1.47 / 1.17, Tron 0.92 / 0.71, Oblivion 1.25 / 1.13, the Matrix
+741 to 754 MHz), the half-size and the full-size world's median ms a moving
+frame, summed: Jarvis 1.47 / 1.17, Tron 0.92 / 0.71, Oblivion 1.25 / 1.13, the Matrix
 1.06 / 0.97, Roadster 1.21 / 1.18. Evangelion's pair was split by a reboot
 (its second run's window pass read 5.49 ms) and says nothing. Hyprland's
 window pass read 2.5 to 2.7 ms in every run, the shared GPU's inflation
@@ -543,6 +548,8 @@ the design point's.
 Not reached, as far as can be said before the full-size runs (they need Sean
 away; scratch/batch6/queue.sh holds them): batch 3's full-size frame was 4.05
 to 5.66 ms with windows still, of which Hyprland's passes and the frost were
-about 2.4 ms, so the films' share must fall to about 0.6 ms for 3 ms, and
-this takes 4 to 22% off it. What is left is spread over each film's look:
+about 2.4 ms, so the films' share must fall to about 0.6 ms for 3 ms. At
+1440x900 this takes 6 to 22% off the drag draw offscreen and 2 to 23% off
+the world's passes in the hidden desktop; at full size it is not yet
+measured. What is left is spread over each film's look:
 the parts named above are the places a taste change would pay most.
