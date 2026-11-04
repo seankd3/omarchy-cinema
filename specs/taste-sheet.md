@@ -44,20 +44,25 @@ data, Jarvis's glass 0.6) are in git history.
    can"; built in films/still-at-rest): the world's own motion runs on the
    desktop's clock. It moves while windows move, open, close, take focus or
    slide between workspaces, and eases to still about two seconds after;
-   a still desktop draws nothing, so at rest every film costs what a stock
-   theme does (1440x900: 0.2 to 0.7 GPU ms a second against 0.6, 1 frame a
-   second presented against 1; before, 83 to 114 ms and 43 to 50 frames).
-   The small parts hold still at rest too: Tron's light cycles and pulses,
-   the bar's markers, the drone's ring, the streaks, and the Matrix's rain
-   (its text changes only while the world moves). Keeping any of them alive
-   at rest would bring back batch 4's tiles (about 8k tokens of plugin and
-   a pace in every film) and frames presented all the time, and the rain,
-   which is everywhere, costs a moving frame every frame (batch 4: 113 ms a
-   second at 1440x900). Recommend: all of it still at rest, as built.
-8. The pointer's light (Jarvis, Tron, Oblivion, the Matrix, Roadster):
-   moving the mouse draws the whole world every frame, as moving a window
-   does (1.7 to 1.9 ms a frame at 1440x900, every frame the pointer moves),
-   where a stock theme draws nothing for it (a hardware cursor). Keep the
-   light, or let it go so the mouse costs nothing? Recommend letting it go:
-   it is faint (a few percent of light round the pointer) and the mouse
-   moves most of the day.
+   a still desktop draws nothing of its own. At 1440x900 at rest the films
+   presented 1.0 to 1.4 frames a second at 0.2 to 0.7 GPU ms a second
+   (Roadster 1.3 and 1.7, on a GPU then shared with your session), against
+   1.0 and 0.6 for a stock theme with the plugin idle and 2.0 frames with no
+   plugin; before, 43 to 50 frames and 83 to 114 ms. The small parts hold
+   still at rest too: Tron's light cycles and pulses, the bar's markers, the
+   drone's ring, the streaks, and the Matrix's rain (its text changes only
+   while the world moves). What keeping them alive cost before, measured:
+   batch 4's tiles (about 8k tokens of plugin and a pace in every film)
+   presented 43 to 50 frames a second at rest in every film, and the
+   Matrix's whole scene with the agents writing cost 88 to 113 GPU ms a
+   second. What one small part alone would cost is not measured.
+   Recommend: all of it still at rest, as built.
+8. The pointer: in every film, each mouse move draws the whole world again
+   (the plugin damages the monitor for the pointer's light), as moving a
+   window does: 1.65 ms a frame in the Matrix, 1.86 in Oblivion and 1.93 in
+   Evangelion at 1440x900, every frame the pointer moves. Five films light
+   the world round the pointer (Jarvis, Tron, Oblivion, the Matrix,
+   Roadster), faintly. Keep it, or let the light go with the redraw it
+   asks for, so moving the mouse draws only what a stock theme draws
+   (to be measured once built)? Recommend letting it go: the mouse moves
+   most of the day.
