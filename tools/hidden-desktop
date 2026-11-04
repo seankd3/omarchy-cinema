@@ -61,6 +61,7 @@ if [[ ${1:-} == --inside ]]; then
   # A login: Hyprland on frameclock with the user's config, D-Bus given its
   # environment, then Omarchy's shell.
   login() {
+    session=$(ps -e -o pid=)
     # Hyprland's instance directory (its sockets and hyprland.log) is a new
     # directory in --out, so this run's log is there however the desktop ends,
     # and a run before it in the same --out is never taken for this one.
@@ -118,9 +119,19 @@ if [[ ${1:-} == --inside ]]; then
     # is not a notice: its bar stays.
     hyprctl dismissnotify >/dev/null
   }
+  # A logout: Hyprland exits, and every process started since the login ends
+  # with it, as a real logout ends the session's.
   logout() {
     hyprctl dispatch 'hl.dsp.exit()' >/dev/null 2>&1 || true
     wait "$hyprland" || true
+    local p ended=()
+    for p in $(ps -e -o pid=); do
+      grep -qx "[[:space:]]*$p" <<<"$session" || { kill "$p" 2>/dev/null && ended+=("$p"); } || true
+    done
+    # A zombie has ended; its parent has yet to say so.
+    for p in "${ended[@]}"; do
+      while [[ -e /proc/$p && $(cut -d ' ' -f 3 "/proc/$p/stat" 2>/dev/null) != Z ]]; do sleep 0.1; done
+    done
     rm -f "$run/shell.pid"
     if [[ -L $run/hypr ]]; then rm "$run/hypr"; fi
   }

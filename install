@@ -157,8 +157,8 @@ fi
 
 # A link never replaces a real directory or file: the user's own theme of the
 # same name stays, and the install stops. A link it replaces that pointed
-# elsewhere (another clone's film) is recorded, and the uninstall puts it
-# back.
+# elsewhere (another clone's film, or one the user put there since) is
+# recorded, and comes back when the install's link goes.
 link() {
   if [[ -e $2 && ! -L $2 ]]; then
     echo "$2 exists and is not a link; move it aside first" >&2
@@ -168,7 +168,7 @@ link() {
   ln -sfn "$1" "$2"
   linked[$2]=1
 }
-declare -A linked swept
+declare -A linked
 
 # Each theme's folder icons are an icon theme of their own. GTK finds it by
 # its directory name; the theme's icons.theme names it, and Omarchy sets it.
@@ -199,11 +199,17 @@ fi
 # A link into themes/ that this run did not make is a film that left the
 # checkout or is no longer whole (its generated icons can outlive it), or,
 # for the uninstall, any film: it goes, so Omarchy's theme list and GTK's
-# icon themes show only the films.
+# icon themes show only the films, and the link it last replaced, if any,
+# comes back in its place.
+displaced() {
+  if [[ -f $state/record ]]; then
+    awk -F '\t' -v path="$1" '$1 == "link" && $2 == path { s = $3 } END { print s }' "$state/record"
+  fi
+}
 for old in ~/.config/omarchy/themes/* ~/.local/share/icons/*; do
   if [[ -L $old && -z ${linked[$old]:-} && $(readlink "$old") == "$here/themes/"* ]]; then
-    rm "$old"
-    swept[$old]=1
+    was=$(displaced "$old")
+    if [[ -n $was ]]; then ln -sfn "$was" "$old"; else rm "$old"; fi
   fi
 done
 
@@ -301,9 +307,9 @@ else
   "$here/browser/chrome-theme" || echo "browser/chrome-theme failed: Chrome keeps the look it has" >&2
 fi
 
-# The record undone, newest first: a line taken out as it went in, a link
-# put back where this run took the install's away, a file removed while it is as
-# the install wrote it, a directory once it is empty,
+# The record undone, newest first (its links came back above): a line taken
+# out as it went in, a file removed while it is as the install wrote it, a
+# directory once it is empty,
 # a setting put back while it is as the install set it (Voxtype's default
 # comes back as the default). A setting with no Voxtype to put it back stays
 # in the record for the next uninstall.
@@ -312,7 +318,6 @@ if [[ -n $remove && -f $state/record ]]; then
   while IFS=$'\t' read -r kind path was ours; do
     case $kind in
       line) [[ -f $path ]] && take_line "$path" "$was" ;;
-      link) [[ -n ${swept[$path]:-} ]] && ln -s "$was" "$path" ;;
       made)
         if [[ $was == dir ]]; then
           rmdir "$path" 2>/dev/null || [[ ! -e $path ]] || echo "kept $path: something else is in it" >&2
