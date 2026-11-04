@@ -1,4 +1,4 @@
-// omarchy-cinema contract 6
+// omarchy-cinema contract 7
 // Roadster: the 2026 Roadster's cockpit, drawn like a fighter jet's display.
 // A floor of red dots runs out to a thin white horizon and rushes toward the
 // viewer, with streaks of speed along it. A wireframe wedge turns slowly on
@@ -352,31 +352,6 @@ vec4 backdrop(vec2 px) {
 
     // Bright light saturates toward white, as it does on film.
     return vec4(background + (1.0 - exp(-light * 1.3)), 1.0);
-}
-
-// How often the cockpit changes on its own (contract.glsl, pace()). The
-// floor's dots come toward the viewer and dashes of speed race in along it;
-// the wedge turns; the marker sweeps the bar.
-float pace(vec2 px) {
-    float horizon = resolution.y * 0.42;
-    // The floor's dots are a few pixels wide and their rows crowd into a
-    // sheen toward the horizon: as they come, wherever a row is it needs
-    // every frame (tools/pace-check at full size), and they are everywhere
-    // on it, the dashes of speed with them.
-    if (px.y + PACE_REACH > horizon) return EVERY_FRAME;
-    float p = 0.0;
-    // The wedge's points turn at most 0.14 of its size a second.
-    float size = min(focused.z / 2.8, focused.w / 1.4);
-    vec2 at = vec2(focused.x + focused.z * 0.5, clamp(horizon + size * 0.5, focused.y + 0.7 * size, focused.y + focused.w - 0.7 * size));
-    vec2 reach = abs(px - at) - vec2(1.4, 0.7) * size;
-    if (size > 8.0 && max(reach.x, reach.y) < 24.0 + PACE_REACH) p = max(p, moving(0.14 * size));
-    if (reserved.x > 0.0) {
-        float edge = glowLine(max(abs(px.y - reserved.x) - PACE_REACH, 0.0), 1.1) * 3.3;
-        float span = resolution.x + 600.0;
-        float off = abs(px.x + 300.0 - cycle(8.0) * span);
-        p = max(p, passing(min(off, span - off), span / 8.0, 45.0, edge));
-    }
-    return p;
 }
 
 // Each window's edge (specs/depth.md, part 2): a cockpit display's bezel. A

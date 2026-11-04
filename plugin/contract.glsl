@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 6
+// omarchy-cinema contract 7
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -20,9 +20,17 @@
 // right, bottom, left): the bar's lower edge is at y = reserved.x, and a
 // backdrop can light it.
 //
-// `time` is seconds and wraps every hour, because Hyprland runs for weeks and
-// a float counting seconds that long loses the precision to animate smoothly.
-// So build motion from cycle(seconds) with a period that divides 3600 (1, 2, 3,
+// `time` is the world's own clock, in seconds, and it runs on the desktop's:
+// while windows move, open, close, take focus or slide between workspaces it
+// runs at the speed of the clock on the wall, and once they hold still it
+// eases to a stop in about two seconds, and starts again over a fraction of
+// one. So the
+// world's own motion, built on it, moves while the desktop does and holds
+// still while it does, when the plugin draws nothing at all. What happened
+// lately (below) has its own ages, on the wall's clock.
+// `time` wraps every hour, because Hyprland runs for weeks and a float
+// counting seconds that long loses the precision to animate smoothly. So
+// build motion from cycle(seconds) with a period that divides 3600 (1, 2, 3,
 // 4, 5, 6, 8, 9, 10, 12, 15, 16, 18, 20, 24, 30, 36, 40, 45, 48, 60, ...), and
 // the wrap never shows.
 
@@ -80,7 +88,9 @@ uniform float voice;
 // feedCount are real and the next goes at feedPos. When the agents stop, the
 // last text stays while feedPresence falls, and feedCount is 0 once it is gone.
 // The theme's glyphs.png is its lettering for them; without one, feedCount is
-// always 0. Read them through feedChar() and glyph().
+// always 0. Read them through feedChar() and glyph(). The text changes only
+// when the whole world is drawn again, so a world holding still holds the
+// text it shows.
 uniform sampler2D feed;
 uniform int feedCount;
 uniform int feedPos;
@@ -320,47 +330,6 @@ vec4 worldAt(vec2 px) {
     return textureLod(drawnWorld, at.xy * 0.5 + 0.5, 0.0);
 }
 
-// How often the world at px changes on its own, in frames a second
-// (specs/smoothness.md, "Cost follows change"): 0 where it holds still while
-// the desktop does, EVERY_FRAME where every frame shown must draw it. The
-// plugin draws each part of the screen only as often as its pace asks, so the
-// world costs where it moves and as fast as it moves; while a window, the
-// focus, the pointer, voice, the agents' text coming or going, or an answer
-// (above) changes, it draws all of it every frame. pace(px) speaks for every
-// point within PACE_REACH px of px, over the next PACE_AHEAD seconds: a part
-// that will start moving there within that time counts already. moving(v)
-// is the pace of a part moving v px a second, changing(f) of one whose light
-// changes by f of full scale a second: then no frame shows it more than half
-// a pixel, or two levels of 255, from where it is (tools/pace-check samples a
-// film for that at the ends of each tile's wait).
-const float EVERY_FRAME = 255.0;
-const float PACE_REACH = 32.0;
-const float PACE_AHEAD = 0.1;
-float moving(float pxPerSecond) {
-    return pxPerSecond * 2.0;
-}
-float changing(float perSecond) {
-    return perSecond * 127.5;
-}
-
-// The pace `d` px from the head of a glow that runs at `speed` px a second,
-// `strength` bright at its head and fading as exp(-d / soft): every frame at
-// its head, which counts as there from PACE_AHEAD before it comes, and as
-// fast as its light changes behind it. For a glow that fades on one side
-// only, `d` is the nearer of the way behind it and the way it still has to
-// come.
-float passing(float d, float speed, float soft, float strength) {
-    float from = d - PACE_REACH - speed * PACE_AHEAD;
-    return from <= 0.0 ? EVERY_FRAME : changing(strength * speed / soft * exp(-from / soft));
-}
-
-// Whether cycle(seconds) comes round within PACE_AHEAD: a sweep that jumps
-// back then takes its glow away from where it was at once, so the whole
-// glow needs every frame.
-bool wrapping(float seconds) {
-    return cycle(seconds) > 1.0 - PACE_AHEAD / seconds;
-}
-
 // What a film defines. backdrop(px): the colour of the world at px. And,
 // optionally, frame(px, i): window i's edge in that world (specs/depth.md,
 // part 2), a premultiplied colour over a band reaching 48 px outside the
@@ -371,6 +340,3 @@ bool wrapping(float seconds) {
 // border ring with the film's edge.
 vec4 backdrop(vec2 px);
 vec4 frame(vec2 px, int i);
-// And pace(px), above: how often the world and the frames at px change on
-// their own.
-float pace(vec2 px);

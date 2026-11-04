@@ -45,7 +45,6 @@ void main() {
 # The plugin links one of these after the film's shader (plugin/main-*.glsl).
 BACKDROP_MAIN = (ROOT / "plugin/main-backdrop.glsl").read_text()
 FRAME_MAIN = (ROOT / "plugin/main-frame.glsl").read_text()
-PACE_MAIN = (ROOT / "plugin/main-pace.glsl").read_text()
 
 
 def palette(theme):
@@ -80,17 +79,17 @@ def framed(theme):
     return re.search(r"\bvec4\s+frame\s*\(", (theme / "backdrop.frag").read_text()) is not None
 
 
-def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses=(), frame=None, voice=0.0, world=None, feed=True, main=None):
+def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses=(), frame=None, voice=0.0, world=None, feed=True):
     """The film's program in `ctx` with everything the plugin would give it,
     as a function that draws it over the bound framebuffer. velocity: (vx, vy)
     per window; pointer: (x, y, vx, vy); impulses: (x, y, age, strength, kind,
     window), newest last, window -1 for none. With `frame` set to a window's
     index, it draws that window's frame (premultiplied) instead of the
     backdrop, reading `world`, the backdrop drawn at half size, as the
-    plugin's frames do; with `main` (PACE_MAIN), that main instead. `feed`
-    False is a film that writes text with no agent running."""
+    plugin's frames do. `feed` False is a film that writes text with no agent
+    running."""
     contract = (ROOT / "plugin/contract.glsl").read_text().replace("#version 300 es", "#version 330 core")
-    source = contract + "\n#line 1\n" + (theme / "backdrop.frag").read_text() + (main or (BACKDROP_MAIN if frame is None else FRAME_MAIN))
+    source = contract + "\n#line 1\n" + (theme / "backdrop.frag").read_text() + (BACKDROP_MAIN if frame is None else FRAME_MAIN)
     program = ctx.program(vertex_shader=VERTEX, fragment_shader=source)
     if frame is not None:
         program["frameWindow"].value = frame

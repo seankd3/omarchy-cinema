@@ -393,3 +393,44 @@ Not reached: next to nothing at rest (the films' own motion, taste sheet
 before, Tron and Oblivion a little cheaper, and every pixel is drawn while
 windows move).
 Not yet measured: full size, 120 Hz and power, which need Sean away.
+
+## Still at rest (2026-11-04, films/still-at-rest, contract 7)
+
+**Sentence:** the world's own motion runs on the desktop's clock, so a still
+desktop draws nothing.
+
+Taste sheet 7, decided by the coordinator on Sean's words ("as lightweight as
+it can possibly be while still looking as good as it can"): at rest the big
+ambient motion holds still, and it moves while windows move and settles
+smoothly to still after them. Batch 4 found its question had no cheap answer:
+five films change all over the screen every frame, so a pace per tile drew
+most of it anyway (45 to 54 frames a second at rest in every film).
+
+Shape: `time` (contract.glsl) runs at a speed that eases toward 1 over
+0.15 s while the scene (the windows, the focus, the panels' room) changed in
+the last 0.05 s on some monitor, and toward 0 over 0.5 s after; below 0.005
+it stops, about 2.6 s after the last change, inside the 3 s an answer to that
+change lives anyway. Time is the exact integral of the speed, so it never
+jumps, whatever the frames between. Each frame reads it at render.pre with
+the scene and the answers (SAnswer), and any change of them draws the world
+whole, glass and frost included; a frame shown asks for the next while the
+world changed or the clock runs. Otherwise the half-size world and the frost
+are kept, a client's damage gets the full-size world drawn as it was, and
+nothing asks for a frame. The agents' text joins the world only when it is
+drawn whole, so a part drawn again at rest never shows newer text than the
+kept world round it.
+
+Deleted: pace() and its helpers (moving, changing, passing, wrapping,
+EVERY_FRAME, PACE_REACH, PACE_AHEAD) in the contract and each film's pace;
+main-pace.glsl; the tiles, their readback and slots, the due timer, the
+world's changed region and the frost's partial levels (its mipmap is
+generated whole, 0.21 against 0.24 ms at 1440x900); tools/pace-check; the
+`fps` and `battery_fps` caps and the power check, which only capped the
+world's motion at rest. Films draw exactly as at a90a212 for the same time
+(previews at 7.5 s identical, pixel for pixel).
+
+Found on the way: the pass-trace scenes of batches 3 and 4 swapped the focused
+window right while it was already rightmost, so their "moving" frames moved
+no window (Hyprland: "No window to swap with in that direction"); those
+numbers are the world's own motion with the windows still. The scene now
+swaps left and back.

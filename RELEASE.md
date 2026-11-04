@@ -40,9 +40,9 @@ already have.
      windows change (since specs/smoothness.md, nothing asks for frames).
    - *No gaps*, *Corners*: apply to the cinema spacing and rounding.
    - *Glassy bar*: the bar's glass.
-   Finer values are Hyprland keys (`plugin:backdrop:fps`, `battery_fps`, the
-   gaps): `film.lua` sets defaults, the user's `~/.config/hypr` and the
-   toggles load after it and win.
+   Finer values are Hyprland keys (`plugin:backdrop:depth`, the gaps):
+   `film.lua` sets defaults, the user's `~/.config/hypr` and the toggles load
+   after it and win.
 4. **Anyone can make one.** Copy a cinema theme directory (Omarchy's
    documented way to make a theme), change `colors.toml`, write one GLSL
    function `backdrop(px)` against `plugin/contract.glsl`. One command does the

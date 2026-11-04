@@ -1,5 +1,5 @@
 # Builds backdrop.so against the installed Hyprland, with the shader contract
-# and the three mains a film's shader is linked with compiled in, and installs
+# and the two mains a film's shader is linked with compiled in, and installs
 # the engine in ENGINE: the plugin and film.lua. The package installs it in
 # /usr/lib/omarchy-cinema, ./install in ~/.local/lib/omarchy-cinema.
 
@@ -10,7 +10,7 @@ CXXFLAGS = -std=c++23 -O2 -fPIC -fno-gnu-unique -I$(BUILD) $(shell pkg-config --
 LDLIBS   = $(shell pkg-config --libs $(DEPS)) -lrt
 VERSION := $(shell pkg-config --variable=prefix hyprland)/hyprland/src/version.h
 
-$(BUILD)/backdrop.so: main.cpp $(BUILD)/contract.inc $(BUILD)/main-backdrop.inc $(BUILD)/main-frame.inc $(BUILD)/main-pace.inc $(BUILD)/hyprland
+$(BUILD)/backdrop.so: main.cpp $(BUILD)/contract.inc $(BUILD)/main-backdrop.inc $(BUILD)/main-frame.inc $(BUILD)/hyprland
 	$(CXX) $(CXXFLAGS) -shared -o $@ main.cpp $(LDLIBS)
 
 # The plugin refuses to load into a Hyprland other than the one its headers
@@ -20,7 +20,7 @@ $(BUILD)/hyprland: FORCE
 	@mkdir -p $(BUILD)
 	@sha256sum $(VERSION) | cmp -s - $@ || sha256sum $(VERSION) > $@
 
-# The shader contract and the three mains a film's shader is linked with are
+# The shader contract and the two mains a film's shader is linked with are
 # compiled in, so a film and the uniforms the plugin sets always come from the
 # same build; tools/preview.py reads the same files. The film itself is the
 # applied theme's own backdrop.frag, read at every theme switch.

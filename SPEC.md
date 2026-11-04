@@ -47,19 +47,17 @@ very frame redraws the backdrop and the glass. Windows reach the shader as a
 float texture, so there is no window limit, and each pixel reads and measures
 each window once (contract.glsl's `window()`).
 
-**Cost follows change.** The film says, as data in its own shader, how often
-each part of its world changes on its own (contract.glsl, `pace()`): 0 where
-it holds still, a few times a second where it drifts, every frame where
-something runs past. Each frame shown reads that pace a tile of 32 px at a
-time and draws again only the tiles whose turn has come, at most every frame
-and on battery 30 a second (`plugin:backdrop:fps`, default 0 = the
-display's rate; `plugin:backdrop:battery_fps`, default 30; Sean: "keep it
-native? or atleast 30"); with no tile due nothing asks for a frame. The world
-at half size and the frost made from it are kept between frames and drawn
-again only where the world changed. While a window, the focus, the pointer, voice or an answer
-changes, the whole world is drawn every frame. Time stands still, and
-nothing asks for frames, with animations off, the session locked, or every
-monitor asleep or fullscreen (specs/smoothness.md, "Cost follows change").
+**Still at rest.** The world's own motion runs on a clock of the desktop's
+(contract.glsl, `time`): while windows move, open, close, take focus or slide
+between workspaces it runs at the wall clock's speed, and once they hold still
+it eases to a stop in about two seconds. A desktop holding still therefore
+draws nothing and asks for no frames: what clients redraw (a cursor, a clock)
+gets the world as it was, and the world at half size and the frost made from
+it are kept until the world changes. While a window, the focus, the pointer,
+voice, an answer or the agents' text coming or going changes, or the clock
+runs, the whole world is drawn every frame. Time stands still with
+animations off, the session locked, or every monitor asleep or fullscreen
+(specs/smoothness.md, "Still at rest").
 
 **Theme switch.** `omarchy-theme-set` swaps `current/theme` and reloads
 Hyprland. The plugin reads `backdrop.frag` and `colors.toml` from

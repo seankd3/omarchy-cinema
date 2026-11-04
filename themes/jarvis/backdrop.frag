@@ -1,4 +1,4 @@
-// omarchy-cinema contract 6
+// omarchy-cinema contract 7
 // Jarvis: a holographic globe in a gyroscope of rings, turning behind the
 // focused window and sized to it. It glows through the glass and past the
 // window's edges; light pools in the seams between windows and wakes the hex
@@ -59,35 +59,16 @@ float hexDots(vec2 px, float size) {
 
 // Dust: a mote in some cells of a grid that rises a cell every 10 seconds.
 // The pattern repeats every 24 cells, so the hourly wrap moves it by whole
-// repeats and never shows. A mote's place in its cell (xy, 0 to 1) and its
-// seed (z): a cell holds one only when that is 0.82 or more.
-vec3 mote(vec2 cell) {
-    vec2 id = vec2(cell.x, mod(cell.y, 24.0));
-    return vec3(vec2(hash(id + 7.1), hash(id + 3.7)) * 0.8 + 0.1, hash(id));
-}
-
-// Where the dust is at px: the grid's cells in 70 px, risen with time.
-vec2 dust(vec2 px) {
-    return px / 70.0 + vec2(0.0, cycle(240.0) * 24.0);
-}
-
+// repeats and never shows.
 float motes(vec2 px) {
-    vec2 p = dust(px);
-    vec3 m = mote(floor(p));
-    if (m.z < 0.82) return 0.0;
-    float twinkle = 0.5 + 0.5 * sin(TAU * (cycle(4.0) + m.z * 9.0));
-    return (1.0 - smoothstep(0.0, 0.06, length(fract(p) - m.xy))) * twinkle;
-}
-
-// `count` dashes round a ring at angle `a` and radius `r`, `duty` of each
-// lit and turning a whole dash every `period` seconds (`turn` as dashes()
-// takes it): the pace where their ends sweep past px, 0 where none does.
-float dashPace(float a, float r, float count, float duty, float turn, float period) {
-    float speed = TAU * r / (count * period);
-    float reach = (PACE_REACH + speed * PACE_AHEAD + 2.0) * count / (TAU * max(r, 1.0));
-    float f = fract(a / TAU * count + turn);
-    float from = min(abs(f - duty), min(f, 1.0 - f));
-    return from < reach ? moving(speed) : 0.0;
+    vec2 p = px / 70.0 + vec2(0.0, cycle(240.0) * 24.0);
+    vec2 cell = floor(p);
+    vec2 id = vec2(cell.x, mod(cell.y, 24.0));
+    float seed = hash(id);
+    if (seed < 0.82) return 0.0;
+    vec2 at = vec2(hash(id + 7.1), hash(id + 3.7)) * 0.8 + 0.1;
+    float twinkle = 0.5 + 0.5 * sin(TAU * (cycle(4.0) + seed * 9.0));
+    return (1.0 - smoothstep(0.0, 0.06, length(fract(p) - at))) * twinkle;
 }
 
 // The globe: latitude and longitude every 15 degrees on a sphere of radius
@@ -359,44 +340,6 @@ vec4 backdrop(vec2 px) {
 
     // Bright light saturates toward white, as it does on film.
     return vec4(base + (1.0 - exp(-light * 1.4)), 1.0);
-}
-
-// How often the workshop changes on its own (contract.glsl, pace()). The
-// globe turns and the gyroscope tumbles behind the focused window; the
-// flat rings' dashes turn round it; the light in the seams flows; each
-// mote twinkles as it rises; the amber marker sweeps the bar.
-float pace(vec2 px) {
-    vec2 c = focused.xy + focused.zw * 0.5;
-    float reach = length(focused.zw) * 0.5;
-    float Rg = reach * 0.45;
-    vec2 q = px - c;
-    float r = length(q);
-    if (r < Rg * 1.75 + PACE_REACH + 4.0) return EVERY_FRAME;
-    float a = atan(q.y, q.x);
-    float p = 0.0;
-    // The rings out past the window's edges, as backdrop() draws them (the
-    // swing is 0 at rest): only their dashes' ends move.
-    if (abs(r - reach * 1.04) < 30.0 + PACE_REACH) p = max(p, dashPace(a, r, 120.0, 0.45, -cycle(120.0), 120.0));
-    // Their ends are crisp, so they step a quarter pixel (twice moving()).
-    if (abs(r - reach * 1.12) < 130.0 + PACE_REACH) p = max(p, 2.0 * max(dashPace(a, r, 6.0, 0.06, cycle(24.0), 24.0), dashPace(a, r, 1.0, 0.05, -cycle(24.0), 24.0)));
-    // The seams' light flows about 0.8 of its strength a second.
-    float near = 0.0;
-    for (int i = 0; i < windowCount; i++) near += exp(-max(window(px, i).d - PACE_REACH, 0.0) / 110.0);
-    p = max(p, changing(0.8 * min(near, 1.0)));
-    // A mote twinkles every 4 s, about 0.6 of full light a second.
-    vec2 d = dust(px);
-    float span = (PACE_REACH + 7.0) / 70.0;
-    for (float y = floor(d.y - span); y <= d.y + span; y++)
-        for (float x = floor(d.x - span); x <= d.x + span; x++) {
-            vec3 m = mote(vec2(x, y));
-            if (m.z >= 0.82 && length(vec2(x, y) + m.xy - d) < span) p = max(p, changing(0.6));
-        }
-    if (reserved.x > 0.0) {
-        float edge = glowLine(max(abs(px.y - reserved.x) - PACE_REACH, 0.0), 2.0, HALO) * 1.3;
-        float off = abs(px.x - cycle(12.0) * resolution.x);
-        p = max(p, wrapping(12.0) && abs(px.y - reserved.x) < 40.0 + PACE_REACH ? EVERY_FRAME : passing(min(off, resolution.x - off), resolution.x / 12.0, 50.0, edge));
-    }
-    return p;
 }
 
 // Each window's edge (specs/depth.md, part 2): a holographic pane. Its outer

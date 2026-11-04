@@ -1,4 +1,4 @@
-// omarchy-cinema contract 6
+// omarchy-cinema contract 7
 // Tron Legacy: the Grid. A floor of light lines runs out to the horizon under
 // a black sky, and light cycles race along it, trailing light. Around every
 // window a circuit line is drawn, and pulses run along it; around the focused
@@ -222,36 +222,6 @@ vec4 backdrop(vec2 px) {
     }
 
     return vec4(col + (1.0 - exp(-light * 1.3)), 1.0);
-}
-
-// How often the Grid changes on its own (contract.glsl, pace()). The floor
-// glides toward the viewer, its light cycles riding it; two pulses run round
-// each window's circuit and two along the bar; the high cloud drifts a level
-// in seconds.
-float pace(vec2 px) {
-    float horizon = resolution.y * 0.40;
-    float p = changing(0.01);
-    // The floor's lines are a pixel or two wide and, toward the horizon,
-    // finer than a pixel: as they glide, wherever one is it needs every frame
-    // (tools/pace-check at full size), and they are everywhere on it.
-    if (px.y + PACE_REACH > horizon) return EVERY_FRAME;
-    for (int i = 0; i < windowCount; i++) {
-        Window w = window(px, i);
-        if (w.d < -PACE_REACH || w.d > 60.0 + PACE_REACH) continue;
-        float lap = 2.0 * (w.rect.z + w.rect.w);
-        float circuit = glowLine(max(abs(w.d - 7.0) - PACE_REACH, 0.0), 1.1, HALO);
-        for (int k = 0; k < 2; k++) {
-            float behind = fract(cycle(i == focusedIndex ? 4.0 : 8.0) - around(px, w.rect) + float(k) * 0.5) * lap;
-            p = max(p, passing(min(behind, lap - behind), lap / (i == focusedIndex ? 4.0 : 8.0), lap / 30.0, 3.9 * circuit));
-        }
-    }
-    if (reserved.x > 0.0) {
-        float edge = glowLine(max(abs(px.y - reserved.x) - PACE_REACH, 0.0), 1.2, HALO);
-        float w = resolution.x;
-        float one = fract(cycle(6.0) - px.x / w) * w, two = fract(px.x / w - cycle(10.0)) * w;
-        p = max(p, max(passing(min(one, w - one), w / 6.0, w / 25.0, 3.3 * edge), passing(min(two, w - two), w / 10.0, w / 25.0, 2.0 * edge)));
-    }
-    return p;
 }
 
 // Each window's edge (specs/depth.md, part 2): a slab of glass standing on the
