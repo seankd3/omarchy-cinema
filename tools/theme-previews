@@ -56,7 +56,7 @@ if [[ ${1:-} == --inside ]]; then
   # download (noice's message split): neither is the theme, and the notices
   # cover btop.
   omarchy-shell -q notifications dismissAll
-  nvim --server "$XDG_RUNTIME_DIR/cinema-nvim" --remote-send "<Cmd>lua for _, w in ipairs(vim.api.nvim_list_wins()) do if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == 'noice' then pcall(vim.api.nvim_win_close, w, true) end end<CR>" || true
+  nvim --server "$XDG_RUNTIME_DIR/cinema-nvim" --remote-send "<Cmd>lua for _, w in ipairs(vim.api.nvim_list_wins()) do if vim.api.nvim_win_is_valid(w) and vim.bo[vim.api.nvim_win_get_buf(w)].filetype == 'noice' then pcall(vim.api.nvim_win_close, w, true) end end<CR>" || true
   box=$(hyprctl -j clients | jq -r '.[] | select(.class == "org.gnome.Nautilus") | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')
   grim -g "$box" "$out/a.png"
   until sleep 1; grim -g "$box" "$out/b.png"; cmp -s "$out/a.png" "$out/b.png"; do mv "$out/b.png" "$out/a.png"; done
