@@ -312,12 +312,10 @@ void main() {
         wl_event_source*                        settling = nullptr; // a settle() waiting for the loop
         // The world's clock (advance()): seconds of its own motion, wrapping
         // hourly; the speed it runs at; when it last ran on (none once the
-        // world stood still everywhere); when the scene last changed; and
-        // whether the speed is rising, as the frame it last ran on found.
+        // world stood still everywhere); and when the scene last changed.
         float                                   time = 0;
         double                                  speed = 0;
         std::chrono::steady_clock::time_point   clocked, stirred;
-        bool                                    rising = false;
         std::unordered_map<MONITORID, SMonitor> monitors;
         std::unordered_map<uint64_t, SMotion>   motion; // each window's, by stable id
         std::deque<SImpulse>                    impulses;
@@ -1785,25 +1783,34 @@ vec4 cinemaGlass(vec4 c) {{
         if (std::ranges::none_of(State::monitorState()->monitors(), moves)) {
             g->clocked = {};
             g->speed   = 0;
-            g->rising  = false;
         }
     }
 
-    // The world's clock run on to `now` (contract.glsl, `time`): since it
-    // last ran, its speed eased toward 1 if it was rising and toward 0 if
-    // not, and time ran on at that speed, worked out exactly whatever the
-    // frames between. From here it rises while the scene changed on some
-    // monitor within STIR_HOLD; a speed fallen below STIR_STILL stops.
+    // The world's clock run on to `now` (contract.glsl, `time`): its speed
+    // eases toward 1 until STIR_HOLD after the scene last changed and
+    // toward 0 after that, and time runs on at that speed, worked out exactly
+    // from those moments alone, whatever frames came between. A change seen
+    // in this frame (`stirred`) starts the next rise; a speed fallen below
+    // STIR_STILL stops.
     void advance(bool stirred, std::chrono::steady_clock::time_point now) {
-        const double dt     = g->clocked == std::chrono::steady_clock::time_point{} ? 0.0 : std::chrono::duration<double>(now - g->clocked).count();
-        const double target = g->rising ? 1.0 : 0.0, ease = g->rising ? STIR_RISE : STIR_FALL, k = std::exp(-dt / ease);
-        g->time             = float(std::fmod(g->time + target * dt + (g->speed - target) * ease * (1.0 - k), 3600.0));
-        g->speed            = target + (g->speed - target) * k;
-        g->clocked          = now;
+        const auto run = [](double target, double ease, double dt) {
+            if (dt <= 0)
+                return;
+            const double k = std::exp(-dt / ease);
+            g->time        = float(std::fmod(g->time + target * dt + (g->speed - target) * ease * (1.0 - k), 3600.0));
+            g->speed       = target + (g->speed - target) * k;
+        };
+        const auto seconds = [](auto d) { return std::chrono::duration<double>(d).count(); };
+        if (g->clocked != std::chrono::steady_clock::time_point{}) {
+            const auto rose = g->stirred + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(STIR_HOLD));
+            const auto turn = std::clamp(rose, g->clocked, now);
+            run(1.0, STIR_RISE, seconds(turn - g->clocked));
+            run(0.0, STIR_FALL, seconds(now - turn));
+        }
+        g->clocked = now;
         if (stirred)
             g->stirred = now;
-        g->rising = std::chrono::duration<double>(now - g->stirred).count() < STIR_HOLD;
-        if (!g->rising && g->speed < STIR_STILL)
+        else if (g->speed < STIR_STILL && seconds(now - g->stirred) >= STIR_HOLD)
             g->speed = 0;
     }
 
