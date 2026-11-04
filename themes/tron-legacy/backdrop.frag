@@ -32,10 +32,10 @@ vec2 floorAt(vec2 px, float horizon) {
 
 // A light cycle in lane `lane` (cells from the middle), riding away from the
 // viewer and coming round again every `period` seconds, its trail fading
-// behind it.
-float lightCycle(vec2 world, float lane, float period, float phase) {
+// behind it; `stride` is how far the floor moves across a drawn pixel.
+float lightCycle(vec2 world, vec2 stride, float lane, float period, float phase) {
     float laneX = lane * CELL;
-    float across = abs(world.x - laneX) / max(fwidth(world.x), 1e-3);
+    float across = abs(world.x - laneX) / max(stride.x, 1e-3);
     float head = fract(cycle(period) + phase) * 1600.0 + 200.0 + cycle(16.0) * 8.0 * CELL;
     float behind = head - world.y;
     if (behind < 0.0) return 0.0;
@@ -110,11 +110,10 @@ vec4 backdrop(vec2 px) {
         see(seen, w);
         near += exp(-max(w.d, 0.0) / 90.0);
         vec4 r = w.rect;
+        vec2 foot = vec2(clamp(px.x, r.x, r.x + r.z), r.y + r.w);
+        vec2 to = foot - px;
+        pull += to * 0.18 * (1.0 - 0.7 * w.lift) * w.alpha * exp(-length(to * vec2(1.0, 2.4)) / 70.0);
         if (ground) {
-            vec2 foot = vec2(clamp(px.x, r.x, r.x + r.z), r.y + r.w);
-            vec2 to = foot - px;
-            float weight = (1.0 - 0.7 * w.lift) * w.alpha;
-            pull += to * 0.18 * weight * exp(-length(to * vec2(1.0, 2.4)) / 70.0);
             float reach = 36.0 + 70.0 * w.lift;
             float below = px.y - (r.y + r.w);
             if (below >= -2.0 && below <= reach * 2.0) {
@@ -138,12 +137,17 @@ vec4 backdrop(vec2 px) {
     float nearest = seen.nearest;
     int closest = seen.closest;
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
+    // The floor under every point, even above the horizon, so how far it
+    // moves across a drawn pixel is taken here, where every pixel of a quad
+    // takes it: a derivative in a branch that differs within a quad is
+    // undefined on some drivers.
+    vec2 world = floorAt(px + pull, horizon);
+    vec2 stride = fwidth(world);
     near = clamp(near, 0.0, 1.0);
 
     if (ground) {
-        vec2 world = floorAt(px + pull, horizon);
         vec2 cell = world / CELL;
-        vec2 aa = max(fwidth(cell), vec2(1e-4));
+        vec2 aa = max(stride / CELL, vec2(1e-4));
         vec2 lines = abs(fract(cell + 0.5) - 0.5) / aa;
         float grid = max(1.0 - smoothstep(0.0, 1.3, lines.x), 1.0 - smoothstep(0.0, 1.3, lines.y));
         float fade = exp(-world.y / 2600.0);
@@ -156,9 +160,9 @@ vec4 backdrop(vec2 px) {
         // The floor holds a little light of its own near the horizon.
         light += cyan * 0.05 * exp(-(px.y - horizon) / 90.0);
 
-        light += cyan * lightCycle(world, -3.0, 9.0, 0.0) * fade;
-        light += vec3(0.75, 0.97, 1.0) * lightCycle(world, 2.0, 12.0, 0.35) * fade;
-        light += ORANGE * lightCycle(world, 6.0, 15.0, 0.7) * fade;
+        light += cyan * lightCycle(world, stride, -3.0, 9.0, 0.0) * fade;
+        light += vec3(0.75, 0.97, 1.0) * lightCycle(world, stride, 2.0, 12.0, 0.35) * fade;
+        light += ORANGE * lightCycle(world, stride, 6.0, 15.0, 0.7) * fade;
     } else {
         // Black sky, a band of light along the horizon, faint high cloud.
         float above = horizon - px.y;

@@ -76,7 +76,13 @@ model is not enough; a judge through Hyprland's own blur is the next step.
    do not depend on the branch: Tron's cell size is a function of the screen
    point and can be computed; Oblivion's slope of its noise cannot, so it
    takes a second sample of the deck a pixel down, or the derivative moves
-   out of every branch.
+   out of every branch. Done: `films/derivatives`, the second way: each film
+   computes what it takes a derivative of for every point (Tron's pulled
+   floor, Oblivion's cloud tops, the sky included) and takes it before the
+   branch, so the derivative is the same one as before wherever it was
+   defined. Working them out by hand (tried first) repeated the films'
+   geometry and missed the flow turning round window corners (Terra). Frames
+   read worldAt() (contract 5), so no backdrop() runs in a branch.
 8. **Performance, measured not yet acted on.** Every film loops over the
    windows at every pixel, Evangelion and Oblivion twice; nine windows cost
    about three times what three do. Evangelion's second loop, at the

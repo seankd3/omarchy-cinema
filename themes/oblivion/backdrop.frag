@@ -127,9 +127,10 @@ vec3 sky(vec2 px, float horizon, vec2 sun) {
     return col;
 }
 
-// The cloud deck below the horizon; `lean` moves the viewer across it (in
-// the deck's own units), so near rows shift more than far ones.
-vec3 cloudDeck(vec2 px, float horizon, vec2 sun, float lean) {
+// The cloud deck's tops seen at px (x) and how far into the deck that is,
+// in noise tiles (y); `lean` moves the viewer across it (in the deck's own
+// units), so near rows shift more than far ones.
+vec2 deckTops(vec2 px, float horizon, float lean) {
     float dy = max(px.y - horizon, 0.5);
     float depth = 90.0 * resolution.y / dy;
     vec2 world = vec2((px.x - resolution.x * 0.5) * depth / resolution.y + lean, depth);
@@ -137,11 +138,14 @@ vec3 cloudDeck(vec2 px, float horizon, vec2 sun, float lean) {
     vec2 p = world * 0.011 + vec2(0.0, 16.0 * cycle(900.0));
     // Broad banks of heavier cloud with thin valleys between, for depth.
     float banks = smoothstep(0.15, 0.85, tiledNoise(p * 0.25 + 2.7, 4.0));
-    float d = clouds(p, 3) * mix(0.6, 1.15, banks);
-    // The sun is low beyond the deck, so each puff's far rim catches it: where
-    // the tops climb going down the screen. The slope comes free from the
-    // screen derivative, so no second noise lookup.
-    float slope = dFdy(d) / max(abs(dFdy(p.y)), 1e-4);
+    return vec2(clouds(p, 3) * mix(0.6, 1.15, banks), p.y);
+}
+
+// The cloud deck below the horizon, its tops `d` there and their `slope`
+// going down the screen.
+vec3 cloudDeck(vec2 px, float horizon, vec2 sun, float d, float slope) {
+    float dy = max(px.y - horizon, 0.5);
+    float depth = 90.0 * resolution.y / dy;
     float lit = clamp(slope * 0.6, 0.0, 1.0);
     float body = smoothstep(0.25, 0.75, d);
     vec3 col = mix(DEEP, SHADE, smoothstep(0.05, 0.35, d));
@@ -277,7 +281,14 @@ vec4 backdrop(vec2 px) {
     // A dragged pane pulls the deck after it, near rows more than far ones;
     // the sky and the sun stay put.
     float lean = focusedIndex < 0 ? 0.0 : window(px, focusedIndex).velocity.x * 0.012;
-    vec3 col = px.y < horizon ? sky(px, horizon, sun) : cloudDeck(px + flow, horizon, sun, lean);
+    // The deck's tops at every point, even in the sky, so their slope is
+    // taken here, where every pixel of a quad takes it (a derivative in a
+    // branch that differs within a quad is undefined on some drivers). The
+    // sun is low beyond the deck, so each puff's far rim catches it: where
+    // the tops climb going down the screen.
+    vec2 tops = deckTops(px + flow, horizon, lean);
+    float slope = dFdy(tops.x) / max(abs(dFdy(tops.y)), 1e-4);
+    vec3 col = px.y < horizon ? sky(px, horizon, sun) : cloudDeck(px + flow, horizon, sun, tops.x, slope);
     // The sun itself: a soft white disc in a wide warm bloom, hazy at dawn.
     float ds = length(px - sun);
     col = mix(col, SUN, 0.45 * exp(-ds / 380.0) + 0.5 * exp(-ds / 70.0));
