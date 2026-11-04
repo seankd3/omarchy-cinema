@@ -137,7 +137,7 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
     # on: its own backdrop.frag, as the plugin cuts it (main.cpp, readTheme()).
     glyphs_png = theme / "glyphs.png"
     count = 0
-    if glyphs_png.exists() and "glyphs" in program:
+    if glyphs_png.exists():
         atlas = Image.open(glyphs_png).convert("RGBA").getchannel("A")
         glyphs = ctx.texture(atlas.size, 1, atlas.tobytes())
         glyphs.filter = (moderngl.LINEAR, moderngl.LINEAR)

@@ -191,10 +191,12 @@ void main() {
     };
 
     // What the world shows besides the windows: what it answers (specs/depth.md,
-    // part 3) and its own clock. A change here draws it again, glass and all.
+    // part 3), whose text it reads and its own clock. A change here draws it
+    // again, glass and all, whether or not its clock may run.
     struct SAnswer {
         uint64_t             impulses = 0; // the impulse ring's generation
         float                voice    = 0; // speech loudness, 0 to 1
+        bool                 agents   = false; // the agents' text, not the theme's own
         float                time     = 0; // the world's clock (contract.glsl, `time`)
         bool                 operator==(const SAnswer&) const = default;
     };
@@ -987,10 +989,10 @@ void main() {
         std::erase_if(g->motion, [&](const auto& entry) { return now - entry.second.seen > std::chrono::seconds(10); });
         if (!answering()) {
             letGo();
-            return {g->impulseGeneration, 0.F, g->time};
+            return {g->impulseGeneration, 0.F, g->agents, g->time};
         }
         const float voice = now - g->voiceReceived <= VOICE_STALE ? g->voice : 0.F;
-        return {g->impulseGeneration, voice, g->time};
+        return {g->impulseGeneration, voice, g->agents, g->time};
     }
 
     bool covered(PHLMONITOR monitor) {
@@ -1083,8 +1085,6 @@ void main() {
         g->voiceReceived = std::chrono::steady_clock::now();
     }
 
-    void wake();
-
     // Puts `count` characters in the text read (the next going at `pos`),
     // counted as a change only when it is one.
     void setText(const uint8_t* ring, uint32_t count, uint32_t pos) {
@@ -1104,10 +1104,11 @@ void main() {
 
     // What the feed says now, as the world hears it: voice until it is
     // VOICE_STALE old, and the agents' text until the feed is FEED_STALE
-    // quiet, the theme's own words once it is. When that changes the world
-    // is drawn again, though the desktop holds still, so voice answers and
-    // the agents' text goes from the screen at once; the timer waits for
-    // the next of them to run out.
+    // quiet, the theme's own words once it is. When that changes every
+    // monitor is asked for a frame, though the desktop holds still, and draws
+    // its world again (onPre(), the answer changed), so voice answers and the
+    // agents' text goes from the screen at once, animations or not; the
+    // timer waits for the next of them to run out.
     void heard() {
         const auto now   = std::chrono::steady_clock::now();
         const bool voice = g->voice > 0 && now - g->voiceReceived <= VOICE_STALE;
@@ -1115,7 +1116,8 @@ void main() {
             ownWords();
         const std::pair<float, bool> heard{voice ? g->voice : 0.F, g->agents};
         if (heard != g->heard)
-            wake();
+            for (const auto& monitor : State::monitorState()->monitors())
+                g_pHyprRenderer->damageMonitor(monitor);
         g->heard  = heard;
         auto ends = std::chrono::steady_clock::time_point::max();
         if (voice)
