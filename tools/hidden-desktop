@@ -6,15 +6,16 @@
 #
 # The sandbox has Sean's configuration (~/.config, ~/.local, ~/.cache) and
 # this checkout as copies whose changes are thrown away, and none of his other
-# files. With --fresh it has a new Omarchy user's instead: /etc/skel with
-# Omarchy's first theme applied, as its installer leaves a new user, and
-# copies of its ~/.config and ~/.local from before and after ./install in
-# $XDG_RUNTIME_DIR/fresh/{before,installed} for the command to compare with. It has no route to his session: its own runtime directory (no
-# compositor, Hyprland socket or session bus of his), nothing of /run (no
-# system bus, so no logind and no power), no network, and the GPU's render
-# nodes as its only hardware (NVIDIA's are /dev/nvidia0 and nvidiactl too,
-# never nvidia-modeset, its display engine), and no core dumps. When the
-# command ends, every process it started ends with it.
+# files. With --fresh it has a new Omarchy user's instead: /etc/skel as
+# Omarchy's installer provisions it, logged in once for Omarchy's first-run
+# setup and out again, and copies of its ~/.config and ~/.local from before
+# and after ./install in $XDG_RUNTIME_DIR/fresh/{before,installed} for the
+# command to compare with. It has no route to his session: its own runtime
+# directory (no compositor, Hyprland socket or session bus of his), nothing
+# of /run (no system bus, so no logind and no power), no network, and the
+# GPU's render nodes as its only hardware (NVIDIA's are /dev/nvidia0 and
+# nvidiactl too, never nvidia-modeset, its display engine), and no core
+# dumps. When the command ends, every process it started ends with it.
 #
 # In it, this checkout's ./install runs, --theme SLUG is applied as Omarchy
 # applies a theme before any session runs (--plugin SO, a build of the plugin
@@ -45,9 +46,91 @@ if [[ ${1:-} == --inside ]]; then
   shift 6
   run=$XDG_RUNTIME_DIR
 
+  # With --out, frames.log has each frame shown and the backdrop's time in
+  # it: frameclock's vblanks and commits, and frametrace's reading of the
+  # time the plugin draws with.
+  frames=() trace=()
+  if [[ -n $out ]]; then
+    : >"$out/frames.log"
+    frames=("$out/frames.log")
+    trace=(LD_PRELOAD="$here/tools/build/frametrace.so" FRAMETRACE="$out/frames.log")
+  fi
+  "$here/tools/build/frameclock" frameclock "$size" "${frames[@]}" &
+  frameclock=$!
+  while [[ ! -S $run/frameclock ]] && kill -0 "$frameclock" 2>/dev/null; do sleep 0.1; done
+  # A login: Hyprland on frameclock with the user's config, D-Bus given its
+  # environment, then Omarchy's shell.
+  login() {
+    # Hyprland's instance directory (its sockets and hyprland.log) is a new
+    # directory in --out, so this run's log is there however the desktop ends,
+    # and a run before it in the same --out is never taken for this one.
+    [[ -n $out ]] && ln -s "$(mktemp -d "$out/hypr.XXXXXX")" "$run/hypr"
+    env "${trace[@]}" WAYLAND_DISPLAY=frameclock Hyprland -c "$here/tools/hidden-desktop.lua" >"$run/hyprland.out" 2>&1 &
+    hyprland=$!
+
+    # Hyprland's socket comes first; its screen, once frameclock has sized it.
+    ready() {
+      HYPRLAND_INSTANCE_SIGNATURE=$(ls "$run/hypr" 2>/dev/null | head -1 || true)
+      export HYPRLAND_INSTANCE_SIGNATURE
+      hyprctl -j monitors 2>/dev/null | jq -e 'any(.name == "WAYLAND-1" and .width > 0)' >/dev/null 2>&1
+    }
+    until ready; do
+      if ! kill -0 "$hyprland" 2>/dev/null; then
+        echo "hidden-desktop: Hyprland did not start" >&2
+        cat "$run/hyprland.out" >&2
+        exit 1
+      fi
+      sleep 0.1
+    done
+    WAYLAND_DISPLAY=$(cd "$run" && ls wayland-* | grep -v '\.lock$' | head -1)
+    export WAYLAND_DISPLAY
+    # Services D-Bus starts (portals, Files' helpers) belong to this desktop,
+    # as Omarchy's first command at login makes them belong to the session. The
+    # update runs in Hyprland, with its environment, and hyprctl returns once
+    # it has finished (io.popen, as Omarchy's helpers read a command).
+    # Its exit status comes back on a line of its own, ahead of what it said.
+    activated=$(hyprctl repl 'local p = io.popen([[said=$(dbus-update-activation-environment --all 2>&1); echo "$?"; printf "%s" "$said"]]); local r = p:read("a"); p:close(); return r' || true)
+    if [[ ${activated%%$'\n'*} != 0 ]]; then
+      echo "hidden-desktop: D-Bus did not take the desktop's environment: ${activated#*$'\n'}" >&2
+      exit 1
+    fi
+    # Then the shell, as omarchy-launch-shell starts it without the journal
+    # the sandbox does not have. It is what first asks D-Bus for the portals,
+    # and a portal started before the update cannot open the desktop and stays
+    # down: Files then draws in GTK's defaults.
+    hyprctl eval 'hl.exec_cmd([[echo $$ >"$XDG_RUNTIME_DIR/shell.pid"; exec env OMARCHY_STARTUP_BACKGROUND=$(readlink -f ~/.local/state/omarchy/current/background) QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 quickshell -n -p "$OMARCHY_PATH/shell"]])' >/dev/null
+    # The desktop is the command's once the bar is up. A hidden bar stays
+    # mapped (parked past the screen's edge), and a top bar maps within two
+    # seconds whatever the screen.
+    bar() {
+      hyprctl -j layers 2>/dev/null | jq -e 'any(.. | objects; .namespace? == "omarchy-bar")' >/dev/null
+    }
+    until bar; do
+      shell=$(cat "$run/shell.pid" 2>/dev/null || true)
+      if ! kill -0 "$hyprland" 2>/dev/null || { [[ -n $shell ]] && ! kill -0 "$shell" 2>/dev/null; }; then
+        echo "hidden-desktop: the shell ended before its bar was up" >&2
+        exit 1
+      fi
+      sleep 0.1
+    done
+    # Hyprland's notices about how it was launched (no start-hyprland, options
+    # Omarchy's config still uses) are not part of the desktop. A config error
+    # is not a notice: its bar stays.
+    hyprctl dismissnotify >/dev/null
+  }
+  logout() {
+    hyprctl dispatch 'hl.dsp.exit()' >/dev/null 2>&1 || true
+    wait "$hyprland" || true
+    rm -f "$run/shell.pid"
+    if [[ -L $run/hypr ]]; then rm "$run/hypr"; fi
+  }
+
   if [[ -n $fresh ]]; then
     cp -rT /etc/skel ~
-    OMARCHY_SETUP_CONTEXT=iso-chroot bash "$OMARCHY_PATH/install/user/theme.sh" >/dev/null
+    OMARCHY_SETUP_CONTEXT=iso-chroot omarchy-provision-user --first-install >/dev/null 2>&1 || true
+    login
+    omarchy-provision-first-run >/dev/null 2>&1 || true
+    logout
     mkdir -p "$run/fresh/before" && cp -a ~/.config ~/.local "$run/fresh/before/"
   fi
 
@@ -64,75 +147,7 @@ if [[ ${1:-} == --inside ]]; then
     OMARCHY_THEME_HEADLESS=1 omarchy-theme-set "$theme"
     omarchy-theme-set-gnome
   fi
-
-  # With --out, frames.log has each frame shown and the backdrop's time in
-  # it: frameclock's vblanks and commits, and frametrace's reading of the
-  # time the plugin draws with.
-  frames=() trace=()
-  if [[ -n $out ]]; then
-    : >"$out/frames.log"
-    frames=("$out/frames.log")
-    trace=(LD_PRELOAD="$here/tools/build/frametrace.so" FRAMETRACE="$out/frames.log")
-  fi
-  "$here/tools/build/frameclock" frameclock "$size" "${frames[@]}" &
-  frameclock=$!
-  while [[ ! -S $run/frameclock ]] && kill -0 "$frameclock" 2>/dev/null; do sleep 0.1; done
-  # Hyprland's instance directory (its sockets and hyprland.log) is a new
-  # directory in --out, so this run's log is there however the desktop ends,
-  # and a run before it in the same --out is never taken for this one.
-  [[ -n $out ]] && ln -s "$(mktemp -d "$out/hypr.XXXXXX")" "$run/hypr"
-  env "${trace[@]}" WAYLAND_DISPLAY=frameclock Hyprland -c "$here/tools/hidden-desktop.lua" >"$run/hyprland.out" 2>&1 &
-  hyprland=$!
-
-  # Hyprland's socket comes first; its screen, once frameclock has sized it.
-  ready() {
-    HYPRLAND_INSTANCE_SIGNATURE=$(ls "$run/hypr" 2>/dev/null | head -1 || true)
-    export HYPRLAND_INSTANCE_SIGNATURE
-    hyprctl -j monitors 2>/dev/null | jq -e 'any(.name == "WAYLAND-1" and .width > 0)' >/dev/null 2>&1
-  }
-  until ready; do
-    if ! kill -0 "$hyprland" 2>/dev/null; then
-      echo "hidden-desktop: Hyprland did not start" >&2
-      cat "$run/hyprland.out" >&2
-      exit 1
-    fi
-    sleep 0.1
-  done
-  WAYLAND_DISPLAY=$(cd "$run" && ls wayland-* | grep -v '\.lock$' | head -1)
-  export WAYLAND_DISPLAY
-  # Services D-Bus starts (portals, Files' helpers) belong to this desktop,
-  # as Omarchy's first command at login makes them belong to the session. The
-  # update runs in Hyprland, with its environment, and hyprctl returns once
-  # it has finished (io.popen, as Omarchy's helpers read a command).
-  # Its exit status comes back on a line of its own, ahead of what it said.
-  activated=$(hyprctl repl 'local p = io.popen([[said=$(dbus-update-activation-environment --all 2>&1); echo "$?"; printf "%s" "$said"]]); local r = p:read("a"); p:close(); return r' || true)
-  if [[ ${activated%%$'\n'*} != 0 ]]; then
-    echo "hidden-desktop: D-Bus did not take the desktop's environment: ${activated#*$'\n'}" >&2
-    exit 1
-  fi
-  # Then the shell, as omarchy-launch-shell starts it without the journal
-  # the sandbox does not have. It is what first asks D-Bus for the portals,
-  # and a portal started before the update cannot open the desktop and stays
-  # down: Files then draws in GTK's defaults.
-  hyprctl eval 'hl.exec_cmd([[echo $$ >"$XDG_RUNTIME_DIR/shell.pid"; exec env OMARCHY_STARTUP_BACKGROUND=$(readlink -f ~/.local/state/omarchy/current/background) QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 quickshell -n -p "$OMARCHY_PATH/shell"]])' >/dev/null
-  # The desktop is the command's once the bar is up. A hidden bar stays
-  # mapped (parked past the screen's edge), and a top bar maps within two
-  # seconds whatever the screen.
-  bar() {
-    hyprctl -j layers 2>/dev/null | jq -e 'any(.. | objects; .namespace? == "omarchy-bar")' >/dev/null
-  }
-  until bar; do
-    shell=$(cat "$run/shell.pid" 2>/dev/null || true)
-    if ! kill -0 "$hyprland" 2>/dev/null || { [[ -n $shell ]] && ! kill -0 "$shell" 2>/dev/null; }; then
-      echo "hidden-desktop: the shell ended before its bar was up" >&2
-      exit 1
-    fi
-    sleep 0.1
-  done
-  # Hyprland's notices about how it was launched (no start-hyprland, options
-  # Omarchy's config still uses) are not part of the desktop. A config error
-  # is not a notice: its bar stays.
-  hyprctl dismissnotify >/dev/null
+  login
   "$@"
   exit
 fi

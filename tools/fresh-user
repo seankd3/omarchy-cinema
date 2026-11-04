@@ -1,7 +1,7 @@
 #!/bin/bash
 # A new Omarchy user's first run, from empty (RELEASE.md, "Release gate"), in
-# a desktop that is never on screen (tools/hidden-desktop --fresh): the
-# install, a login whose own config loads the engine with no config errors, a
+# a desktop that is never on screen (tools/hidden-desktop --fresh: a first
+# login done, as for a user who installs later): the install, a login whose own config loads the engine with no config errors, a
 # film applied in the session and drawing, Omarchy's first theme again, an
 # uninstall refused while Hyprland runs, and one after logging out. Then
 # every path in ~/.config and ~/.local that the install changed is as it was
@@ -20,6 +20,7 @@ if [[ ${1:-} == --inside ]]; then
   film=$2 out=$3
   fail() { echo "fresh-user: $*; logs in $out" >&2; exit 1; }
   clean() { [[ -z $(hyprctl configerrors | tr -d '[:space:]') ]] || fail "config errors: $(hyprctl configerrors)"; }
+  [[ -s ~/.local/state/omarchy/first-run.log ]] || fail "Omarchy's first-run setup did not run at the first login"
   hyprctl plugin list | grep -q '^Plugin backdrop ' || fail "the engine did not load at login"
   clean
   # The backdrop's draws, as frametrace logs each one's time.
@@ -61,5 +62,5 @@ film=${1:-jarvis}
 [[ -f $here/themes/$film/backdrop.frag ]] || { echo "fresh-user: $film is not a film theme" >&2; exit 2; }
 out=$(mktemp -d)
 # The desktop is small: this tests the paths, not the look.
-timeout 120 "$here/tools/hidden-desktop" --fresh --size 1280x800 --scale 1 --out "$out" "$here/tools/fresh-user" --inside "$film" "$out"
+timeout 180 "$here/tools/hidden-desktop" --fresh --size 1280x800 --scale 1 --out "$out" "$here/tools/fresh-user" --inside "$film" "$out"
 rm -rf "$out"

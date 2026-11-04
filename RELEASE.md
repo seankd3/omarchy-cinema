@@ -163,7 +163,8 @@ Held (films/release): the README (install, the toggles, uninstall,
 authoring, the fan-homage note and where every image comes from; MIT);
 `./install --uninstall`, which takes away only what the install added and
 puts back the Voxtype settings it changed; `tools/fresh-user`, a new Omarchy
-user from /etc/skel in a hidden desktop: install, a login whose own config
+user from /etc/skel, logged in once for Omarchy's first-run setup, in a
+hidden desktop: install, a login whose own config
 loads the engine with zero config errors, a film applied and drawing,
 Omarchy's first theme again, an uninstall refused in the session and run
 after logging out, and every path the install changed back as it was.
@@ -180,3 +181,5 @@ Open:
   `omarchy-cinema` command; popups on Voxtype's `style = "theme"` once a
   release has it.
 - The repo made public, then the Omarchy Discussion.
+- Sean's install predates the uninstall's record: `--uninstall` there
+  leaves its two config lines and the two templates, to take out by hand.
