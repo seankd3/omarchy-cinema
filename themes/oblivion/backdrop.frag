@@ -281,17 +281,23 @@ vec4 backdrop(vec2 px) {
     // A dragged pane pulls the deck after it, near rows more than far ones;
     // the sky and the sun stay put.
     float lean = focusedIndex < 0 ? 0.0 : window(px, focusedIndex).velocity.x * 0.012;
-    // The deck's tops at every point, even in the sky, so their slope is
-    // taken here, where every pixel of a quad takes it (a derivative in a
-    // branch that differs within a quad is undefined on some drivers). The
-    // sun is low beyond the deck, so each puff's far rim catches it: where
-    // the tops climb going down the screen. Down the screen, not the target:
-    // the drawn pixel's own steps in px turn its derivatives into px's, so a
-    // rotated monitor or the preview's flipped target lights the same rim.
-    vec2 tops = deckTops(px + flow, horizon, lean);
+    // The sun is low beyond the deck, so each puff's far rim catches it: where
+    // its tops climb going down the screen. Their slope is a derivative, which
+    // is undefined on some drivers unless every pixel of a 2x2 quad takes it,
+    // so the deck is worked out from a quad's height above the horizon down,
+    // and below the horizon every quad takes it whole. Down the screen, not
+    // the target: the drawn pixel's own steps in px turn the derivatives into
+    // px's, so a rotated monitor or the preview's flipped target lights the
+    // same rim.
     mat2 toScreen = inverse(mat2(dFdx(px), dFdy(px)));
-    vec2 climb = vec2(dFdx(tops.x), dFdy(tops.x)) * toScreen, away = vec2(dFdx(tops.y), dFdy(tops.y)) * toScreen;
-    float slope = climb.y / max(abs(away.y), 1e-4);
+    float quad = abs(dFdx(px).y) + abs(dFdy(px).y); // how far down the screen a quad reaches
+    vec2 tops = vec2(0.0);
+    float slope = 0.0;
+    if (px.y > horizon - quad) {
+        tops = deckTops(px + flow, horizon, lean);
+        vec2 climb = vec2(dFdx(tops.x), dFdy(tops.x)) * toScreen, away = vec2(dFdx(tops.y), dFdy(tops.y)) * toScreen;
+        slope = climb.y / max(abs(away.y), 1e-4);
+    }
     vec3 col = px.y < horizon ? sky(px, horizon, sun) : cloudDeck(px + flow, horizon, sun, tops.x, slope);
     // The sun itself: a soft white disc in a wide warm bloom, hazy at dawn.
     float ds = length(px - sun);

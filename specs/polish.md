@@ -87,6 +87,8 @@ model is not enough; a judge through Hyprland's own blur is the next step.
    not along the target's y: Hyprland's target runs y down the screen (the
    desktop is unchanged, identical in its orientation), the preview's ran it
    up and lit the opposite rims, and a rotated monitor would light the side.
+   The deck is worked out from one quad's height above the horizon down, not
+   under the whole sky: that cost Oblivion 0.72 ms a frame (5.33 to 6.05).
 8. **Performance, measured not yet acted on.** Every film loops over the
    windows at every pixel, Evangelion and Oblivion twice; nine windows cost
    about three times what three do. Evangelion's second loop, at the
