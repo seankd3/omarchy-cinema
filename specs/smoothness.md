@@ -434,3 +434,32 @@ window right while it was already rightmost, so their "moving" frames moved
 no window (Hyprland: "No window to swap with in that direction"); those
 numbers are the world's own motion with the windows still. The scene now
 swaps left and back.
+
+Measured at 1440x900 in the hidden desktop (Sean at the machine), its 60 Hz,
+three terminals, GPU at 754 to 760 MHz: 6 s at rest once the clock has
+stopped (8 s after the windows open), then the focused window swapping left
+and back for 3 s; a90a212 against this, interleaved (scratch/batch5/runs/q2).
+Frames presented a second and GPU busy ms a second at rest, whole frame ms
+moving (median):
+
+| | rest, frames/s | rest, GPU ms/s | moving, ms a frame |
+|---|---|---|---|
+| stock (Tokyo Night), no plugin | 2.0 | | |
+| stock, plugin idle | 1.0 | 0.6 | 2.62 |
+| Jarvis | 43.4 / 1.1 | 91.4 / 0.4 | 2.43 / 2.38 |
+| Tron Legacy | 45.7 / 1.4 | 82.7 / 0.7 | 1.89 / 1.84 |
+| Oblivion | 43.8 / 1.0 | 90.5 / 0.3 | 2.19 / 2.15 |
+| The Matrix (agents writing) | 45.2 / 1.0 | 88.5 / 0.2 | 1.90 / 1.92 |
+| Evangelion | 50.2 / 1.0 | 114.0 / 0.2 | 2.32 / 2.28 |
+| Roadster | 43.9 / 1.3 | 97.2 / 1.7 | shared, see below |
+
+At rest every film now presents what a stock theme does (btop's own redraw
+every 2 s, the cursor's blink) and the backdrop draws only what those
+clients damage. Moving costs what it did, a little less (the frost's whole
+mipmap). A stock theme's moving frame costs more than any film's here: its
+bar is a live blur (1.82 ms), where a film's reads the backdrop's frost.
+From 10:24 the GPU was shared with Sean's session (Hyprland's window pass
+took 2.4 to 2.7 ms in every film, 0.38 before), so Roadster's runs, which
+came after it, say nothing about its moving frame. Full size, 120 Hz and
+power need Sean away.
+

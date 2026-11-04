@@ -39,17 +39,25 @@ data, Jarvis's glass 0.6) are in git history.
    blur cost 0.8 ms every frame. A notification over a window now shows the
    film's frost through its card, not the window under it. Recommend keeping.
    Stills: scratch/batch3/taste/notify-{before,after}.png.
-7. The films' own motion at rest (films/batch-4): it now costs only where
-   and as often as it changes, but in five films it changes nearly
-   everywhere: Tron's and Roadster's floors glide toward you over the lower
-   screen, Jarvis's globe and rings turn round the focused window,
-   Evangelion's rings spread across the whole screen, and the Matrix's rain
-   falls while agents write. So at rest they cost 60 to 85% of what they
-   did (Oblivion 67%, its cloud deck drifting), against a stock theme's
-   near nothing. For next to nothing at rest, the big motions would hold
-   still while nothing on the desktop moves and run while a window moves,
-   and the small parts keep running (light cycles, pulses, streaks, the
-   drone's ring, the bar's markers). Recommend: yes for the floors, the
-   rings and the globe; Oblivion's deck steps 4 times a second instead of
-   30; the Matrix's rain stays, since it shows agents working. Not built
-   yet, so no stills: this decides batch 5.
+7. The films' own motion at rest (coordinator, 2026-11-04, on your "as
+   lightweight as it can possibly be while still looking as good as it
+   can"; built in films/still-at-rest): the world's own motion runs on the
+   desktop's clock. It moves while windows move, open, close, take focus or
+   slide between workspaces, and eases to still about two seconds after;
+   a still desktop draws nothing, so at rest every film costs what a stock
+   theme does (1440x900: 0.2 to 0.7 GPU ms a second against 0.6, 1 frame a
+   second presented against 1; before, 83 to 114 ms and 43 to 50 frames).
+   The small parts hold still at rest too: Tron's light cycles and pulses,
+   the bar's markers, the drone's ring, the streaks, and the Matrix's rain
+   (its text changes only while the world moves). Keeping any of them alive
+   at rest would bring back batch 4's tiles (about 8k tokens of plugin and
+   a pace in every film) and frames presented all the time, and the rain,
+   which is everywhere, costs a moving frame every frame (batch 4: 113 ms a
+   second at 1440x900). Recommend: all of it still at rest, as built.
+8. The pointer's light (Jarvis, Tron, Oblivion, the Matrix, Roadster):
+   moving the mouse draws the whole world every frame, as moving a window
+   does (1.7 to 1.9 ms a frame at 1440x900, every frame the pointer moves),
+   where a stock theme draws nothing for it (a hardware cursor). Keep the
+   light, or let it go so the mouse costs nothing? Recommend letting it go:
+   it is faint (a few percent of light round the pointer) and the mouse
+   moves most of the day.
