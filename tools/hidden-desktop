@@ -58,10 +58,25 @@ if [[ ${1:-} == --inside ]]; then
   "$here/tools/build/frameclock" frameclock "$size" "${frames[@]}" &
   frameclock=$!
   while [[ ! -S $run/frameclock ]] && kill -0 "$frameclock" 2>/dev/null; do sleep 0.1; done
+  # The processes alive at a login's start, and those alive since then and not
+  # yet ended (in `left`), read from /proc with builtins only, so the reading
+  # starts no process of its own.
+  declare -A session
+  since() {
+    local d stat
+    left=()
+    for d in /proc/[0-9]*; do
+      [[ -n ${session[${d#/proc/}]:-} ]] && continue
+      read -r stat 2>/dev/null <"$d/stat" || continue
+      [[ ${stat##*) } == Z* ]] || left+=("${d#/proc/}")
+    done
+  }
   # A login: Hyprland on frameclock with the user's config, D-Bus given its
   # environment, then Omarchy's shell.
   login() {
-    session=$(ps -e -o pid=)
+    local d
+    session=()
+    for d in /proc/[0-9]*; do session[${d#/proc/}]=1; done
     # Hyprland's instance directory (its sockets and hyprland.log) is a new
     # directory in --out, so this run's log is there however the desktop ends,
     # and a run before it in the same --out is never taken for this one.
@@ -120,17 +135,17 @@ if [[ ${1:-} == --inside ]]; then
     hyprctl dismissnotify >/dev/null
   }
   # A logout: Hyprland exits, and every process started since the login ends
-  # with it, as a real logout ends the session's.
+  # with it, as a real logout ends the session's: asked to, then, past five
+  # seconds, made to, again until none is left, since one may start another
+  # as it ends.
   logout() {
     hyprctl dispatch 'hl.dsp.exit()' >/dev/null 2>&1 || true
     wait "$hyprland" || true
-    local p ended=()
-    for p in $(ps -e -o pid=); do
-      grep -qx "[[:space:]]*$p" <<<"$session" || { kill "$p" 2>/dev/null && ended+=("$p"); } || true
-    done
-    # A zombie has ended; its parent has yet to say so.
-    for p in "${ended[@]}"; do
-      while [[ -e /proc/$p && $(cut -d ' ' -f 3 "/proc/$p/stat" 2>/dev/null) != Z ]]; do sleep 0.1; done
+    local signal=TERM start=$SECONDS left
+    while since; ((${#left[@]})); do
+      ((SECONDS - start < 5)) || signal=KILL
+      kill -s "$signal" "${left[@]}" 2>/dev/null || true
+      sleep 0.1
     done
     rm -f "$run/shell.pid"
     if [[ -L $run/hypr ]]; then rm "$run/hypr"; fi

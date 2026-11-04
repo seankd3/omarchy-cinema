@@ -156,15 +156,15 @@ fi
 [[ -n $remove && $other == /usr/lib/omarchy-cinema/ ]] && rm -rf ~/.local/lib/omarchy-cinema
 
 # A link never replaces a real directory or file: the user's own theme of the
-# same name stays, and the install stops. A link it replaces that pointed
-# elsewhere (another clone's film, or one the user put there since) is
-# recorded, and comes back when the install's link goes.
+# same name stays, and the install stops. Each time its link takes a path,
+# what was there (nothing, or a link elsewhere: another clone's film, one the
+# user put there since) is recorded, and comes back when that link goes.
 link() {
   if [[ -e $2 && ! -L $2 ]]; then
     echo "$2 exists and is not a link; move it aside first" >&2
     exit 1
   fi
-  [[ -L $2 && $(readlink "$2") != "$here/themes/"* ]] && record "link	$2	$(readlink "$2")"
+  [[ -L $2 && $(readlink "$2") == "$here/themes/"* ]] || record "link	$2	$(readlink "$2" 2>/dev/null || true)"
   ln -sfn "$1" "$2"
   linked[$2]=1
 }
@@ -199,8 +199,8 @@ fi
 # A link into themes/ that this run did not make is a film that left the
 # checkout or is no longer whole (its generated icons can outlive it), or,
 # for the uninstall, any film: it goes, so Omarchy's theme list and GTK's
-# icon themes show only the films, and the link it last replaced, if any,
-# comes back in its place.
+# icon themes show only the films, and what the link took the place of
+# comes back.
 displaced() {
   if [[ -f $state/record ]]; then
     awk -F '\t' -v path="$1" '$1 == "link" && $2 == path { s = $3 } END { print s }' "$state/record"
