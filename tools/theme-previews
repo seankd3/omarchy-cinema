@@ -45,9 +45,14 @@ if [[ ${1:-} == --inside ]]; then
   open org.gnome.Nautilus "nautilus --new-window '$HOME'"
   focus cinema-nvim
 
-  # Long enough for Files to draw its folders, btop to graph a few seconds
-  # and the rain to fill.
+  # Long enough for btop to graph a few seconds and the world to come to
+  # rest, then until Files has drawn its folders: its window the same in two
+  # captures a second apart (a desktop at rest draws nothing; Files' loading
+  # spinner turns).
   sleep 6
+  box=$(hyprctl -j clients | jq -r '.[] | select(.class == "org.gnome.Nautilus") | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')
+  grim -g "$box" "$out/a.png"
+  until sleep 1; grim -g "$box" "$out/b.png"; cmp -s "$out/a.png" "$out/b.png"; do mv "$out/b.png" "$out/a.png"; done
   grim "$out/$slug.png"
   exit
 fi
