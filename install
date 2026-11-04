@@ -283,7 +283,7 @@ StandardOutput=null
 [Install]
 WantedBy=graphical-session.target
 EOF
-  ours "$1" || echo "$1 is not as the install wrote it, so it is left as it is$4" >&2
+  ours "$1" || echo "$1 is not as the install wrote it, so it is left as it is${4:-}" >&2
 }
 if [[ -n $remove ]]; then
   for unit in "$feed" "$agents"; do
