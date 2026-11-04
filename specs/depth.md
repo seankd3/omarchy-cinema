@@ -49,8 +49,7 @@ Each is one fact with one source; nothing is stored that can be computed.
   splashes). This one ring replaces a uniform per event. Typing and the start
   of speech were kinds too; no film answered them (Sean, 2026-10-29: calm
   while you work), and an answer draws the whole world every frame while it
-  lives, so contract 6 deleted them (specs/smoothness.md, "Cost follows
-  change").
+  lives, so contract 6 deleted them.
   - *Time.* The plugin stamps each impulse on the monotonic clock and uploads
     its age, so the shader never subtracts on the hourly-wrapping `time`. An
     impulse lives 3 s of real time and is then gone. What happens while the

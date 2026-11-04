@@ -1597,7 +1597,7 @@ vec4 cinemaGlass(vec4 c) {{
             // what frosted windows cover (CGlassPass). Not kept between
             // frames: Hyprland draws its last two frames' damage again too,
             // merged into few boxes, and a copy over that cost about as much
-            // as drawing it (specs/smoothness.md, "Cost follows change").
+            // as drawing it (specs/smoothness.md, "Frame budget").
             drawSquare(ctx, coarse, ctx.m_data.damage, set);
             return {};
         }

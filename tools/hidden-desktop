@@ -2,11 +2,14 @@
 # Runs a command on a Hyprland desktop that is never on screen: Sean's desktop
 # with this checkout installed, logged in inside a sandbox.
 #
-#   tools/hidden-desktop [--size WxH] [--scale S] [--theme SLUG] [--plugin SO] [--out DIR] <command> [args...]
+#   tools/hidden-desktop [--fresh] [--size WxH] [--scale S] [--theme SLUG] [--plugin SO] [--out DIR] <command> [args...]
 #
 # The sandbox has Sean's configuration (~/.config, ~/.local, ~/.cache) and
 # this checkout as copies whose changes are thrown away, and none of his other
-# files. It has no route to his session: its own runtime directory (no
+# files. With --fresh it has a new Omarchy user's instead: /etc/skel with
+# Omarchy's first theme applied, as its installer leaves a new user, and
+# copies of its ~/.config and ~/.local from before and after ./install in
+# $XDG_RUNTIME_DIR/fresh/{before,installed} for the command to compare with. It has no route to his session: its own runtime directory (no
 # compositor, Hyprland socket or session bus of his), nothing of /run (no
 # system bus, so no logind and no power), no network, and the GPU's render
 # nodes as its only hardware (NVIDIA's are /dev/nvidia0 and nvidiactl too,
@@ -16,7 +19,7 @@
 # In it, this checkout's ./install runs, --theme SLUG is applied as Omarchy
 # applies a theme before any session runs (--plugin SO, a build of the plugin
 # under this checkout's plugin/build, is installed in place of the
-# checkout's own), and Hyprland logs in with
+# checkout's own), and Hyprland logs in with the user's own config through
 # tools/hidden-desktop.lua on tools/frameclock, a compositor with no screen
 # that asks for each next frame. The command then runs against that Hyprland
 # (WAYLAND_DISPLAY and HYPRLAND_INSTANCE_SIGNATURE are its) on a private
@@ -38,9 +41,15 @@ if [[ ${1:-} == --inside ]]; then
   # The desktop's own output goes to the log; the command's goes where it was
   # going.
   exec >&3 2>&4 3>&- 4>&-
-  size=$2 theme=$3 out=$4 plugin=$5
-  shift 5
+  size=$2 theme=$3 out=$4 plugin=$5 fresh=$6
+  shift 6
   run=$XDG_RUNTIME_DIR
+
+  if [[ -n $fresh ]]; then
+    cp -rT /etc/skel ~
+    OMARCHY_SETUP_CONTEXT=iso-chroot bash "$OMARCHY_PATH/install/user/theme.sh" >/dev/null
+    mkdir -p "$run/fresh/before" && cp -a ~/.config ~/.local "$run/fresh/before/"
+  fi
 
   # What a login finds: this checkout installed, and the theme applied the
   # way Omarchy's installer applies one (with the GNOME step it leaves to the
@@ -49,6 +58,7 @@ if [[ ${1:-} == --inside ]]; then
     printf '%s\nhidden-desktop: ./install failed\n' "$said" >&2
     exit 1
   fi
+  [[ -n $fresh ]] && mkdir "$run/fresh/installed" && cp -a ~/.config ~/.local "$run/fresh/installed/"
   [[ -n $plugin ]] && install -m 755 "$plugin" ~/.local/lib/omarchy-cinema/backdrop.so
   if [[ -n $theme ]]; then
     OMARCHY_THEME_HEADLESS=1 omarchy-theme-set "$theme"
@@ -127,9 +137,10 @@ if [[ ${1:-} == --inside ]]; then
   exit
 fi
 
-size=2880x1800 scale=1.25 theme="" out="" plugin=""
+size=2880x1800 scale=1.25 theme="" out="" plugin="" fresh=""
 while [[ ${1:-} == --* ]]; do
   case $1 in
+    --fresh) fresh=1; shift; continue ;;
     --size) size=$2 ;;
     --scale) scale=$2 ;;
     --theme) theme=$2 ;;
@@ -139,7 +150,7 @@ while [[ ${1:-} == --* ]]; do
   esac
   shift 2
 done
-(($#)) || { echo "usage: tools/hidden-desktop [--size WxH] [--scale S] [--theme SLUG] [--plugin SO] [--out DIR] <command> [args...]" >&2; exit 2; }
+(($#)) || { echo "usage: tools/hidden-desktop [--fresh] [--size WxH] [--scale S] [--theme SLUG] [--plugin SO] [--out DIR] <command> [args...]" >&2; exit 2; }
 
 build=$here/tools/build
 frameclock=$build/frameclock
@@ -165,11 +176,13 @@ for device in /dev/dri/renderD* /dev/nvidia[0-9]* /dev/nvidiactl; do
   [[ -c $device ]] && sandbox+=(--dev-bind "$device" "$device")
 done
 sandbox+=(--tmpfs "$HOME")
-for dir in "$HOME/.config" "$HOME/.local" "$HOME/.cache" "$here"; do
+mine=("$HOME/.config" "$HOME/.local" "$HOME/.cache")
+[[ -n $fresh ]] && mine=()
+for dir in "${mine[@]}" "$here"; do
   [[ -d $dir ]] && sandbox+=(--overlay-src "$dir" --tmp-overlay "$dir")
 done
 for file in .bashrc .bash_profile; do
-  [[ -f $HOME/$file ]] && sandbox+=(--ro-bind "$HOME/$file" "$HOME/$file")
+  [[ -z $fresh && -f $HOME/$file ]] && sandbox+=(--ro-bind "$HOME/$file" "$HOME/$file")
 done
 [[ -n $out ]] && sandbox+=(--bind "$out" "$out")
 sandbox+=(
@@ -189,5 +202,5 @@ cd "$here"
 # systemd-coredump, whose journal entry Omarchy's crash watcher turns into a
 # toast on Sean's screen, and a limit of one byte is the kernel's own "never
 # pipe this core".
-exec prlimit --core=1 bwrap "${sandbox[@]}" -- dbus-run-session -- "$here/tools/hidden-desktop" --inside "$size" "$theme" "$out" "$plugin" "$@" \
+exec prlimit --core=1 bwrap "${sandbox[@]}" -- dbus-run-session -- "$here/tools/hidden-desktop" --inside "$size" "$theme" "$out" "$plugin" "$fresh" "$@" \
   3>&1 4>&2 >"$log" 2>&1

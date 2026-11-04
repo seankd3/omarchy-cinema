@@ -1,0 +1,65 @@
+#!/bin/bash
+# A new Omarchy user's first run, from empty (RELEASE.md, "Release gate"), in
+# a desktop that is never on screen (tools/hidden-desktop --fresh): the
+# install, a login whose own config loads the engine with no config errors, a
+# film applied in the session and drawing, Omarchy's first theme again, an
+# uninstall refused while Hyprland runs, and one after logging out. Then
+# every path in ~/.config and ~/.local that the install changed is as it was
+# before it, but for Omarchy's own record of theme switches, and nothing
+# named for the cinema is left. (A first login writes much of its own.)
+#
+#   tools/fresh-user [slug]
+#
+# Exits 0 when all of it held, else names the first step that did not and
+# keeps the desktop's logs.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+
+if [[ ${1:-} == --inside ]]; then
+  film=$2 out=$3
+  fail() { echo "fresh-user: $*; logs in $out" >&2; exit 1; }
+  clean() { [[ -z $(hyprctl configerrors | tr -d '[:space:]') ]] || fail "config errors: $(hyprctl configerrors)"; }
+  hyprctl plugin list | grep -q '^Plugin backdrop ' || fail "the engine did not load at login"
+  clean
+  # The backdrop's draws, as frametrace logs each one's time.
+  drawn() { grep -c '^t ' "$out/frames.log" || true; }
+  before=$(drawn)
+  omarchy-theme-set "$film" >/dev/null 2>&1 || fail "omarchy-theme-set $film failed"
+  for _ in {1..50}; do (($(drawn) > before)) && break; sleep 0.1; done
+  (($(drawn) > before)) || fail "$film drew no backdrop"
+  clean
+  omarchy-theme-set "Tokyo Night" >/dev/null 2>&1 || fail "omarchy-theme-set Tokyo Night failed"
+  ! "$here/install" --uninstall 2>/dev/null || fail "the uninstall ran while Hyprland did"
+  hyprctl dispatch 'hl.dsp.exit()' >/dev/null 2>&1 || true
+  while pgrep -x Hyprland >/dev/null || compgen -G "$XDG_RUNTIME_DIR/hypr/*/.socket.sock" >/dev/null; do sleep 0.1; done
+  "$here/install" --uninstall >"$out/uninstall.log" 2>&1 || fail "the uninstall failed"
+  # Each path's kind, link, mode and contents, a line each.
+  list() {
+    cd "$1"
+    join -t $'\t' -a 1 <(find .config .local -printf '%p\t%y %l %m\n' | sort -t $'\t' -k 1,1) \
+      <(find .config .local -type f -exec sha256sum {} + | sed -E 's/^([0-9a-f]+)  (.*)$/\2\t\1/' | sort -t $'\t' -k 1,1)
+  }
+  # A theme switch counts itself and keeps each theme's background.
+  switches='^[.]local/state/omarchy/(current/theme[.]generation|theme-backgrounds)'
+  awk -F '\t' -v switches="$switches" '
+    FILENAME == ARGV[1] { before[$1] = $0; next }
+    FILENAME == ARGV[2] { installed[$1] = $0; next }
+    { after[$1] = $0 }
+    END {
+      for (p in installed) if (before[p] != installed[p]) changed[p]
+      for (p in before) if (before[p] != installed[p]) changed[p]
+      for (p in changed) if (before[p] != after[p] && p !~ switches) print "changed by the install, not restored: " p
+      for (p in after) if (!(p in before) && tolower(p) ~ /cinema/) print "left: " p
+    }' <(list "$XDG_RUNTIME_DIR/fresh/before") <(list "$XDG_RUNTIME_DIR/fresh/installed") <(list ~) | sort >"$out/left.txt"
+  [[ ! -s $out/left.txt ]] || fail "the uninstall left $(wc -l <"$out/left.txt") paths as they were not ($out/left.txt)"
+  echo "fresh-user: $film installed, drawn and uninstalled from empty"
+  exit
+fi
+
+film=${1:-jarvis}
+[[ -f $here/themes/$film/backdrop.frag ]] || { echo "fresh-user: $film is not a film theme" >&2; exit 2; }
+out=$(mktemp -d)
+# The desktop is small: this tests the paths, not the look.
+timeout 120 "$here/tools/hidden-desktop" --fresh --size 1280x800 --scale 1 --out "$out" "$here/tools/fresh-user" --inside "$film" "$out"
+rm -rf "$out"

@@ -141,7 +141,8 @@ and says so.
 `hyprland=` dependency makes pacman stop a whole `omarchy update` when Omarchy
 ships a new Hyprland and the engine has not been rebuilt. Proposed: the engine
 goes into omarchy-pkgs, the repository Hyprland already comes from here
-(`pacman -Si hyprland`: repository omarchy, 0.57.0-4), and is rebuilt there in
+(`pacman -Si hyprland`: repository omarchy, 0.57.1-2 on 2026-11-04, a
+release ahead of Arch's), and is rebuilt there in
 the same push as each Hyprland it ships, so the two always move together and
 the pin never blocks. An AUR build, which no one rebuilds in lockstep, takes
 the other side: it depends on `hyprland` without a version, so updates are
@@ -158,40 +159,24 @@ Discussion's job).
 
 ## Release gate
 
-- All six themes seen live on the P16 by Sean, with before and after
-  screenshots of workspace 1 and Files.
-- GPT-6.1 Sol review of each theme's shader, CSS and popup, and of the
-  plugin and tooling.
-- From empty, on the supported versions (Omarchy 4 as of 2026-10, Hyprland
-  0.57, GTK 4.24, named in the README): a fresh user runs the install, logs in
-  again (the install adds the plugin's one load line to
-  `~/.config/hypr/hyprland.lua`, the only loader; native code never loads or
-  unloads in a running Hyprland), applies a cinema theme, and gets the
-  backdrop, Files, folders and popup with zero config errors. Voxtype is
-  optional; when present, the install selects its Quickshell OSD and
-  `style = "theme"`.
+Held (films/release): the README (install, the toggles, uninstall,
+authoring, the fan-homage note and where every image comes from; MIT);
+`./install --uninstall`, which takes away only what the install added and
+puts back the Voxtype settings it changed; `tools/fresh-user`, a new Omarchy
+user from /etc/skel in a hidden desktop: install, a login whose own config
+loads the engine with zero config errors, a film applied and drawing,
+Omarchy's first theme again, an uninstall refused in the session and run
+after logging out, and every path the install changed back as it was.
+
+Open:
+- All six seen live on the P16 by Sean, workspace 1 and Files.
+- x86_64: nothing has run there yet (the P16 is aarch64).
 - Transitions: glassy, opaque, glassy; film to film to stock; Files already
   running; no animations on and off; a broken shader; a Hyprland update.
-- Uninstall removes only what the install added (the two config lines,
-  templates, links, Voxtype settings it changed) and keeps the user's own.
 - Same-frame motion and idle cost as in SPEC.md's acceptance.
-- README: what it is, one screenshot per film, install, the toggles,
-  authoring; MIT licence; a note that the themes are fan homages, not
-  affiliated with the studios or Tesla.
-- The repo is created private for the review flow (PRs from now on) and made
-  public at the gate.
-
-## Order (stacked PRs, one sentence each)
-
-1. Glass follows glassy mode and its findings are fixed; film.lua's late
-   overrides go.
-2. No animations stops the backdrop's clock.
-3. Theme assets take colours from `colors.toml`; cinema defaults for themes
-   without their own Files styling.
-4. `omarchy-cinema` command (new, preview, check, install, uninstall); the
-   preview tools share one entry point and keep their own renderers.
-5. Popups on Voxtype's `style = "theme"` once a Voxtype release has it,
-   workaround deleted.
-6. Live review fixes for Oblivion, The Matrix, Evangelion, Roadster.
-7. README, licence, screenshots, uninstall; then public, then the Omarchy
-   Discussion.
+- Reviews of each theme's shader, CSS and popup, and of the plugin.
+- Plan items not built: glass follows glassy mode with film.lua's late
+  overrides gone; theme assets from `colors.toml` roles; the
+  `omarchy-cinema` command; popups on Voxtype's `style = "theme"` once a
+  release has it.
+- The repo made public, then the Omarchy Discussion.
