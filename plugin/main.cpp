@@ -253,27 +253,34 @@ void main() {
         GLint  pointer, impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder, drawnWorld, worldProj;
     };
 
-    // A monitor's world at half its size, and its mipmap down to the level
-    // as soft as the film's frost; `proj` places the monitor in it, for the
-    // frames that read it (worldAt()).
+    // A monitor's world as it was last drawn whole, kept until the world
+    // changes: at half its size, with its mipmap down to the level as soft
+    // as the film's frost; `proj` places the monitor in it, for the frames
+    // that read it (worldAt()). With it, the agents' text it was drawn with
+    // (the feed change, its count and next position), so a part of the
+    // screen drawn again at rest shows the text the kept world does.
     struct SCoarse {
-        GLuint   texture = 0, fbo = 0;
+        GLuint   texture = 0, fbo = 0, feed = 0;
         int      width = 0, height = 0, levels = 0;
         Mat3x3   proj;
+        uint64_t feedUploaded = 0;
+        uint32_t feedCount = 0, feedPos = 0;
         // The frost target last drawn whole: its framebuffer and size.
         GLuint   frosted = 0;
         Vector2D frostedSize;
     };
 
+    void forget(const SCoarse& coarse) {
+        glDeleteFramebuffers(1, &coarse.fbo);
+        for (const auto texture : {coarse.texture, coarse.feed})
+            if (texture)
+                glDeleteTextures(1, &texture);
+    }
+
     // What the film's programs draw with: the unit square and the textures,
     // filled once a frame by the backdrop and read by every frame after it.
     struct SGpu {
-        GLuint   vao = 0, vbo = 0, data = 0, feed = 0, glyphs = 0;
-        // The feed change in the texture, and its count and next position:
-        // taken only when the world is drawn whole, so a part of the screen
-        // drawn again at rest shows the text the kept world does.
-        uint64_t feedUploaded = 0;
-        uint32_t feedCount = 0, feedPos = 0;
+        GLuint   vao = 0, vbo = 0, data = 0, glyphs = 0;
         bool     glyphsUploaded = false;
         SProgram backdrop, frame;
         // COPY's program, and where its uniforms are.
@@ -335,6 +342,9 @@ void main() {
         int                                     feedFd     = -1, feedLock = -1;
         std::string                             feedPath;
         wl_event_source*                        feedSource = nullptr;
+        // When what the feed last said runs out with no datagram to say so
+        // (onStale()).
+        wl_event_source*                        stale = nullptr;
         std::vector<uint8_t>                    feedRing   = std::vector<uint8_t>(FEED_RING, ' ');
         uint64_t                                feedGeneration = 0, feedChanges = 0;
         uint32_t                                feedCount = 0, feedPos = 0;
@@ -529,13 +539,11 @@ void main() {
             glDeleteBuffers(1, &gpu.vbo);
         if (gpu.vao)
             glDeleteVertexArrays(1, &gpu.vao);
-        for (const auto texture : {gpu.data, gpu.feed, gpu.glyphs})
+        for (const auto texture : {gpu.data, gpu.glyphs})
             if (texture)
                 glDeleteTextures(1, &texture);
-        for (const auto& [id, coarse] : gpu.coarse) {
-            glDeleteFramebuffers(1, &coarse.fbo);
-            glDeleteTextures(1, &coarse.texture);
-        }
+        for (const auto& [id, coarse] : gpu.coarse)
+            forget(coarse);
         gpu = {};
     }
 
@@ -647,7 +655,6 @@ void main() {
         glBindBuffer(GL_ARRAY_BUFFER, buffer);
 
         glGenTextures(1, &gpu.data);
-        glGenTextures(1, &gpu.feed);
         glGenTextures(1, &gpu.glyphs);
         return true;
     }
@@ -1061,9 +1068,24 @@ void main() {
         g->voiceReceived = std::chrono::steady_clock::now();
     }
 
+    void wake();
+
+    // What the feed said runs out: voice after VOICE_STALE, the agents'
+    // text after FEED_STALE. The world is drawn again then, so what was
+    // showing eases away though the desktop holds still.
+    int onStale(void*) {
+        if (g) {
+            feedPresence(std::chrono::steady_clock::now());
+            wake();
+        }
+        return 0;
+    }
+
     int onFeed(int fd, uint32_t, void*) {
         if (!g)
             return 0;
+        const float voice = g->voice;
+        const bool  text  = g->presenceTarget;
         std::array<uint8_t, FEED_HEADER + FEED_RING> buffer;
         for (int i = 0; i < FEED_BUDGET; i++) {
             const ssize_t length = recv(fd, buffer.data(), buffer.size(), MSG_DONTWAIT | MSG_TRUNC);
@@ -1096,11 +1118,20 @@ void main() {
             g->feedPos        = pos;
             g->feedChanges++;
         }
-        // Text coming or going changes a world that may be holding still.
-        const bool before = g->presenceTarget;
-        feedPresence(std::chrono::steady_clock::now());
-        if (g->presenceTarget != before)
-            settle();
+        // Voice, and text coming or going, change a world that may be
+        // holding still; each runs out at its own time.
+        const auto now = std::chrono::steady_clock::now();
+        feedPresence(now);
+        if (g->voice != voice || g->presenceTarget != text)
+            wake();
+        auto ends = std::chrono::steady_clock::time_point::max();
+        if (g->voice > 0)
+            ends = g->voiceReceived + VOICE_STALE;
+        if (g->presenceTarget)
+            ends = std::min(ends, g->feedReceived + FEED_STALE);
+        const auto ms = ends == std::chrono::steady_clock::time_point::max() ? 0 :
+                                                                               std::max<long>(1, std::chrono::ceil<std::chrono::milliseconds>(ends - now).count() + 1);
+        wl_event_source_timer_update(g->stale, int(ms));
         return 0;
     }
 
@@ -1142,11 +1173,13 @@ void main() {
         g->feedFd     = fd;
         g->feedPath   = path;
         g->feedSource = wl_event_loop_add_fd(g_pCompositor->m_wlEventLoop, fd, WL_EVENT_READABLE, onFeed, nullptr);
+        g->stale      = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onStale, nullptr);
     }
 
     void closeFeed() {
-        if (g->feedSource)
-            wl_event_source_remove(g->feedSource);
+        for (const auto source : {g->feedSource, g->stale})
+            if (source)
+                wl_event_source_remove(source);
         if (g->feedFd >= 0) {
             close(g->feedFd);
             unlink(g->feedPath.c_str());
@@ -1316,7 +1349,8 @@ vec4 cinemaGlass(vec4 c) {{
     // and the windows.
     void setUniforms(const SProgram& p, const PHLMONITOR& monitor, const SScene& scene, const SAnswer& answer, const Mat3x3& proj, const CBox& area,
                      std::chrono::steady_clock::time_point now) {
-        const auto& gpu = g->gpu;
+        const auto& gpu  = g->gpu;
+        const auto& kept = g->gpu.coarse[monitor->m_id];
         glUseProgram(p.id);
         glUniformMatrix3fv(p.proj, 1, GL_TRUE, proj.getMatrix().data());
         glUniform4f(p.area, area.x, area.y, area.w, area.h);
@@ -1329,14 +1363,14 @@ vec4 cinemaGlass(vec4 c) {{
         glUniform4fv(p.reserved, 1, scene.reserved.data());
         glUniform1i(p.windowData, 7);
         glUniform1i(p.drawnWorld, 4);
-        glUniformMatrix3fv(p.worldProj, 1, GL_TRUE, g->gpu.coarse[monitor->m_id].proj.getMatrix().data());
+        glUniformMatrix3fv(p.worldProj, 1, GL_TRUE, kept.proj.getMatrix().data());
         glUniform1i(p.windowCount, scene.shapes.size());
         glUniform1i(p.focusedIndex, scene.focusedIndex);
         glUniform1f(p.focusAlpha, scene.focusAlpha);
         glUniform1i(p.glyphsUniform, 5);
         glUniform1i(p.feedUniform, 6);
-        glUniform1i(p.feedCount, gpu.glyphsUploaded && answer.presence > 0 && gpu.feedUploaded ? int(gpu.feedCount) : 0);
-        glUniform1i(p.feedPos, int(gpu.feedPos));
+        glUniform1i(p.feedCount, gpu.glyphsUploaded && answer.presence > 0 && kept.feedUploaded ? int(kept.feedCount) : 0);
+        glUniform1i(p.feedPos, int(kept.feedPos));
         glUniform1f(p.feedPresence, answer.presence);
         glUniform4fv(p.pointer, 1, answer.pointer.data());
         glUniform1f(p.voice, answer.voice);
@@ -1390,22 +1424,22 @@ vec4 cinemaGlass(vec4 c) {{
         }
     };
 
-    // Binds the film's textures, the world drawn at half size being `world`
-    // (none while it is being drawn), sets the program's state with `set`
-    // and binds the square.
-    void prepare(GLuint world, const std::function<void()>& set) {
+    // Binds the film's textures, with the kept world's text, and its world
+    // drawn at half size unless that is being drawn (`drawing`), sets the
+    // program's state with `set` and binds the square.
+    void prepare(const SCoarse& kept, bool drawing, const std::function<void()>& set) {
         auto& gpu = g->gpu;
         for (int unit = 0; unit < 4; unit++) {
             glActiveTexture(GL_TEXTURE4 + unit);
-            glBindTexture(GL_TEXTURE_2D, std::array{world, gpu.glyphs, gpu.feed, gpu.data}[unit]);
+            glBindTexture(GL_TEXTURE_2D, std::array{drawing ? 0 : kept.texture, gpu.glyphs, kept.feed, gpu.data}[unit]);
         }
         set();
         glBindVertexArray(gpu.vao);
     }
 
     // Draws the square over each rect of `where`, a part of the damage.
-    void drawSquare(Render::CRenderContext& ctx, GLuint world, const CRegion& where, const std::function<void()>& set) {
-        prepare(world, set);
+    void drawSquare(Render::CRenderContext& ctx, const SCoarse& kept, const CRegion& where, const std::function<void()>& set) {
+        prepare(kept, false, set);
         where.forEachRect([&ctx](const auto& rect) {
             g_pHyprOpenGL->scissor(ctx, &rect, ctx.m_data.transformDamage);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -1499,13 +1533,15 @@ vec4 cinemaGlass(vec4 c) {{
                     upload(GL_R8, g->glyphWidth, g->glyphHeight, GL_RED, GL_UNSIGNED_BYTE, g->glyphPixels.data(), GL_LINEAR);
                     gpu.glyphsUploaded = true;
                 }
-                glActiveTexture(GL_TEXTURE6);
-                glBindTexture(GL_TEXTURE_2D, gpu.feed);
-                if (whole && gpu.feedUploaded != g->feedChanges) {
+                if (whole && coarse.feedUploaded != g->feedChanges) {
+                    if (!coarse.feed)
+                        glGenTextures(1, &coarse.feed);
+                    glActiveTexture(GL_TEXTURE6);
+                    glBindTexture(GL_TEXTURE_2D, coarse.feed);
                     upload(GL_R8, 128, FEED_RING / 128, GL_RED, GL_UNSIGNED_BYTE, g->feedRing.data(), GL_NEAREST);
-                    gpu.feedUploaded = g->feedChanges;
-                    gpu.feedCount    = g->feedCount;
-                    gpu.feedPos      = g->feedPos;
+                    coarse.feedUploaded = g->feedChanges;
+                    coarse.feedCount    = g->feedCount;
+                    coarse.feedPos      = g->feedPos;
                 }
             }
             const auto now  = std::chrono::steady_clock::now();
@@ -1542,7 +1578,7 @@ vec4 cinemaGlass(vec4 c) {{
                 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.texture, 0);
                 glViewport(0, 0, width, height);
                 coarse.proj = proj;
-                prepare(0, set);
+                prepare(coarse, true, set);
                 g_pHyprOpenGL->disableScissor();
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
                 glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
@@ -1555,7 +1591,7 @@ vec4 cinemaGlass(vec4 c) {{
             // frames: Hyprland draws its last two frames' damage again too,
             // merged into few boxes, and a copy over that cost about as much
             // as drawing it (specs/smoothness.md, "Cost follows change").
-            drawSquare(ctx, coarse.texture, ctx.m_data.damage, set);
+            drawSquare(ctx, coarse, ctx.m_data.damage, set);
             return {};
         }
 
@@ -1646,7 +1682,7 @@ vec4 cinemaGlass(vec4 c) {{
             const auto   now    = std::chrono::steady_clock::now();
             const SGuest guest;
             g_pHyprRenderer->blend(true);
-            drawSquare(ctx, g->gpu.coarse[monitor->m_id].texture, ctx.m_data.damage.copy().subtract(within), [&] {
+            drawSquare(ctx, g->gpu.coarse[monitor->m_id], ctx.m_data.damage.copy().subtract(within), [&] {
                 setUniforms(g->gpu.frame, monitor, state.drawn, state.answered, proj, area, now);
                 glUniform1i(g->gpu.frame.frameWindow, index);
                 glUniform1f(g->gpu.frame.frameAlpha, m_alpha);
@@ -1765,6 +1801,14 @@ vec4 cinemaGlass(vec4 c) {{
             g->speed = 0;
     }
 
+    // The world drawn again, whole, on every monitor it moves on.
+    void wake() {
+        if (g && !g->source.empty())
+            for (const auto& monitor : State::monitorState()->monitors())
+                if (moves(monitor))
+                    redraw(monitor);
+    }
+
     // Once Hyprland has finished a change that may move the glass or start
     // or stop the world (a theme read or config change; a lock or a monitor
     // leaving, both announced before Hyprland marks them; a window going
@@ -1779,10 +1823,7 @@ vec4 cinemaGlass(vec4 c) {{
         applyGlass();
         if (!answering())
             letGo();
-        if (!g->source.empty())
-            for (const auto& monitor : State::monitorState()->monitors())
-                if (moves(monitor))
-                    redraw(monitor);
+        wake();
         standStill();
     }
 
@@ -1810,8 +1851,12 @@ vec4 cinemaGlass(vec4 c) {{
         state.pending = readScene(monitor, state);
         // The world's clock runs on while it moves here, each frame at its
         // render.pre, just after the vblank before the one it is shown at.
+        const float before = g->time;
         if (moves(monitor))
             advance(state.pending != state.drawn, std::chrono::steady_clock::now());
+        // The clock is every monitor's: when it runs, each is drawn again.
+        if (g->time != before)
+            wake();
         state.answer = readAnswer(monitor, state);
         // A change of the world changes it everywhere: all of it, the
         // half-size world and the frost too, is drawn again in this frame.
@@ -1917,8 +1962,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     static auto REMOVED = Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) {
         if (const auto coarse = g->gpu.coarse.find(monitor->m_id); coarse != g->gpu.coarse.end()) {
             g_pHyprOpenGL->makeEGLCurrent();
-            glDeleteFramebuffers(1, &coarse->second.fbo);
-            glDeleteTextures(1, &coarse->second.texture);
+            forget(coarse->second);
             g->gpu.coarse.erase(coarse);
         }
         settle();
