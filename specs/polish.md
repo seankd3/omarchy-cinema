@@ -82,7 +82,11 @@ model is not enough; a judge through Hyprland's own blur is the next step.
    branch, so the derivative is the same one as before wherever it was
    defined. Working them out by hand (tried first) repeated the films'
    geometry and missed the flow turning round window corners (Terra). Frames
-   read worldAt() (contract 5), so no backdrop() runs in a branch.
+   read worldAt() (contract 5), so no backdrop() runs in a branch. Oblivion's
+   slope is taken down the screen through the drawn pixel's own steps in px,
+   not along the target's y: Hyprland's target runs y down the screen (the
+   desktop is unchanged, identical in its orientation), the preview's ran it
+   up and lit the opposite rims, and a rotated monitor would light the side.
 8. **Performance, measured not yet acted on.** Every film loops over the
    windows at every pixel, Evangelion and Oblivion twice; nine windows cost
    about three times what three do. Evangelion's second loop, at the
