@@ -131,7 +131,11 @@ void main() {
 
     // The two things a film's shader can draw: the world, and (if it defines
     // frame()) each window's edge in it (main-backdrop.glsl, main-frame.glsl).
+    const char* DITHER =
+#include "dither.inc"
+        ;
     const char* BACKDROP_MAIN =
+#include "dither.inc"
 #include "main-backdrop.inc"
         ;
     const char* FRAME_MAIN =
@@ -146,8 +150,11 @@ uniform sampler2D source;
 uniform float level;
 uniform vec2 size;
 out vec4 fragColor;
+)"
+#include "dither.inc"
+                       R"(
 void main() {
-    fragColor = textureLod(source, gl_FragCoord.xy / size, level);
+    fragColor = textureLod(source, gl_FragCoord.xy / size, level) + vec4(vec3(cinemaDither()), 0.0);
 }
 )";
     // How far outside a window its frame may draw, in logical px.
@@ -1260,9 +1267,10 @@ vec4 cinemaShade(vec3 rgb) {{
 // 4.5:1, it goes as far as the shade: the glass never reads worse than the
 // theme drawn solid. Text drawn opaque has no frost to hold.
 #if USE_BLUR
+{}
 vec4 cinemaHold(vec4 pix, vec2 uv, float k) {{
     if (k <= 0.0) return pix;
-    vec4  c     = pix + texture(blurredBG, uv) * k;
+    vec4  c     = pix + texture(blurredBG, uv) * k + vec4(vec3(cinemaDither()), 0.0);
     float m     = cinemaLuminance(CINEMA_MUTED), side = sign(m - cinemaLuminance(CINEMA_BACKGROUND));
     float limit = side > 0.0 ? (m + 0.05) / 4.5 - 0.05 : 4.5 * (m + 0.05) - 0.05;
     vec3  shown = round(c.rgb * 255.0) / 255.0;
@@ -1298,7 +1306,7 @@ vec4 cinemaGlass(vec4 c) {{
 }}
 
 )",
-                                         g->backgrounds.size(), keys, glass, vec3(g->background), vec3(g->muted), g->backgrounds.size()));
+                                         g->backgrounds.size(), keys, glass, vec3(g->background), vec3(g->muted), g->backgrounds.size(), DITHER));
         source.insert(source.find(read), "#if USE_BLUR\n    pixColor = cinemaGlass(pixColor);\n#endif\n\n");
         // The frost is held where Hyprland composites it, for the window's
         // pixel and, when it mirrors, the mirror's.

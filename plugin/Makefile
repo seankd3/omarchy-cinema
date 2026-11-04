@@ -10,7 +10,7 @@ CXXFLAGS = -std=c++23 -O2 -fPIC -fno-gnu-unique -I$(BUILD) $(shell pkg-config --
 LDLIBS   = $(shell pkg-config --libs $(DEPS)) -lrt
 VERSION := $(shell pkg-config --variable=prefix hyprland)/hyprland/src/version.h
 
-$(BUILD)/backdrop.so: main.cpp $(BUILD)/contract.inc $(BUILD)/main-backdrop.inc $(BUILD)/main-frame.inc $(BUILD)/hyprland
+$(BUILD)/backdrop.so: main.cpp $(BUILD)/contract.inc $(BUILD)/dither.inc $(BUILD)/main-backdrop.inc $(BUILD)/main-frame.inc $(BUILD)/hyprland
 	$(CXX) $(CXXFLAGS) -shared -o $@ main.cpp $(LDLIBS)
 
 # The plugin refuses to load into a Hyprland other than the one its headers

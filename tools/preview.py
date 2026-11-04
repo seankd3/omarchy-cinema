@@ -43,7 +43,7 @@ void main() {
 }
 """
 # The plugin links one of these after the film's shader (plugin/main-*.glsl).
-BACKDROP_MAIN = (ROOT / "plugin/main-backdrop.glsl").read_text()
+BACKDROP_MAIN = (ROOT / "plugin/dither.glsl").read_text() + (ROOT / "plugin/main-backdrop.glsl").read_text()
 FRAME_MAIN = (ROOT / "plugin/main-frame.glsl").read_text()
 
 
