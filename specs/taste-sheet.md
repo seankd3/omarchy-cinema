@@ -44,12 +44,12 @@ data, Jarvis's glass 0.6) are in git history.
    everywhere: Tron's and Roadster's floors glide toward you over the lower
    screen, Jarvis's globe and rings turn round the focused window,
    Evangelion's rings spread across the whole screen, and the Matrix's rain
-   falls while agents write. So at rest they cost 65 to 100% of what they
-   did, Oblivion about 65% (its cloud deck drifts), against a stock theme's
+   falls while agents write. So at rest they cost 60 to 85% of what they
+   did (Oblivion 67%, its cloud deck drifting), against a stock theme's
    near nothing. For next to nothing at rest, the big motions would hold
    still while nothing on the desktop moves and run while a window moves,
    and the small parts keep running (light cycles, pulses, streaks, the
    drone's ring, the bar's markers). Recommend: yes for the floors, the
    rings and the globe; Oblivion's deck steps 4 times a second instead of
-   15; the Matrix's rain stays, since it shows agents working. Not built
+   30; the Matrix's rain stays, since it shows agents working. Not built
    yet, so no stills: this decides batch 5.

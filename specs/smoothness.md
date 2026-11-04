@@ -370,16 +370,26 @@ the gliding floor, so it dropped 12% as the glide came round: 17% of pixels
 changed at the wrap against 5% a frame); its fade now follows depth on the
 screen alone, at the old mean.
 
-Measured at 1440x900 in the hidden desktop (Sean at the machine), 60 Hz,
-three terminals, 8 s at rest after the windows' answers end, GPU busy ms a
-second at rest (frames' GPU time summed), 5ecdd5c against this:
+Measured at 1440x900 in the hidden desktop (Sean at the machine all
+night), its 60 Hz, three terminals, 8 s at rest after the windows' answers
+end, then the focused window swapping round; 5ecdd5c against 4e8619d,
+interleaved (scratch/batch4/runs/r6). GPU busy is the frames' GPU time
+summed over a second; frames presented at rest were 45 to 54 a second in
+every film both ways, since each always has a part running every frame.
 
-| film | rest, ms/s | whole frame at rest | whole frame moving |
+| film | rest, GPU ms/s | whole frame at rest, ms | whole frame moving, ms |
 |---|---|---|---|
-| stock (Tokyo Night) | 2 to 15 | | |
-| Jarvis | 148 / 132 | 1.83 / 1.93 | 1.82 / 1.93 |
-| Tron Legacy | 154 / 103 | 1.52 / 1.54 | 1.50 / 1.53 |
-| Oblivion | 147 / 89 | 1.86 / 1.44 | 1.87 / 1.53 |
-| The Matrix (agents writing) | 150 / 131 | 1.60 / 1.70 | 1.61 / 1.70 |
-| Evangelion | 155 / 122 | 1.90 / 1.97 | 1.89 / 1.97 |
-| Roadster | 133 / 103 | 1.69 / 1.69 | 1.70 / 1.67 |
+| stock (Tokyo Night) | 4 / 9 | | |
+| Jarvis | 147 / 123 | 1.81 / 1.83 | 1.82 / 1.82 |
+| Tron Legacy | 159 / 99 | 1.51 / 1.46 | 1.56 / 1.46 |
+| Oblivion | 163 / 110 | 1.85 / 1.59 | 1.85 / 1.61 |
+| The Matrix (agents writing) | 164 / 113 | 1.61 / 1.57 | 1.60 / 1.57 |
+| Evangelion | 194 / 125 | 1.89 / 1.87 | 1.89 / 1.88 |
+| Roadster | 161 / 109 | 1.70 / 1.60 | 1.69 / 1.60 |
+
+Not reached: next to nothing at rest (the films' own motion, taste sheet
+7), and 3 ms a frame at 2880x1800 while windows move (still Frame budget
+2's 4.05 to 5.66 ms there: at this size moving frames are no dearer than
+before, Tron and Oblivion a little cheaper, and every pixel is drawn while
+windows move).
+Not yet measured: full size, 120 Hz and power, which need Sean away.
