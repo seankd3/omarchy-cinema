@@ -342,9 +342,11 @@ void main() {
         int                                     feedFd     = -1, feedLock = -1;
         std::string                             feedPath;
         wl_event_source*                        feedSource = nullptr;
-        // When what the feed last said runs out with no datagram to say so
-        // (onStale()).
+        // When what the feed last said runs out with no datagram to say so,
+        // and what it said as last heard: voice and whether there is text
+        // (heard()).
         wl_event_source*                        stale = nullptr;
+        std::pair<float, bool>                  heard{0.F, false};
         std::vector<uint8_t>                    feedRing   = std::vector<uint8_t>(FEED_RING, ' ');
         uint64_t                                feedGeneration = 0, feedChanges = 0;
         uint32_t                                feedCount = 0, feedPos = 0;
@@ -1070,22 +1072,39 @@ void main() {
 
     void wake();
 
-    // What the feed said runs out: voice after VOICE_STALE, the agents'
-    // text after FEED_STALE. The world is drawn again then, so what was
-    // showing eases away though the desktop holds still.
-    int onStale(void*) {
-        if (g) {
-            feedPresence(std::chrono::steady_clock::now());
+    // What the feed says now, as the world hears it: voice until it is
+    // VOICE_STALE old, and whether there is text until the feed is
+    // FEED_STALE quiet. When that changes the world is drawn again, so voice
+    // and text answer, and ease away when they run out, though the desktop
+    // holds still; the timer waits for the next of them to run out.
+    void heard() {
+        const auto now   = std::chrono::steady_clock::now();
+        const bool voice = g->voice > 0 && now - g->voiceReceived <= VOICE_STALE;
+        feedPresence(now);
+        const std::pair<float, bool> heard{voice ? g->voice : 0.F, g->presenceTarget};
+        if (heard != g->heard)
             wake();
-        }
+        g->heard  = heard;
+        auto ends = std::chrono::steady_clock::time_point::max();
+        if (voice)
+            ends = g->voiceReceived + VOICE_STALE;
+        if (g->presenceTarget)
+            ends = std::min(ends, g->feedReceived + FEED_STALE);
+        // Each end is still to come (`voice`, and feedPresence()'s own
+        // staleness), so the wait is at least a millisecond; 0 disarms.
+        const auto ms = ends == std::chrono::steady_clock::time_point::max() ? 0 : std::chrono::ceil<std::chrono::milliseconds>(ends - now).count() + 1;
+        wl_event_source_timer_update(g->stale, int(ms));
+    }
+
+    int onStale(void*) {
+        if (g)
+            heard();
         return 0;
     }
 
     int onFeed(int fd, uint32_t, void*) {
         if (!g)
             return 0;
-        const float voice = g->voice;
-        const bool  text  = g->presenceTarget;
         std::array<uint8_t, FEED_HEADER + FEED_RING> buffer;
         for (int i = 0; i < FEED_BUDGET; i++) {
             const ssize_t length = recv(fd, buffer.data(), buffer.size(), MSG_DONTWAIT | MSG_TRUNC);
@@ -1118,20 +1137,7 @@ void main() {
             g->feedPos        = pos;
             g->feedChanges++;
         }
-        // Voice, and text coming or going, change a world that may be
-        // holding still; each runs out at its own time.
-        const auto now = std::chrono::steady_clock::now();
-        feedPresence(now);
-        if (g->voice != voice || g->presenceTarget != text)
-            wake();
-        auto ends = std::chrono::steady_clock::time_point::max();
-        if (g->voice > 0)
-            ends = g->voiceReceived + VOICE_STALE;
-        if (g->presenceTarget)
-            ends = std::min(ends, g->feedReceived + FEED_STALE);
-        const auto ms = ends == std::chrono::steady_clock::time_point::max() ? 0 :
-                                                                               std::max<long>(1, std::chrono::ceil<std::chrono::milliseconds>(ends - now).count() + 1);
-        wl_event_source_timer_update(g->stale, int(ms));
+        heard();
         return 0;
     }
 
