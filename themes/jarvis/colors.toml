@@ -37,5 +37,5 @@ bright_blue = "#80c4ff"
 bright_magenta = "#c9b6ff"
 
 # Clearer glass than the 0.85 default: the globe and lattice show through,
-# and muted text keeps 4.9:1 at worst (Sean, 2026-11-03: yes to 0.6).
+# and muted text keeps 4.9:1 at worst.
 glass = "0.6"

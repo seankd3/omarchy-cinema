@@ -25,7 +25,7 @@ esac
 # setting it changed, from what to what. The
 # uninstall undoes the record newest first and keeps what the user changed
 # since. An install from before the record (2026-11-04) has none, so its
-# lines, templates, feed unit and Chrome hook stay.
+# lines, templates, feed units and Chrome hook stay.
 state=~/.local/state/omarchy-cinema
 record() { mkdir -p "$state"; printf '%s\n' "$1" >>"$state/record"; }
 fingerprint() { sha256sum <"$1" | cut -c 1-64; }
@@ -258,25 +258,24 @@ if [[ -z $remove ]] && command -v voxtype >/dev/null; then
   fi
 fi
 
-# The agents' text for backdrops that draw it (The Matrix rains it): a user
-# service that follows the agents' logs while a theme with lettering is
-# applied and idles otherwise (specs/agent-rain.md). It writes nothing; its
-# output goes nowhere, and its errors, which never carry agent text, reach the
-# journal. It is started and stopped only while its unit is as the install
-# wrote it. With no user manager to reach (a console, a sandbox) the feed is
-# not enabled, and the rest still runs.
-unit=~/.config/systemd/user/omarchy-cinema-feed.service
-if [[ -n $remove ]]; then
-  if ours "$unit"; then systemctl --user disable --now omarchy-cinema-feed.service >/dev/null 2>&1 || true; fi
-else
-  made "$unit" <<EOF
+# The feed: two user services from feed/cinema-feed.py that write nothing
+# (specs/agent-rain.md). omarchy-cinema-feed, on, sends speech's loudness;
+# omarchy-cinema-agents, off until the user turns it on (README), sends the
+# agents' text, which would show on the desktop. Each is started or stopped
+# only while its unit is as the install wrote it; the voice one is restarted
+# onto this checkout, so one from before it carries no text. With no user
+# manager (a console, a sandbox) neither starts.
+feed=~/.config/systemd/user/omarchy-cinema-feed.service
+agents=~/.config/systemd/user/omarchy-cinema-agents.service
+feedunit() {
+  made "$1" <<EOF
 [Unit]
-Description=Omarchy Cinema: the agents' text for backdrops that draw it
+Description=Omarchy Cinema: $2
 PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-ExecStart=/usr/bin/python3 $here/feed/cinema-feed.py
+ExecStart=/usr/bin/python3 $here/feed/cinema-feed.py$3
 Restart=on-failure
 RestartSec=5
 StandardOutput=null
@@ -284,9 +283,17 @@ StandardOutput=null
 [Install]
 WantedBy=graphical-session.target
 EOF
-  if ! ours "$unit"; then
-    echo "$unit is not as the install wrote it, so it is left as it is" >&2
-  elif ! { systemctl --user daemon-reload && systemctl --user enable --now omarchy-cinema-feed.service; } >/dev/null 2>&1; then
+  ours "$1" || echo "$1 is not as the install wrote it, so it is left as it is" >&2
+}
+if [[ -n $remove ]]; then
+  for unit in "$feed" "$agents"; do
+    if ours "$unit"; then systemctl --user disable --now "${unit##*/}" >/dev/null 2>&1 || true; fi
+  done
+else
+  feedunit "$feed" "speech's loudness for the backdrop" ""
+  feedunit "$agents" "the agents' text for backdrops that draw it" " agents"
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  if ours "$feed" && ! { systemctl --user enable omarchy-cinema-feed.service && systemctl --user restart omarchy-cinema-feed.service; } >/dev/null 2>&1; then
     echo "omarchy-cinema-feed did not start: systemctl --user status omarchy-cinema-feed" >&2
   fi
 fi

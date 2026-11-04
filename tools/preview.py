@@ -10,7 +10,7 @@ the windows drawn as glass over it.
     uv run tools/preview.py <theme-dir> --answers [seconds]
 
 Writes <theme-dir>/../../scratch/preview/<theme>-{empty,windows}-<t>.png at
-the P16's 2880 x 1800 (2304 x 1440 logical at 1.25). With --answers it writes
+2880 x 1800 (2304 x 1440 logical at 1.25). With --answers it writes
 <theme>-answers-<t>.png instead: the film answering the desktop
 (specs/depth.md) in four frames, at rest, a window dragged, a window just
 landed while you speak into the focused one, and a window opening, one

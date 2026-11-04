@@ -13,9 +13,7 @@
 // field, which catches the light passing behind the glass. The honeycomb is
 // nearer than the far lattice, so it shifts a few pixels more as a window is
 // dragged. The field is calm while you work and shines
-// when windows move (Sean, 2026-10-29: "just don't make it too flashy ...
-// Unless like I'm moving windows round or whatever, then you can really make
-// things shine"): a moving window sets the honeycomb rippling and lighting
+// when windows move (SPEC.md, "Calm"): a moving window sets the honeycomb rippling and lighting
 // cell by cell round it and in its wake, and landing flares one full AT
 // field ring out from its edge. The rest is soft: opening or taking focus
 // lights the cells along a window's edge for a moment, closing lets the

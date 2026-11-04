@@ -4,10 +4,9 @@
 frame's own time, and each frame draws only what its look needs, so motion is
 smooth at the display's rate and a still desktop costs nothing.
 
-Sean, 2026-11-02: "its still a bit laggy and not super smooth". 2026-11-04:
-"as lightweight as it can possibly be while still looking as good as it
-can"; "make it as fast as possible even on a very slow GPU". The design point
-is this GPU's ~754 MHz, with weak iGPUs and laptops as the audience: one
+The aim is a backdrop as light as it can be while it looks as good as it
+can, even on a very slow GPU. The design point is a GPU at about 754 MHz
+(this laptop's N1X under load), with weak iGPUs and laptops as the audience: one
 default that is cheap everywhere, no quality tiers, no adaptive knobs. A
 target is a ceiling; a film that meets one keeps climbing while its look
 holds.
@@ -31,7 +30,7 @@ the tick's own copy of "time stands still", the glass's own idle callback.
 Measured with `tools/smoothness` (hidden desktop, frameclock's fixed 60 Hz
 vblank, frametrace logging each draw's `time`; judder is the RMS of each step
 minus one frame, jumps the steps over 1.5 frames), fit against the hidden
-desktop's CPU wait at Sean's 11 ms/s: main 3.4 ms judder and 3.3% jumps,
+desktop's CPU wait at a session's 11 ms/s: main 3.4 ms judder and 3.3% jumps,
 this 2.9 ms and 1.0%. The rest is CPU starvation of the nice 19 sandbox.
 
 ## Frame budget
@@ -46,7 +45,7 @@ Hyprland only composites.
   notifications read the same frost (film.lua's xray rule): their layers
   cover the screen or stay mapped empty down its edge, and a live blur under
   them cost 0.8 ms every frame. A notification over a window shows the
-  world's frost through its card (taste sheet 6).
+  world's frost through its card.
 - **The glass is opaque, and says so.** In a film session a frosted window's
   pixels all come out opaque (frosted() in main.cpp), so each adds, under its
   surface, an element whose opaque region is its glass. Hyprland's own
@@ -56,7 +55,7 @@ Hyprland only composites.
 - **A frame reads the world drawn this frame** (`worldAt()`), the half-size
   world, instead of drawing `backdrop()` again: 0.45 to 0.79 ms down to 0.15
   to 0.23. In Tron and the Matrix a line crossing a rim turns from a sharp
-  glint to a soft dot (taste sheet 5).
+  glint to a soft dot.
 - **The windows are a uniform block** (contract 9), constants to a pixel,
   not a texture it fetches: 1 to 8% of a draw.
 - **A wake or a shadow pays only where it reaches.** A moving window's ghosts
@@ -66,7 +65,7 @@ Hyprland only composites.
   each film's comment shows. windowShadow is exactly 0 from 2 px inside the
   window and past its softness: 6 to 22% off a drag.
 
-At 2880x1800, GPU at 754 MHz, windows moving (films/budget, 2026-11-03), ms
+At 2880x1800, GPU at 754 MHz, windows moving (2026-11-03), ms
 a frame: half-size world 0.78 (Tron) to 1.60 (Evangelion), frost 0.62 to
 0.76, full-size world 0.72 to 1.44, windows 0.94 to 1.03, frames 0.14 to
 0.23, top layers 0.65; whole frame 4.05 (Tron) to 5.66 (Evangelion).
@@ -82,7 +81,7 @@ scissored glBlitFramebuffer (costs a full one here, 0.6 ms at 1440x900:
 draw a quad); shrinking Hyprland's blur texture; a quarter-size kept world
 (frost off by up to 107 levels); keeping the nearest, focused and over
 windows in see() (slower: registers); Evangelion's honeycomb answer met once
-per cell (batch 7: a pass and a texture for one film, and the cell's answer
+per cell (a pass and a texture for one film, and the cell's answer
 is not constant over a cell, since the held honeycomb shifts per pixel; up
 to 209 levels on a drag).
 
@@ -112,14 +111,14 @@ plugin idle 1.0 and 0.6, with no plugin 2.0 frames.
 
 ## Measuring
 
-- Benches take frames from Sean's screen and GPU priority does not protect
-  him. While he is present: at most 1440x900 and 15 s a run, with an equal
-  gap. Full size only while every monitor sleeps or the session is locked,
-  behind a watchdog (scratch/batch6/queue.sh, trace/run.sh).
+- A bench takes frames from the session on the same GPU, and GPU priority
+  does not protect it. While someone uses the machine: at most 1440x900 and
+  15 s a run, with an equal gap. Full size only while every monitor sleeps
+  or the session is locked, behind a watchdog.
 - The GPU clock is not fixed (754 MHz most runs, 2340 seen once while
   another client kept it busy): record it per run and compare only runs at
   one clock.
-- A GPU shared with Sean's session inflates Hyprland's window pass from 0.38
+- A GPU shared with a running session inflates Hyprland's window pass from 0.38
   to 2.5 ms in every film; check the other films' runs before chasing one
   film's outlier. Offscreen ablations (tools/preview.py's storyboard, least
   contended of 15 rounds) hold to about 2% even then.

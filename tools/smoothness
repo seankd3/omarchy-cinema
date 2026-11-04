@@ -8,8 +8,8 @@
 #
 # Each REVISION's plugin is built (once, under plugin/build) and measured on
 # this checkout's desktop, themes and tools, round by round, interleaved;
-# without one, this checkout as it stands. The desktop is Sean's screen unless
-# --size says otherwise (at scale 1); a smaller one keeps the GPU from
+# without one, this checkout as it stands. The desktop is 2880x1800 at 1.25
+# unless --size says otherwise (at scale 1); a smaller one keeps the GPU from
 # saturating when only the timing is measured. One line per run. On
 # frameclock's 60 Hz display a new frame should come every vblank, and the
 # backdrop's time in it should be one frame (16.67 ms) on from the last:

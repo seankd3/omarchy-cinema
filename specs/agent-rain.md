@@ -4,22 +4,21 @@
 everything the agents on this machine are producing, mirrored like the film's
 code.
 
-Sean, 2026-10-28: "for the matrix code rain could you make it rain the tokens
-from all your current active agents? that would be super sick"; then
-"Mirrored, like the film" and "Everything they produce" (replies, commands,
-thinking and tool output); then "if agents arent running then there should be
-no rain".
+Everything they produce counts: replies, commands, thinking and tool
+output. With no agent running there is no rain. It is off until the user
+turns it on ("Exposure", below).
 
 ## Shape
 
 Two pieces joined by one socket.
 
-1. **The feed** is a small user service, `cinema-feed`, with one job: send
-   the plugin the newest plaintext the agents on this machine produced. It
+1. **The feed** is `feed/cinema-feed.py agents`, the user service
+   `omarchy-cinema-agents`, with one job: send the plugin the newest
+   plaintext the agents on this machine produced. (The same script with no
+   argument is `omarchy-cinema-feed`, which sends voice, specs/depth.md.) It
    follows the session logs that already exist and grow as agents work:
    Claude Code's `~/.claude/projects/**/*.jsonl`, child agents' logs
-   included, and Codex's `~/.codex/sessions/**/*.jsonl` (T3 Code threads run
-   on these two). An agent is running while its log was written in the last
+   included, and Codex's `~/.codex/sessions/**/*.jsonl`. An agent is running while its log was written in the last
    two minutes, and only those logs are followed; on discovery it starts from its last 64 KiB, then reads only
    appended complete lines, and starts over when a log is replaced or
    truncated.
@@ -75,19 +74,22 @@ is no rain to draw, so it has no job left.
 
 ## Non-goals
 
-Readable text (mirrored, by Sean's choice); text from anything but agent
+Readable text (mirrored, like the film); text from anything but agent
 logs; any network or agent-side hook (the logs are already written);
 per-agent colours; storing the text anywhere but the runtime ring (it is
 gone at logout).
 
-## Settled in review (Sol, 2026-10-28)
+## Exposure
+
+Mirrored text is still exposed text: anything an agent prints, secrets
+included, can show on the desktop, in a screen share and in a recording. So
+the service is off until the user turns it on
+(`systemctl --user enable --now omarchy-cinema-agents`, README), the text
+stays in memory, and the socket is private to the user.
 
 The join is a nonblocking datagram (a file polled on Hyprland's event loop
 would block it); the logs grow in bursts of 1 to 24 seconds, enough to rain
-but not token by token; and mirrored text is still exposed text: anything an
-agent prints, secrets included, can show on the desktop, which is the
-behaviour Sean asked for, so the text stays in memory and the socket is
-private to the user.
+but not token by token.
 
 ## Acceptance
 
@@ -96,7 +98,7 @@ private to the user.
    writes, or ten seconds after the service stops, the rain drains away over
    about three seconds, and it returns when an agent writes again.
 2. Frame cost within 10% of today's Matrix at 2880x1800, measured.
-3. Plugin changes tested in a nested Hyprland first, including the service
+3. Plugin changes tested in the hidden desktop first, including the service
    absent, restarting and sending malformed snapshots, a ring that wraps,
    and theme switches; the live desktop gets the new plugin and contract
    together at the next login.

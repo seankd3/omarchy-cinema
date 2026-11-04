@@ -31,10 +31,12 @@ again: the plugin loads only into the Hyprland it was built for.
 Omarchy's own toggles tune it: *Glassy windows* or *Opaque windows*, and
 *No animations*, which holds the backdrop still.
 
-The Matrix rains the text your Claude Code and Codex agents write, read from
-their logs on this machine and kept only in memory, so whatever an agent
-prints can show on your desktop. With no agent running there is no rain.
-To turn it off: `systemctl --user disable --now omarchy-cinema-feed`.
+The Matrix can rain the text your Claude Code and Codex agents write, read
+from their logs on this machine and kept only in memory. It is off, since
+whatever an agent prints, secrets included, would show on your desktop and
+in a screen share. To turn it on:
+`systemctl --user enable --now omarchy-cinema-agents` (`disable --now` turns
+it off). With it off, or no agent running, there is no rain.
 
 ## Uninstall
 

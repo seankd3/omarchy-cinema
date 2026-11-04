@@ -10,9 +10,8 @@
 // near white wash of the sky's light shows, so the frosted glass reads as
 // white paper with dark text on it.
 //
-// The panes float in the sun's light (specs/depth.md), calmly (Sean,
-// 2026-10-29: "nice and elegant and give depth to the window, but we don't
-// need too much crazy movement going on"). Each casts a glass shadow toward
+// The panes float in the sun's light (specs/depth.md), calmly
+// (SPEC.md, "Calm"). Each casts a glass shadow toward
 // the viewer and away from the sun: a slate patch, on the cloud rimmed by a
 // gold caustic, further and softer as focus lifts the pane, and a lifted
 // pane glows brighter against the sky. The cloud deck flows round each pane,
@@ -222,8 +221,7 @@ vec3 answers(vec2 px) {
     return a;
 }
 
-// A moving pane's wake, which may shine (Sean, 2026-10-29: "unless like I'm
-// moving windows round ... then you can really make things shine"): vapour
+// A moving pane's wake, which may shine: vapour
 // trails from its corners (`glow`, with a blue fringe in `blue`) and the
 // cloud it parts behind it (`part`), gone as soon as the pane stops.
 void wake(vec2 px, Window w, inout float glow, inout float blue, inout float part) {

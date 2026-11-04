@@ -5,15 +5,20 @@ the open windows, in the same frame as the windows.
 
 Films: Jarvis (Iron Man), Tron Legacy, Oblivion, Evangelion, The Matrix,
 Roadster (the 2026 Tesla Roadster's red-on-black fighter-jet UI, 80s retro).
-Sean's asks: windows more transparent; the background reacts to the windows
+The brief: windows more transparent; the background reacts to the windows
 and fills in behind and around them; tied to these themes; no HUD, no screen
-shader that makes text harder to read; "if I move a window too fast the box
-doesn't catch up with it, it needs to be in the same frame. No lag. Cheap when
-it doesn't move and super responsive when things are moving"; Files and its
-icons themed too.
+shader that makes text harder to read; Files and its icons themed too; and
+"if I move a window too fast the box doesn't catch up with it, it needs to be
+in the same frame. No lag. Cheap when it doesn't move and super responsive
+when things are moving".
 
-Machine: ASUS P16, aarch64, NVIDIA N1X, 2880x1800 at 120 Hz, scale 1.25,
-Omarchy 4 (Quickshell shell, Hyprland 0.57.1 with Lua config).
+**Calm.** Depth and elegance first: shadows, lift, rims, the glass's
+thickness. The world is calm while you work, with gentle ambient motion at
+most, and may shine while windows move (a drag, a landing); answers are brief
+and soft, focus is a glow and not a flash, and text always reads.
+
+Built and measured on: ASUS P16, aarch64, NVIDIA N1X, 2880x1800 at 120 Hz,
+scale 1.25, Omarchy 4 (Quickshell shell, Hyprland 0.57.1 with Lua config).
 
 ## Shape
 
@@ -81,10 +86,9 @@ swapped in a running Hyprland: on 2026-10-28 an unload, load and theme switch
 hung the desktop and it took a forced power-off. A new build takes effect at
 the next login, and is tried first in the hidden desktop.
 
-**Glass: the background turns to glass, text stays opaque.** Sean: "the
-transparency should effect the background but not the text, all text should
-stay opauqe"; "the little logo, line, stuff like that, should all remain fully
-opaque. Just the background elements should have the transparency." Hyprland's
+**Glass: the background turns to glass, text stays opaque.** Text, logos,
+lines and the rest of an app's interface keep their full opacity; only its
+background turns to glass. Hyprland's
 window opacity fades a whole window, so the plugin adds one step to Hyprland's
 own window shader (`surface.frag`, taken from the running build): it un-mixes
 each pixel from the theme's background colour (colour-to-alpha), so pure
@@ -115,14 +119,11 @@ applies it). GTK imports the applied theme's stylesheet through one fixed line
 in `~/.config/gtk-4.0/gtk.css`; stock themes get an empty one from
 `~/.config/omarchy/themed/gtk.css.tpl`. Icons change live.
 
-**Open, waiting on Sean:** GTK reads the stylesheet once per process, and
-Files runs as a resident service, so a running Files keeps the last film's
-look until it restarts. Restarting it on a theme switch is his call (it
-replaces his Files windows). If yes, the lifecycle must: never quit Files while
-a file operation runs (defer until idle, then apply the latest look); capture
-each window's locations and canonical workspace before quitting and restore
-exactly that record; and mark the look applied only after the restore is
-verified. A first draft that did none of this was deleted (Sol pass 4).
+**A running Files keeps the last film's look** until it restarts: GTK reads
+the stylesheet once per process, and Files runs as a resident service.
+Restarting it on a theme switch would replace its windows, so it is not
+done; a restart would have to wait out file operations, put each window
+back where it was, and only then count the look as applied.
 
 **Dictation popup.** Voxtype's Quickshell OSD takes its style from
 `~/.local/state/omarchy/current/theme`: the applied theme's `voxtype-osd.toml`.
@@ -138,14 +139,14 @@ are canvas, not shader effects, so `tools/osd-preview` renders them off screen
 exactly as they draw live. No HUD text.
 
 **Previews and visual tests.** `tools/hidden-desktop` logs a real Hyprland in
-where it is never on screen: Sean's desktop with the checkout's `./install`
+where it is never on screen: your desktop with the checkout's `./install`
 and a chosen film applied (Omarchy's own headless theme switch), drawing into
 `tools/frameclock`, a Wayland compositor with no screen that takes each frame
-and asks for the next. It runs in a sandbox with Sean's configuration and the
-checkout as throwaway copies, none of his other files and no route to his
-session (no compositor, Hyprland socket, bus, `/run` or network of his), and
-every process ends with it. A Hyprland nested in his session drew only while
-its window was on his screen, and Hyprland's own headless outputs ask NVIDIA
+and asks for the next. It runs in a sandbox with your configuration and the
+checkout as throwaway copies, none of your other files and no route to your
+session (no compositor, Hyprland socket, bus, `/run` or network of yours), and
+every process ends with it. A Hyprland nested in the session drew only while
+its window was on screen, and Hyprland's own headless outputs ask NVIDIA
 for linear buffers it cannot render to. `tools/theme-previews` opens the
 stock previews' four windows there and writes `themes/<slug>/preview.png` at
 their 2560x1440.
@@ -184,7 +185,7 @@ HUD widgets and data readouts; a full-screen post-process shader.
 1. `./install` builds and links; after a login the plugin is loaded with no
    config errors, and `omarchy theme set jarvis` draws its backdrop.
 2. Dragging and resizing a window, workspace slides and focus changes: the
-   backdrop follows in the same frame (Sean's eye on the real machine).
+   backdrop follows in the same frame (by eye on the real machine).
 3. Workspace 1 before and after screenshots, read for legibility.
 4. Idle cost measured against a stock theme (plugin idle), interleaved.
 5. Missing and broken shader, and switching between film and stock themes:

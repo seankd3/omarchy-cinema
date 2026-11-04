@@ -39,9 +39,8 @@ bright_blue = "#8dd2ea"
 bright_magenta = "#d2b2ea"
 
 # Clear glass and a light frost (film.lua), so the rain reads through the
-# windows round the text (Sean, 2026-10-28: "make the backgrounds in the
-# matrix theme more transparent"; the films' usual frost blurred the fine
-# glyphs to black). Secondary text keeps about 5.6:1 over most of the glass
+# windows round the text (the films' usual frost blurred the fine glyphs to
+# black). Secondary text keeps about 5.6:1 over most of the glass
 # (a sample of the rain, 99th percentile).
 glass = "0.2"
 frost = "1"

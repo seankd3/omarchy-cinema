@@ -8,8 +8,7 @@
 // focus does.
 //
 // The windows stand on the floor in the horizon's light (specs/depth.md),
-// calmly (Sean, 2026-10-29: "nice and elegant and give depth to the window,
-// but we don't need too much crazy movement going on"). Each shadows the dots
+// calmly (SPEC.md, "Calm"). Each shadows the dots
 // and streaks toward the viewer, further and softer as focus lifts it. The
 // floor's lanes bow out round each window's foot, so the dots and the speed
 // streaks route round it, and the floor's own lines run from each foot's
@@ -145,9 +144,7 @@ vec3 answers(vec2 px, vec3 red, float horizon, out float lit) {
     return light;
 }
 
-// A moving window's speed lines, which may shine (Sean, 2026-10-29: "unless
-// like I'm moving windows round ... then you can really make things shine"):
-// streaks of light back from its trailing edge across its width, and the
+// A moving window's speed lines, which may shine: streaks of light back from its trailing edge across its width, and the
 // flight path marker riding ahead of it, gone as soon as the window stops.
 vec3 speedLines(vec2 px, Window w, vec3 red) {
     vec3 light = vec3(0.0);

@@ -1194,9 +1194,7 @@ void main() {
 
     // Glass: in a film theme, a window's background (the theme's background
     // colour) turns to glass, and everything drawn over it (text, icons, lines,
-    // logos) keeps its full opacity (Sean, 2026-10-28: "the transparency should
-    // effect the background but not the text"; "the little logo, line, stuff
-    // like that, should all remain fully opaque").
+    // logos) keeps its full opacity.
     //
     // Hyprland fades a whole window by its opacity, text included, so the glass
     // is drawn where Hyprland draws windows: its own surface shader, the
@@ -1204,7 +1202,7 @@ void main() {
     // is read: a pixel in one of the theme's background colours (background,
     // dark, darker, lighter) becomes glass at the theme's glass, and every
     // other pixel keeps exactly the opacity the app drew it with. An earlier
-    // colour-to-alpha un-mixing made grey text partly see-through (Sol, 2026-10-28). It runs only in the shader's
+    // colour-to-alpha un-mixing made grey text partly see-through. It runs only in the shader's
     // blur variant (film.lua turns render:use_shader_blur_blend on), which
     // Hyprland uses only for windows it blurs: a solid browser, video or photo
     // is never touched. Hyprland reads shaders from a directory before its
@@ -1288,14 +1286,12 @@ vec4 cinemaGlass(vec4 c) {{
     if (c.a <= 0.0) return c;
     // Judged by colour alone, before the app's own alpha: a terminal that
     // draws its background half see-through gets the same glass as a window
-    // that draws it solid (Sean: "the transparency in T3 code is also
-    // mimicked in the terminal and other apps").
+    // that draws it solid.
     vec3  rgb = c.rgb / c.a;
     // Only a background colour itself is background, within a step or two of
     // rounding. Panels, cards, fields, rows and dividers are shaded a few
     // steps off it, and they are interface, not background: they keep their
-    // opacity with the text, icons and lines (Sean, 2026-10-28: "keep the text
-    // opaque and other UI elements other than the background").
+    // opacity with the text, icons and lines.
     float background = 1.0 - smoothstep(0.5 / 255.0, 2.5 / 255.0, cinemaShade(rgb).w);
     float a = mix(c.a, CINEMA_GLASS, background);
     return vec4(rgb * a, a);
@@ -1913,7 +1909,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g         = makeUnique<SState>();
     g->handle = handle;
-    g->depth      = makeShared<Config::Values::CIntValue>("plugin:backdrop:depth", "How far windows' depth goes: 0 the backdrop alone (no answers or frames), 1 to 3 the tiers of specs/depth.md", 2,
+    g->depth      = makeShared<Config::Values::CIntValue>("plugin:backdrop:depth", "How far windows' depth goes: 0 the backdrop alone (no answers or frames), above 0 with them (specs/depth.md, \"Tiers\")", 2,
                                                          Config::Values::SIntValueOptions{.min = 0, .max = 3});
     HyprlandAPI::addConfigValueV2(handle, g->depth);
     openFeed();

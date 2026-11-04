@@ -18,9 +18,7 @@
 // below it, deeper and softer as focus lifts it, and the rain's light lies
 // on its glass. The near columns shift a few pixels more than the far ones
 // as a window is dragged. The code is calm while you work and shines
-// when windows move (Sean, 2026-10-29: "just don't make it too flashy ...
-// Unless like I'm moving windows round or whatever, then you can really make
-// things shine"): a moving window drags the rain beside it along and leaves
+// when windows move (SPEC.md, "Calm"): a moving window drags the rain beside it along and leaves
 // a bright wake, and landing bursts glyphs out from the window's edge, brief,
 // then calm. The rest is soft: opening or taking focus brightens the rain
 // round a window for a moment, closing leaves a glow that fades, and the rain

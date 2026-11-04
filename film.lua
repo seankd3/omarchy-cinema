@@ -43,13 +43,12 @@ local function glow(alpha)
 end
 
 -- Every window is glass over the backdrop: its background turns to glass and
--- its text stays opaque (Sean, 2026-10-28: "the transparency should effect the
--- background but not the text"). The plugin draws that in Hyprland's window
+-- its text stays opaque. The plugin draws that in Hyprland's window
 -- shader at the theme's glass, in the version Hyprland uses for windows it
 -- blurs, which is the one use_shader_blur_blend selects. Hyprland blurs only
 -- behind windows it can see through, so glass windows are 0.999 opaque: no
--- visible fade, but blurred behind. Browsers stay solid (Sean: "except
--- chrome"), as anything at 1 does. Terminals keep their text crisp the same
+-- visible fade, but blurred behind. Browsers stay solid, as anything at 1
+-- does. Terminals keep their text crisp the same
 -- way; Glassy mode clears their background.
 require("default.hypr.glass")()
 o.transparent_window(".*", "0.999 0.999")
@@ -57,11 +56,9 @@ o.transparent_window({ tag = "terminal" }, "0.999 0.999")
 o.window({ tag = "chromium-based-browser" }, { opacity = "1 1" })
 o.window({ tag = "firefox-based-browser" }, { opacity = "1 1" })
 
--- Room around and between the windows for the backdrop's light to play in
--- (Sean, 2026-10-28: "more space between windows and the edge of the screen to
--- give more breathing room for the effects", then "double it, preportional"),
+-- Room around and between the windows for the backdrop's light to play in,
 -- in proportion to the screen: 64 px for each 1440 of the smallest screen's
--- shorter side, the side a column of windows runs out of (64 on his 2304x1440,
+-- shorter side, the side a column of windows runs out of (64 at 2304x1440,
 -- 48 at 1920x1080, 34 at 1366x768).
 local function room()
   local short
@@ -116,15 +113,14 @@ hl.config({
 hl.layer_rule({ match = { namespace = "^(omarchy-bar|omarchy-notifications)$" }, xray = true })
 
 -- A light frost: text on the glass is opaque, so nothing behind it competes,
--- and the backdrop's lines should read through (Sean, 2026-10-28: "I don't
--- really see this transparency getting applied"; the heavier 8 x 3 frost had
+-- and the backdrop's lines should read through (the heavier 8 x 3 frost
 -- smeared Tron's grid to black). Omarchy's glass toggles load after the theme
 -- and set their own, so this is set once the whole config has loaded.
 -- Glassy mode also fades Files whole, text included; under a film theme its
 -- background turns to glass like every other window's instead.
 -- A light film's frost keeps its light: Omarchy's glass dims the blur to 0.75,
--- which on white glass leaves apps' dimmed secondary text under 4.5:1 (Sol,
--- 2026-10-28, Oblivion); a dark film keeps Omarchy's dimming.
+-- which on white glass leaves apps' dimmed secondary text under 4.5:1
+-- (Oblivion); a dark film keeps Omarchy's dimming.
 local frost = { size = tonumber(colors.frost) or 3, passes = 2, brightness = colors.mode == "light" and 1 or nil }
 hl.on("config.reloaded", function()
   hl.config({ decoration = { blur = frost } })

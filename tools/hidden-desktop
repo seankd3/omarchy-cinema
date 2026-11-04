@@ -1,17 +1,17 @@
 #!/bin/bash
-# Runs a command on a Hyprland desktop that is never on screen: Sean's desktop
+# Runs a command on a Hyprland desktop that is never on screen: your desktop
 # with this checkout installed, logged in inside a sandbox.
 #
 #   tools/hidden-desktop [--fresh] [--size WxH] [--scale S] [--theme SLUG] [--plugin SO] [--out DIR] <command> [args...]
 #
-# The sandbox has Sean's configuration (~/.config, ~/.local, ~/.cache) and
-# this checkout as copies whose changes are thrown away, and none of his other
+# The sandbox has your configuration (~/.config, ~/.local, ~/.cache) and
+# this checkout as copies whose changes are thrown away, and none of your other
 # files. With --fresh it has a new Omarchy user's instead: /etc/skel as
 # Omarchy's installer provisions it, logged in once for Omarchy's first-run
 # setup and out again, and copies of its ~/.config and ~/.local from before
 # and after ./install in $XDG_RUNTIME_DIR/fresh/{before,installed} for the
-# command to compare with. It has no route to his session: its own runtime
-# directory (no compositor, Hyprland socket or session bus of his), nothing
+# command to compare with. It has no route to your session: its own runtime
+# directory (no compositor, Hyprland socket or session bus of yours), nothing
 # of /run (no system bus, so no logind and no power), no network, and the
 # GPU's render nodes as its only hardware (NVIDIA's are /dev/nvidia0 and
 # nvidiactl too, never nvidia-modeset, its display engine), and no core
@@ -28,8 +28,8 @@
 # and gets one hypr.* directory per run (Hyprland's sockets and log),
 # desktop.log (what the desktop's own processes said) and frames.log (when
 # each frame was shown, on frameclock's 60 Hz vblanks, and the backdrop's time
-# in it; tools/smoothness reads it). The desktop is Sean's
-# screen, 2880x1800 at 1.25, unless --size and --scale say otherwise.
+# in it; tools/smoothness reads it). The desktop is
+# 2880x1800 at 1.25, unless --size and --scale say otherwise.
 #
 # Each wait lasts as long as what it waits for is alive, however loaded the
 # machine is; a deadline for the whole run is the caller's: run it under
@@ -248,7 +248,7 @@ log=/dev/null
 cd "$here"
 # Nothing in it dumps core: the kernel pipes a core to the host's
 # systemd-coredump, whose journal entry Omarchy's crash watcher turns into a
-# toast on Sean's screen, and a limit of one byte is the kernel's own "never
+# toast on your screen, and a limit of one byte is the kernel's own "never
 # pipe this core".
 exec prlimit --core=1 bwrap "${sandbox[@]}" -- dbus-run-session -- "$here/tools/hidden-desktop" --inside "$size" "$theme" "$out" "$plugin" "$fresh" "$@" \
   3>&1 4>&2 >"$log" 2>&1

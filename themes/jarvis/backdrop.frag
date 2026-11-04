@@ -4,9 +4,8 @@
 // window's edges; light pools in the seams between windows and wakes the hex
 // lattice near them; dust drifts through the beam.
 //
-// The windows stand in the workshop's light (specs/depth.md), calmly (Sean,
-// 2026-10-29: "nice and elegant and give depth to the window, but we don't
-// need too much crazy movement going on"). The arc reactor glows up from the
+// The windows stand in the workshop's light (specs/depth.md), calmly
+// (SPEC.md, "Calm"). The arc reactor glows up from the
 // table below the screen, so each window shades the lattice, the dust and
 // the light pooled in the seams on its far side, further and softer as focus
 // lifts it; the holograms (globe, rings) are light and cast no shadow. Holo
@@ -129,9 +128,7 @@ vec3 holdLines(vec2 px, int i, vec3 cyan) {
     return tint * (glowLine(o, 0.9, HALO) * (0.1 + 0.3 * dash) * exp(-toCorner / 150.0) + node * 0.45) * w.alpha;
 }
 
-// A moving window's wake, which may shine (Sean, 2026-10-29: "unless like
-// I'm moving windows round ... then you can really make things shine"):
-// dashed afterimages of it where it just was over a wash of scanned light,
+// A moving window's wake, which may shine: dashed afterimages of it where it just was over a wash of scanned light,
 // outside the window itself, and the lattice it sweeps across lit up
 // (`lattice`). It is gone as soon as the window stops. Past 70 px from
 // where the window was in the last 0.16 s (its last afterimage's lag) the

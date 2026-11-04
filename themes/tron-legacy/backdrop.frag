@@ -5,9 +5,7 @@
 // window they run orange, as Clu's do.
 //
 // The windows stand on the Grid (specs/depth.md), calmly, and shine when they
-// move (Sean, 2026-10-29: "nice and elegant and give depth to the window";
-// "Unless like I'm moving windows round ... then you can really make things
-// shine"): lit from the horizon behind them, each casts its shadow toward the
+// move (SPEC.md, "Calm"): lit from the horizon behind them, each casts its shadow toward the
 // viewer, further and softer as focus lifts it, and the floor gives under its
 // weight; a moving window leaves a bright light-cycle trail of its circuit and
 // landing rings out through the grid; closing sends one soft ring, opening
@@ -21,7 +19,7 @@ const vec2 HALO = vec2(0.25, 6.0); // how the Grid's lines glow (glowLine)
 // The floor under the point, in floor units: x across, z away from the viewer.
 // The viewer glides forward a cell every two seconds; eight cells per sixteen
 // seconds, so the hourly wrap moves the floor by whole cells. The viewer
-// stands on the middle line, so the Grid is symmetrical (Sean, 2026-11-03: "I liked how it stayed symmetrical").
+// stands on the middle line, so the Grid stays symmetrical.
 vec2 floorAt(vec2 px, float horizon) {
     float dy = max(px.y - horizon, 0.5);
     float depth = 140.0 * resolution.y / dy;
@@ -64,9 +62,7 @@ float gridLit(vec2 px) {
     for (int i = 0; i < impulseCount; i++) {
         vec4 e = impulses[i];
         int kind = impulseKinds[i];
-        // Calm, except where windows move (Sean, 2026-10-29: "don't make it
-        // too flashy ... Unless like I'm moving windows round ... then you can
-        // really make things shine"): landing rings out bright, closing is a
+        // Calm, except where windows move: landing rings out bright, closing is a
         // gentle ring, typing and speech make none.
         if (kind == LAND) lit += 3.2 * e.w * wave(px, foot(i), e.z, 900.0, 45.0);
         else if (kind == CLOSE) lit += 1.0 * wave(px, foot(i), e.z, 900.0, 60.0);

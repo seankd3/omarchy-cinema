@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Sends the backdrop plugin the newest plaintext the agents on this machine
-produced, as a ring of characters, for themes whose backdrop draws text (The
-Matrix rains it). specs/agent-rain.md is the contract.
+"""The plugin's one door for outside input, over a datagram socket it never
+waits on; specs/agent-rain.md is the contract.
 
-It also sends how loud speech is while Voxtype records, and when speech starts
-and stops, for every film (specs/depth.md, "Voice"): its own small message on
-the same socket, from its own thread, apart from the text and its lettering
-gate. Only loudness and activity: Voxtype's audio bridge carries no audio or
+With no argument it sends how loud speech is while Voxtype records, and when
+speech starts and stops, for every film (specs/depth.md, "Voice"). Only
+loudness and activity: Voxtype's audio bridge carries no audio or
 transcript, and nothing is kept.
 
-It follows the session logs the agents already write as they work, Claude
-Code's (child agents' too) and Codex's (T3 Code threads run on both), takes
-each record's text once from its canonical place, and sends the plugin a
-complete snapshot over a datagram socket it never waits on. The text lives
-only in this process and the plugin; nothing is written anywhere.
+With `agents` it sends the newest plaintext the agents on this machine
+produced, as a ring of characters, for themes whose backdrop draws text (The
+Matrix rains it). It follows the session logs the agents already write as
+they work, Claude Code's (child agents' too) and Codex's, takes each
+record's text once from its canonical place, and sends a complete snapshot.
+The text lives only in this process and the plugin; nothing is written
+anywhere. It runs only once the user turns it on (README).
 """
 
 import bisect
@@ -25,7 +25,7 @@ import select
 import socket
 import struct
 import subprocess
-import threading
+import sys
 import time
 
 HOME = os.path.expanduser("~")
@@ -259,8 +259,9 @@ def voice():
             send(0.0, False)
 
 
-def main():
-    threading.Thread(target=voice, daemon=True).start()
+def agents():
+    """Follow the running agents' logs while the applied theme draws text, and
+    send the plugin their newest text."""
     history = History()
     logs = {}
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -311,4 +312,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    agents() if sys.argv[1:] == ["agents"] else voice()

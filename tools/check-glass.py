@@ -6,7 +6,7 @@ The plugin turns a window pixel to glass when it matches one of colors.toml's
 background shades (background, dark_background, darker_background,
 lighter_background) to within 2.5/255 on every channel. Those shades are for
 window backgrounds alone: text, icons, panels, cards, fields, popovers and
-dialogs in one of them go see-through with the window (Sol, 2026-10-28). So
+dialogs in one of them go see-through with the window. So
 every solid colour in gtk.css that matches a shade is listed, except on the
 window-background properties named below.
 
