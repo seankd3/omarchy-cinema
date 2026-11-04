@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 7
+// omarchy-cinema contract 8
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -59,10 +59,6 @@ uniform int focusedIndex;
 // focused, focusedIndex and `focused` stay on it as it fades out and this
 // falls with it; with no window focused on this screen it eases to 0.
 uniform float focusAlpha;
-
-// The pointer: position (xy) and velocity (zw, px a second) on this screen.
-// It moves in the same frame as the cursor.
-uniform vec4 pointer;
 
 // What happened lately (specs/depth.md): the last 32 things, newest last, each
 // a point, its age in seconds (it is gone after 3), a strength from 0 to 1 and

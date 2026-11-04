@@ -11,7 +11,8 @@ they have depth?"; "could we make the workspace changes live as 3d items?";
 "lets try lots of stuff". Asked how far windows go in 3D (glass only,
 physical glass that tilts with momentum, a full 3D desktop): "lets try all".
 Asked what the world reacts to: window motion, the pointer, typing and voice
-(typing has no answer since contract 6).
+(typing has no answer since contract 6, the pointer none since contract 8:
+taste sheet 8).
 
 Standing rules from SPEC.md stay: same frame as the windows, cheap at rest,
 no HUD, no full-screen post shader, text opaque. New one, implied by the
@@ -41,8 +42,6 @@ Each is one fact with one source; nothing is stored that can be computed.
   (eased to 1 for the focused window, 0 for the rest, over FOCUS_EASE) and
   `z` (its place in Hyprland's stacking order, 0 on top). Shadows, rims,
   wakes and tilt all read these.
-- **Pointer.** `pointer`: position and velocity in logical px, read at
-  `render.pre` from Hyprland's pointer.
 - **Impulses.** One ring of the last 32 things that happened, each a point,
   an age in seconds, a strength and a kind: `OPEN`, `CLOSE`, `LAND`,
   `FOCUS`. Every film reads the same ring and answers each kind its own way
@@ -232,11 +231,10 @@ animation, which Omarchy turns off so a switch is instant.
 Two kinds of change, two rules, for every fact above:
 - **The windows changed** (geometry, fade, lift, a switch frame): damage the
   monitor and the glass in this frame, as today.
-- **Only the world's answer changed** (pointer, an impulse alive, voice):
+- **Only the world's answer changed** (an impulse alive, voice):
   damage the monitor in this frame, and leave the glass to the next
-  frame the world moves in. A pointer move schedules a frame for its monitor, so the light
-  follows the cursor in the same frame.
-At rest (no window moving, no impulse alive, pointer and voice still) the
+  frame the world moves in.
+At rest (no window moving, no impulse alive, voice still) the
 plugin does exactly what it does today. Per-pixel cost (shadows, the impulse
 loop) is a budget, measured, not assumed: each film's backdrop at most 1.5 ms
 a frame at 2880 x 1800 on the N1X (`tools/gpu-bench`), and idle power at rest within 10% of

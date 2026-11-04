@@ -1,4 +1,4 @@
-// omarchy-cinema contract 7
+// omarchy-cinema contract 8
 // Oblivion: Tower 49 at dawn. A high pale sky over a sea of cloud that slides
 // slowly toward the tower, the sun low on the horizon and the broken moon faint
 // in the daylight. Every window is a pane of the tower's glass, traced by a fine
@@ -17,8 +17,7 @@
 // gold caustic, further and softer as focus lifts the pane, and a lifted
 // pane glows brighter against the sky. The cloud deck flows round each pane,
 // bending and curling at its edges, and piles up white against them where it
-// catches the sun. The view never moves with the pointer, which only gathers
-// a little sunlight. Moving a pane is where the sky shines: the pane pulls the deck after it,
+// catches the sun. Moving a pane is where the sky shines: the pane pulls the deck after it,
 // draws vapour trails from its corners and parts the cloud behind it; when it
 // lands a pressure wave runs out with a bright crest and the sun flashes gold
 // off its edges, gone within 1.2 s. Under each pane the glass catches a sheen that slides as the pane
@@ -332,10 +331,6 @@ vec4 backdrop(vec2 px) {
         // The cloud a moving pane parts: deeper below the deck's tops, and a
         // white haze of its passage in the sky.
         col = mix(col, mix(vec3(1.0), DEEP, deck), part * mix(0.5, 0.35, deck));
-
-        // A little sunlight gathers round the pointer.
-        float hand = exp(-length(px - pointer.xy) / 230.0);
-        col = mix(col, mix(vec3(1.0), GOLD, 0.6), hand * 0.12);
 
         if (closest >= 0 && nearest < 60.0) {
             Window c = window(px, closest);

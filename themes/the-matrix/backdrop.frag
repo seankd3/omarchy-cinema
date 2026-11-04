@@ -1,4 +1,4 @@
-// omarchy-cinema contract 7
+// omarchy-cinema contract 8
 // The Matrix: the code, and the code is what the agents on this machine are
 // writing (specs/agent-rain.md). Their text rains down the black screen in
 // mirrored glyphs, each stream led by a white-hot head carrying the newest
@@ -17,8 +17,7 @@
 // The windows stand in the rain (specs/depth.md): each shelters the rain
 // below it, deeper and softer as focus lifts it, and the rain's light lies
 // on its glass. The near columns shift a few pixels more than the far ones
-// as a window is dragged; the view never moves with the pointer, and the
-// rain is only a little brighter under it. The code is calm while you work and shines
+// as a window is dragged. The code is calm while you work and shines
 // when windows move (Sean, 2026-10-29: "just don't make it too flashy ...
 // Unless like I'm moving windows round or whatever, then you can really make
 // things shine"): a moving window drags the rain beside it along and leaves
@@ -220,15 +219,12 @@ vec4 backdrop(vec2 px) {
         + green * (mid.x * 0.62 + mid.z * 0.06) + HEAD * mid.y * 0.9;
     vec3 front = green * (close.x * 1.0 + close.z * 0.1) + HEAD * close.y * 1.6;
 
-    // Out in the open the rain is brightest round the focused window, a
-    // little brighter under the pointer, in a moving window's wake, where
-    // something just happened and as you speak; the rain behind the windows
-    // is sheltered below them.
+    // Out in the open the rain is brightest round the focused window, in a
+    // moving window's wake, where something just happened and as you speak;
+    // the rain behind the windows is sheltered below them.
     vec4 answer = answers(px, nearCell(px, shift));
-    vec2 toPointer = px - pointer.xy;
-    float touch = exp(-dot(toPointer, toPointer) / (2.0 * 90.0 * 90.0));
     float shade = 1.0 - 0.75 * shadow;
-    float lit = (1.0 + 0.6 * nearFocus) * (1.0 + 0.35 * touch + 2.5 * wake + answer.y + 0.3 * voice);
+    float lit = (1.0 + 0.6 * nearFocus) * (1.0 + 2.5 * wake + answer.y + 0.3 * voice);
     vec3 light = behind * mix(1.0, lit * shade, open) + front * lit;
     light += green * 0.16 * wake * open;
 

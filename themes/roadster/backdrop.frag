@@ -1,4 +1,4 @@
-// omarchy-cinema contract 7
+// omarchy-cinema contract 8
 // Roadster: the 2026 Roadster's cockpit, drawn like a fighter jet's display.
 // A floor of red dots runs out to a thin white horizon and rushes toward the
 // viewer, with streaks of speed along it. A wireframe wedge turns slowly on
@@ -13,8 +13,7 @@
 // and streaks toward the viewer, further and softer as focus lifts it. The
 // floor's lanes bow out round each window's foot, so the dots and the speed
 // streaks route round it, and the floor's own lines run from each foot's
-// corners toward the viewer. The view never moves with the pointer, which
-// only lights the floor round it. Moving a window is where the cockpit shines: the window pulls the floor after it, throws speed
+// corners toward the viewer. Moving a window is where the cockpit shines: the window pulls the floor after it, throws speed
 // lines back from its trailing edge and a flight path marker rides ahead of
 // it; at touchdown its seams flash and a shock runs out over the floor, gone
 // within 1.2 s. Behind
@@ -234,8 +233,6 @@ vec4 backdrop(vec2 px) {
     float shade = 1.0 - 0.85 * shadow;
     float lit;
     vec3 answered = answers(px, red, horizon, lit) + speeding;
-    // The floor lights up a little round the pointer.
-    lit += 0.4 * exp(-length((px - pointer.xy) * vec2(1.0, 1.6)) / 200.0);
     float inside = 1.0 - smoothstep(-1.0, 1.0, nearest);
     // Behind a window's glass, and the bar's, only a trace of the light shows.
     float veil = mix(1.0, 0.16, max(inside, step(px.y, reserved.x)));

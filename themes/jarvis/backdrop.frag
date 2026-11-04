@@ -1,4 +1,4 @@
-// omarchy-cinema contract 7
+// omarchy-cinema contract 8
 // Jarvis: a holographic globe in a gyroscope of rings, turning behind the
 // focused window and sized to it. It glows through the glass and past the
 // window's edges; light pools in the seams between windows and wakes the hex
@@ -11,8 +11,7 @@
 // the light pooled in the seams on its far side, further and softer as focus
 // lifts it; the holograms (globe, rings) are light and cast no shadow. Holo
 // lines hold each window, running along its edges in the seams and
-// converging on its corners. The view never moves with the pointer, which
-// only lights the lattice under it. Moving a window is where the workshop
+// converging on its corners. Moving a window is where the workshop
 // shines: the window pulls the hologram after it and the lattice less,
 // swings the rings like a carousel and leaves dashed afterimages over
 // scanned light; when it lands a white-hot shock runs out through the
@@ -262,14 +261,12 @@ vec4 backdrop(vec2 px) {
     // The rings swing with the focused window as it moves, like a carousel
     // pushed round, and settle back when it stops.
     float swing = focusedIndex < 0 ? 0.0 : clamp(window(px, focusedIndex).velocity.x * 0.00016, -0.4, 0.4);
-    float hand = exp(-length(px - pointer.xy) / 170.0);
 
     // Deep navy, lifted around the globe and darker toward the corners.
     vec3 base = background * (0.55 + 0.6 * exp(-r / (reach * 1.8)) * mix(1.0, shade, 0.6));
     vec3 light = vec3(0.0);
 
-    light += cyan * hexDots(world, 26.0) * (0.03 + 0.3 * near + 0.25 * hand + lattice) * shade;
-    light += cyan * 0.015 * hand;
+    light += cyan * hexDots(world, 26.0) * (0.03 + 0.3 * near + lattice) * shade;
 
     float rim;
     float g = globe(p, Rg, rim);

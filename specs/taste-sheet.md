@@ -56,9 +56,15 @@ data, Jarvis's glass 0.6) are in git history.
    presented 43 to 50 frames a second at rest in every film, and the
    Matrix's whole scene with the agents writing cost 88 to 113 GPU ms a
    second. What one small part alone would cost is not measured.
-   Recommend: all of it still at rest, as built.
-8. The pointer: in every film, each mouse move draws the whole world again
-   (the plugin damages the monitor for the pointer's light), as moving a
+   Recommend: all of it still at rest, as built. Decided (coordinator,
+   2026-11-04): as built.
+8. The pointer (coordinator, 2026-11-04: let it go; built in films/pointer,
+   contract 8): the five films' faint light round the pointer is gone, and
+   with it the whole-world redraw every mouse move asked for, so a mouse
+   move draws what a stock theme's does. Stills, before and after with the
+   pointer at the screen's middle: scratch/batch6/taste/pointer/. Asked:
+   in every film, each mouse move drew the whole world again
+   (the plugin damaged the monitor for the pointer's light), as moving a
    window does: 1.65 ms a frame in the Matrix, 1.86 in Oblivion and 1.93 in
    Evangelion at 1440x900, every frame the pointer moves. Five films light
    the world round the pointer (Jarvis, Tron, Oblivion, the Matrix,

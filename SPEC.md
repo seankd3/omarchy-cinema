@@ -53,7 +53,7 @@ between workspaces it runs at the wall clock's speed, and once they hold still
 it eases to a stop in about two seconds. A desktop holding still therefore
 draws nothing and asks for no frames: what clients redraw (a cursor, a clock)
 gets the world as it was, and the world at half size and the frost made from
-it are kept until the world changes. While a window, the focus, the pointer,
+it are kept until the world changes. While a window, the focus,
 voice, an answer or the agents' text coming or going changes, or the clock
 runs, the whole world is drawn every frame. Time stands still with
 animations off, the session locked, or every monitor asleep or fullscreen

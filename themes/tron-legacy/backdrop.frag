@@ -1,4 +1,4 @@
-// omarchy-cinema contract 7
+// omarchy-cinema contract 8
 // Tron Legacy: the Grid. A floor of light lines runs out to the horizon under
 // a black sky, and light cycles race along it, trailing light. Around every
 // window a circuit line is drawn, and pulses run along it; around the focused
@@ -12,7 +12,7 @@
 // weight; a moving window leaves a bright light-cycle trail of its circuit and
 // landing rings out through the grid; closing sends one soft ring, opening
 // draws one in; focus warms the circuit; the horizon glows a little with your
-// voice and the grid a little under the pointer.
+// voice.
 
 const vec3 ORANGE = vec3(1.0, 0.52, 0.10);
 const float CELL = 40.0; // grid spacing on the floor, in floor units
@@ -21,8 +21,7 @@ const vec2 HALO = vec2(0.25, 6.0); // how the Grid's lines glow (glowLine)
 // The floor under the point, in floor units: x across, z away from the viewer.
 // The viewer glides forward a cell every two seconds; eight cells per sixteen
 // seconds, so the hourly wrap moves the floor by whole cells. The viewer
-// stands on the middle line, so the Grid is symmetrical whatever the pointer
-// does (Sean, 2026-11-03: "I liked how it stayed symmetrical").
+// stands on the middle line, so the Grid is symmetrical (Sean, 2026-11-03: "I liked how it stayed symmetrical").
 vec2 floorAt(vec2 px, float horizon) {
     float dy = max(px.y - horizon, 0.5);
     float depth = 140.0 * resolution.y / dy;
@@ -58,10 +57,10 @@ vec2 foot(int k) {
     return vec2(impulses[k].x, r.y + r.w);
 }
 
-// How much the grid lights up at px, from everything that happened lately and
-// the pointer above it: 0 when nothing did.
+// How much the grid lights up at px, from everything that happened lately: 0
+// when nothing did.
 float gridLit(vec2 px) {
-    float lit = 0.45 * exp(-length((px - pointer.xy) * vec2(1.0, 2.4)) / 260.0);
+    float lit = 0.0;
     for (int i = 0; i < impulseCount; i++) {
         vec4 e = impulses[i];
         int kind = impulseKinds[i];
@@ -156,8 +155,8 @@ vec4 backdrop(vec2 px) {
         float shade = 1.0 - 0.7 * shadow;
         float lit = gridLit(px);
         light += cyan * grid * fade * (0.35 + 0.9 * near) * (1.0 + lit) * shade;
-        // The waves and the pointer's light carry a soft band of their own, so
-        // they read through frosted glass as well as in the seams.
+        // The waves carry a soft band of their own, so they read through
+        // frosted glass as well as in the seams.
         light += cyan * 0.05 * lit * fade * shade;
         // The floor holds a little light of its own near the horizon.
         light += cyan * 0.05 * exp(-(px.y - horizon) / 90.0);

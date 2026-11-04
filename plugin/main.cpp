@@ -35,7 +35,6 @@
 #include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/managers/SessionLockManager.hpp>
-#include <hyprland/src/pointer/PointerManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/plugins/PluginAPI.hpp>
@@ -79,8 +78,8 @@ using namespace Render::GL;
 namespace {
 
     constexpr double FOCUS_EASE  = 0.32; // seconds
-    // A window's and the pointer's velocity ease over this long, so one late
-    // frame does not spike them.
+    // A window's velocity eases over this long, so one late frame does not
+    // spike it.
     constexpr double VELOCITY_EASE = 0.08; // seconds
     // What happened lately (specs/depth.md, part 1): the last IMPULSES things,
     // each gone IMPULSE_LIFE after it happened. Kinds as contract.glsl names them.
@@ -187,7 +186,6 @@ void main() {
     // part 6), the agents' text and its own clock. A change here draws it
     // again, glass and all.
     struct SAnswer {
-        std::array<float, 4> pointer{}; // x, y, velocity x, y
         uint64_t             impulses = 0; // the impulse ring's generation
         float                voice    = 0; // speech loudness, 0 to 1
         float                presence = 0; // how present the agents' text is (contract.glsl, feedPresence)
@@ -196,7 +194,7 @@ void main() {
     };
 
     // How something moves between frames, so its velocity is known and its
-    // lift eases. Kept by a window's stable id, and per monitor for the pointer.
+    // lift eases. Kept by a window's stable id.
     struct SMotion {
         Vector2D                              at;
         std::array<float, 2>                  velocity{};
@@ -224,7 +222,6 @@ void main() {
         SScene                                drawn;
         SAnswer                               answer; // read for the frame being drawn
         SAnswer                               answered;
-        SMotion                               pointer;
         // What the focus decoration follows: the focused window, or, once it
         // has closed with nothing else focused here, its fadeout until that
         // has faded. A source is a window's stable id, which its fadeout
@@ -250,7 +247,7 @@ void main() {
         GLuint id = 0;
         GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
         GLint  feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
-        GLint  pointer, impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder, drawnWorld, worldProj;
+        GLint  impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder, drawnWorld, worldProj;
     };
 
     // A monitor's world as it was last drawn whole, kept until the world
@@ -593,7 +590,6 @@ void main() {
         p.feedPos       = at("feedPos");
         p.glyphsUniform = at("glyphs");
         p.feedPresence  = at("feedPresence");
-        p.pointer       = at("pointer");
         p.impulses      = at("impulses");
         p.impulseKinds  = at("impulseKinds");
         p.impulseWindows = at("impulseWindows");
@@ -954,9 +950,9 @@ void main() {
 
     float feedPresence(std::chrono::steady_clock::time_point now);
 
-    // The pointer over this monitor, the impulse ring as it stands, after
-    // letting go of impulses that have run out, and the agents' text.
-    SAnswer readAnswer(PHLMONITOR monitor, SMonitor& state) {
+    // The impulse ring as it stands, after letting go of impulses that have
+    // run out, voice, the agents' text and the world's clock.
+    SAnswer readAnswer() {
         const auto now = std::chrono::steady_clock::now();
         while (!g->impulses.empty() && std::chrono::duration<double>(now - g->impulses.front().start).count() > IMPULSE_LIFE) {
             g->impulses.pop_front();
@@ -968,12 +964,10 @@ void main() {
         const float presence = feedPresence(now);
         if (!answering()) {
             letGo();
-            return {{float(monitor->m_size.x / 2.0), float(monitor->m_size.y / 2.0), 0.F, 0.F}, g->impulseGeneration, 0.F, presence, g->time};
+            return {g->impulseGeneration, 0.F, presence, g->time};
         }
-        const auto at = Pointer::mgr()->untransformedPosition() - monitor->m_position;
-        step(state.pointer, at, false, now);
         const float voice = now - g->voiceReceived <= VOICE_STALE ? g->voice : 0.F;
-        return {{float(at.x), float(at.y), state.pointer.velocity[0], state.pointer.velocity[1]}, g->impulseGeneration, voice, presence, g->time};
+        return {g->impulseGeneration, voice, presence, g->time};
     }
 
     bool covered(PHLMONITOR monitor) {
@@ -1376,7 +1370,6 @@ vec4 cinemaGlass(vec4 c) {{
         glUniform1i(p.feedCount, gpu.glyphsUploaded && answer.presence > 0 && kept.feedUploaded ? int(kept.feedCount) : 0);
         glUniform1i(p.feedPos, int(kept.feedPos));
         glUniform1f(p.feedPresence, answer.presence);
-        glUniform4fv(p.pointer, 1, answer.pointer.data());
         glUniform1f(p.voice, answer.voice);
         // The impulses with their ages now, on this monitor's coordinates:
         // ages from the monotonic clock, so the hourly wrap of `time` never
@@ -1870,7 +1863,7 @@ vec4 cinemaGlass(vec4 c) {{
         // The clock is every monitor's: when it runs, each is drawn again.
         if (g->time != before)
             wake();
-        state.answer = readAnswer(monitor, state);
+        state.answer = readAnswer();
         // A change of the world changes it everywhere: all of it, the
         // half-size world and the frost too, is drawn again in this frame.
         state.changed = state.pending != state.drawn || state.answer != state.answered || !g->impulses.empty();
@@ -1934,14 +1927,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         decorate(window);
     static auto ACTIVE = Event::bus()->m_events.window.active.listen(
         [](PHLWINDOW window, Desktop::eFocusReason) { windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_CURRENT, 0.6F, IMPULSE_FOCUS); });
-    // The pointer's light follows it in the same frame: a move draws its
-    // monitor again (a hardware cursor alone would not).
-    static auto MOVE = Event::bus()->m_events.input.mouse.move.listen([](const Vector2D& at, Event::SCallbackInfo&) {
-        if (!g || g->source.empty())
-            return;
-        if (const auto monitor = State::monitorState()->query().vec(at).run())
-            g_pHyprRenderer->damageMonitor(monitor);
-    });
     static auto RELOADED = Event::bus()->m_events.config.reloaded.listen([] {
         if (!g)
             return;
