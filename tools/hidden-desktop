@@ -129,9 +129,16 @@ if [[ ${1:-} == --inside ]]; then
     cp -rT /etc/skel ~
     OMARCHY_SETUP_CONTEXT=iso-chroot omarchy-provision-user --first-install >/dev/null 2>&1 || true
     login
-    omarchy-provision-first-run >/dev/null 2>&1 || true
+    # This login's run of the first-run setup, its log lines and its status,
+    # in $XDG_RUNTIME_DIR/fresh too.
+    mkdir -p "$run/fresh/before"
+    log=~/.local/state/omarchy/first-run.log
+    from=$(($({ wc -l <"$log"; } 2>/dev/null || echo 0) + 1)) status=0
+    omarchy-provision-first-run >/dev/null 2>&1 || status=$?
+    echo "$status" >"$run/fresh/first-run.status"
+    tail -n "+$from" "$log" >"$run/fresh/first-run.log" 2>/dev/null || true
     logout
-    mkdir -p "$run/fresh/before" && cp -a ~/.config ~/.local "$run/fresh/before/"
+    cp -a ~/.config ~/.local "$run/fresh/before/"
   fi
 
   # What a login finds: this checkout installed, and the theme applied the

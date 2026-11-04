@@ -21,7 +21,8 @@ esac
 # themes, and what its record says (state/record, a line for each change it
 # made, in order, from the first run on): a file or directory it wrote where
 # there was none, or over its own, with what it wrote; a line it added to a
-# file of the user's; a Voxtype setting it changed, from what to what. The
+# file of the user's; a link it replaced, with where it pointed; a Voxtype
+# setting it changed, from what to what. The
 # uninstall undoes the record newest first and keeps what the user changed
 # since. An install from before the record (2026-11-04) has none, so its
 # lines, templates, feed unit and Chrome hook stay.
@@ -38,15 +39,20 @@ dirs() {
 # File $1 from stdin (mode $2, else 644), where there is none or it is as
 # this last wrote it; one the user made or changed stays theirs.
 made() {
-  local new last; new=$(cat; echo .)
+  local new; new=$(cat; echo .)
   if [[ -e $1 || -L $1 ]]; then
-    last=$(awk -F '\t' -v path="$1" '$1 == "made" && $2 == path { s = $3 } END { print s }' "$state/record" 2>/dev/null)
-    [[ -f $1 && -n $last && $(fingerprint "$1") == "$last" && $last != $(printf '%s' "${new%.}" | fingerprint /dev/stdin) ]] || return 0
+    ours "$1" && [[ $(fingerprint "$1") != $(printf '%s' "${new%.}" | fingerprint /dev/stdin) ]] || return 0
   fi
   dirs "${1%/*}"
   printf '%s' "${new%.}" >"$1"
   chmod "${2:-644}" "$1"
   record "made	$1	$(fingerprint "$1")"
+}
+# Whether file $1 is as this install last wrote it (no record: never).
+ours() {
+  local last=""
+  [[ -f $state/record ]] && last=$(awk -F '\t' -v path="$1" '$1 == "made" && $2 == path { s = $3 } END { print s }' "$state/record")
+  [[ -f $1 && -n $last && $(fingerprint "$1") == "$last" ]]
 }
 # A file's contents, trailing newlines and all.
 contents() { local c; c=$(cat "$1"; echo .); printf '%s' "${c%.}"; }
@@ -149,13 +155,16 @@ if [[ -z $remove ]]; then
 fi
 [[ -n $remove && $other == /usr/lib/omarchy-cinema/ ]] && rm -rf ~/.local/lib/omarchy-cinema
 
-# A link never replaces a file, a directory or a link of the user's: their
-# theme of the same name stays, and the install stops.
+# A link never replaces a real directory or file: the user's own theme of the
+# same name stays, and the install stops. A link it replaces that pointed
+# elsewhere (another clone's film) is recorded, and the uninstall puts it
+# back.
 link() {
-  if [[ -e $2 || -L $2 ]] && [[ $(readlink "$2") != "$here/themes/"* ]]; then
-    echo "$2 exists and is not this install's; move it aside first" >&2
+  if [[ -e $2 && ! -L $2 ]]; then
+    echo "$2 exists and is not a link; move it aside first" >&2
     exit 1
   fi
+  [[ -L $2 && $(readlink "$2") != "$here/themes/"* ]] && record "link	$2	$(readlink "$2")"
   ln -sfn "$1" "$2"
   linked[$2]=1
 }
@@ -244,11 +253,12 @@ fi
 # service that follows the agents' logs while a theme with lettering is
 # applied and idles otherwise (specs/agent-rain.md). It writes nothing; its
 # output goes nowhere, and its errors, which never carry agent text, reach the
-# journal. With no user manager to reach (a console, a sandbox) the feed is
+# journal. It is started and stopped only while its unit is as the install
+# wrote it. With no user manager to reach (a console, a sandbox) the feed is
 # not enabled, and the rest still runs.
 unit=~/.config/systemd/user/omarchy-cinema-feed.service
 if [[ -n $remove ]]; then
-  systemctl --user disable --now omarchy-cinema-feed.service >/dev/null 2>&1 || true
+  if ours "$unit"; then systemctl --user disable --now omarchy-cinema-feed.service >/dev/null 2>&1 || true; fi
 else
   made "$unit" <<EOF
 [Unit]
@@ -265,8 +275,11 @@ StandardOutput=null
 [Install]
 WantedBy=graphical-session.target
 EOF
-  { systemctl --user daemon-reload && systemctl --user enable --now omarchy-cinema-feed.service; } >/dev/null 2>&1 ||
+  if ! ours "$unit"; then
+    echo "$unit is not as the install wrote it, so it is left as it is" >&2
+  elif ! { systemctl --user daemon-reload && systemctl --user enable --now omarchy-cinema-feed.service; } >/dev/null 2>&1; then
     echo "omarchy-cinema-feed did not start: systemctl --user status omarchy-cinema-feed" >&2
+  fi
 fi
 
 # Google Chrome's header follows the applied theme too (browser/chrome-theme):
@@ -285,8 +298,9 @@ else
   "$here/browser/chrome-theme" || echo "browser/chrome-theme failed: Chrome keeps the look it has" >&2
 fi
 
-# The record undone, newest first: a line taken out as it went in, a file
-# removed while it is as the install wrote it, a directory once it is empty,
+# The record undone, newest first: a line taken out as it went in, a link
+# put back where nothing has taken its place, a file removed while it is as
+# the install wrote it, a directory once it is empty,
 # a setting put back while it is as the install set it (Voxtype's default
 # comes back as the default). A setting with no Voxtype to put it back stays
 # in the record for the next uninstall.
@@ -295,6 +309,7 @@ if [[ -n $remove && -f $state/record ]]; then
   while IFS=$'\t' read -r kind path was ours; do
     case $kind in
       line) [[ -f $path ]] && take_line "$path" "$was" ;;
+      link) [[ -e $path || -L $path ]] || ln -s "$was" "$path" ;;
       made)
         if [[ $was == dir ]]; then
           rmdir "$path" 2>/dev/null || [[ ! -e $path ]] || echo "kept $path: something else is in it" >&2

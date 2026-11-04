@@ -6,8 +6,9 @@
 -- herdr) and the user's stay out, so the command starts everything else, and
 -- the user's monitors give way to the hidden screen.
 
-package.loaded["default.hypr.autostart"] = true
-package.loaded["hypr.autostart"] = true
+-- Preloaded, since Omarchy's bootstrap clears package.loaded of its modules.
+package.preload["default.hypr.autostart"] = function() return true end
+package.preload["hypr.autostart"] = function() return true end
 dofile(os.getenv("HOME") .. "/.config/hypr/hyprland.lua")
 
 -- The screen is frameclock's window, and the pointer it never has is not

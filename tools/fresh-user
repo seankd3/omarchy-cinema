@@ -22,9 +22,15 @@ if [[ ${1:-} == --inside ]]; then
   clean() { [[ -z $(hyprctl configerrors | tr -d '[:space:]') ]] || fail "config errors: $(hyprctl configerrors)"; }
   # Every first-run step done, but for those the sandbox cannot give: it has
   # no user systemd manager.
+  # The run reached its end: it marked itself done, or its last line says
+  # which steps it will try again.
   cannot='enable user systemd units'
-  grep -q 'Completed:' ~/.local/state/omarchy/first-run.log 2>/dev/null || fail "Omarchy's first-run setup did not run at the first login"
-  failed=$(sed -n 's/.*Failed: \(.*\) (exit code.*/\1/p' ~/.local/state/omarchy/first-run.log | sort -u)
+  ran=$XDG_RUNTIME_DIR/fresh/first-run.log
+  cp "$ran" "$out/"
+  [[ $(cat "$XDG_RUNTIME_DIR/fresh/first-run.status") == 0 ]] || fail "Omarchy's first-run setup failed at the first login"
+  omarchy-done check first-run-user || [[ $(tail -n 1 "$ran") == *"first-run steps failed"* ]] ||
+    fail "Omarchy's first-run setup did not reach its end at the first login ($ran)"
+  failed=$(sed -n 's/.*Failed: \(.*\) (exit code.*/\1/p' "$ran" | sort -u)
   [[ -z $(grep -vxF "$cannot" <<<"$failed") ]] || fail "first-run steps failed: $(grep -vxF "$cannot" <<<"$failed" | paste -sd ,)"
   [[ -z $failed ]] || echo "fresh-user: not covered here (no user systemd manager): $cannot"
   hyprctl plugin list | grep -q '^Plugin backdrop ' || fail "the engine did not load at login"
