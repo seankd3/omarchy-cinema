@@ -74,8 +74,7 @@ opaque, occlusion updated); that is a later design.
   file names. Install's Voxtype settings shrink to the Quickshell OSD,
   `style = "theme"`, and clearing a pinned `plugin_path` or fixed palette,
   which would win over the style.
-- **The preview's fake glass overlay**; the two preview tools share
-  `omarchy-cinema preview` and keep their own renderers.
+- The two preview tools' own commands: they share `omarchy-cinema preview`.
 
 ## Packaging
 

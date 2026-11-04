@@ -43,8 +43,12 @@ void main() {
 }
 """
 # The plugin links one of these after the film's shader (plugin/main-*.glsl).
-BACKDROP_MAIN = (ROOT / "plugin/dither.glsl").read_text() + (ROOT / "plugin/main-backdrop.glsl").read_text()
+DITHER = (ROOT / "plugin/dither.glsl").read_text()
+BACKDROP_MAIN = DITHER + (ROOT / "plugin/main-backdrop.glsl").read_text()
 FRAME_MAIN = (ROOT / "plugin/main-frame.glsl").read_text()
+# Hyprland's own window shader, from the installed build's headers, as the
+# plugin takes it from the running build (main.cpp, glassShaderSource()).
+SHADERS = Path("/usr/include/hyprland/src/render/shaders")
 
 
 def palette(theme):
@@ -54,6 +58,15 @@ def palette(theme):
         if m:
             colors[m[1]] = tuple(int(m[2][i:i + 2], 16) / 255 for i in (0, 2, 4))
     return colors
+
+
+def setting(theme, name, default):
+    """A number colors.toml gives as a string (glass, frost), else `default`."""
+    m = re.search(rf'^\s*{name}\s*=\s*"\s*([^"\s]*)\s*"', (theme / "colors.toml").read_text(), re.M)
+    try:
+        return float(m[1]) if m else default
+    except ValueError:
+        return default
 
 
 def layout():
@@ -170,17 +183,23 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
     return draw
 
 
+def half_world(ctx, theme, t, windows, focused, levels=1, **answers):
+    """The world at half size, as the plugin keeps it (RGB10_A2), with its
+    mipmap down to `levels`."""
+    world = ctx.texture((PIXELS[0] // 2, PIXELS[1] // 2), 4, internal_format=0x8059)
+    world.repeat_x = world.repeat_y = False
+    ctx.framebuffer([world]).use()
+    scene(ctx, theme, t, windows, focused, **answers)()
+    world.build_mipmaps(0, levels - 1)
+    world.filter = (moderngl.LINEAR_MIPMAP_NEAREST, moderngl.LINEAR)
+    return world
+
+
 def render(theme, t, windows, focused, frame=None, **answers):
     """One scene() drawn off screen: the backdrop as RGB, or a frame as
     premultiplied RGBA."""
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
-    world = None
-    if frame is not None:
-        world = ctx.texture((PIXELS[0] // 2, PIXELS[1] // 2), 4, dtype="f2")  # finer than 8 bits, as the plugin's
-        world.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        world.repeat_x = world.repeat_y = False
-        ctx.framebuffer([world]).use()
-        scene(ctx, theme, t, windows, focused, **answers)()
+    world = half_world(ctx, theme, t, windows, focused, **answers) if frame is not None else None
     draw = scene(ctx, theme, t, windows, focused, frame=frame, world=world, **answers)
     target = ctx.simple_framebuffer(PIXELS, components=4)
     target.use()
@@ -207,29 +226,108 @@ def with_frames(theme, image, t, windows, focused, **answers):
     return Image.fromarray((np.clip(out, 0, 1) * 255).astype("uint8"))
 
 
-def glass(image, windows, colors, focused, border=True):
-    """The windows as the film's glass would show them: their background a
-    darkened, blurred view of the backdrop, a lit border on the focused one,
-    and a block of text lines that stay opaque."""
-    from PIL import ImageDraw, ImageFilter
+def hyprland(name, defines):
+    """One of Hyprland's shaders with its includes in place, defines.h as
+    `defines`."""
+    text = (SHADERS / f"{name}.inc").read_text()
+    out = []
+    for line in text[text.index('R"#(') + 4: text.rindex(')#"')].splitlines():
+        m = re.match(r'\s*#include "(.+)"', line)
+        if m:
+            out.append(defines if m[1] == "defines.h" else hyprland(m[1], defines))
+        elif line.strip() != "#define ALLOW_INCLUDES" and "GL_ARB_shading_language_include" not in line:
+            out.append(line)
+    return "\n".join(out)
 
+
+def surface(theme, colors):
+    """Hyprland's window shader as it draws a window it blurs (its blur
+    variant, without colour management, rounding, tint or discard), with
+    the plugin's glass added where glassShaderSource() adds it."""
+    source = hyprland("surface.frag", "")
+    used = set(re.findall(r"\b(USE_\w+)", " ".join(l for l in source.splitlines() if l.lstrip().startswith(("#if", "#elif")))))
+    defines = "".join(f"#define {u} {int(u in ('USE_RGBA', 'USE_BLUR'))}\n" for u in sorted(used)) + "#define SOURCE_TF 9\n#define TARGET_TF 9\n"
+    source = source.replace("#version 300 es", "#version 300 es\n" + defines, 1)
+    names = ("background", "dark_background", "darker_background", "lighter_background")
+    shades = [c for n, c in colors.items() if n in names]
+    glass = setting(theme, "glass", 0.85)
+    if glass >= 1 or not shades:
+        return source
+    vec3 = lambda c: "vec3({:.6f}, {:.6f}, {:.6f})".format(*c)
+    out = "layout(location = 0) out vec4 fragColor;"
+    source = source.replace(out, f"""const vec3  CINEMA_BACKGROUNDS[{len(shades)}] = vec3[]({", ".join(map(vec3, shades))});
+const float CINEMA_GLASS = {min(max(glass, 0.0), 1.0):.4f};
+const vec3  CINEMA_BACKGROUND = {vec3(colors["background"])}, CINEMA_MUTED = {vec3(colors.get("muted", (0.5, 0.5, 0.5)))};
+""" + DITHER + (ROOT / "plugin/glass.glsl").read_text() + out, 1)
+    read = "#if USE_DISCARD && !USE_BLUR"
+    source = source.replace(read, "#if USE_BLUR\n    pixColor = cinemaGlass(pixColor);\n#endif\n\n" + read, 1)
+    return re.sub(r"(pixColor|mirrorColor) \+= (blurred\w+) \* (\w+);", r"\1 = cinemaHold(\1, blurUV, \3);", source)
+
+
+WINDOW = """#version 300 es
+uniform vec4 box;
+uniform vec2 size;
+in vec2 pos;
+out vec2 v_texcoord;
+void main() {
+    v_texcoord = pos;
+    vec2 px = box.xy + pos * box.zw;
+    gl_Position = vec4(px.x / size.x * 2.0 - 1.0, 1.0 - px.y / size.y * 2.0, 0.0, 1.0);
+}
+"""
+
+
+def glass(theme, image, t, windows, focused, border=True, **answers):
+    """`image` with the windows over it as the film's glass shows them: the
+    plugin's frost (the world at half size, softened through its mipmap as
+    far as the film's frost and copied into 8 bits, frost() in main.cpp),
+    then each window, 0.999 opaque, drawn by Hyprland's window shader with
+    the glass in it: its background the theme's, a block of text lines in
+    the foreground and muted colours, and a lit border on the focused one
+    where the film draws no frame."""
+    from PIL import ImageDraw
+
+    colors = palette(theme)
     scale = PIXELS[0] / LOGICAL[0]
-    out = image.copy()
-    blurred = image.filter(ImageFilter.GaussianBlur(6))
-    background = tuple(int(c * 255) for c in colors.get("background", (0, 0, 0)))
-    foreground = tuple(int(c * 255) for c in colors.get("foreground", (1, 1, 1)))
-    accent = tuple(int(c * 255) for c in colors.get("accent", (1, 1, 1)))
-    for i, (x, y, w, h) in enumerate(windows):
-        box = tuple(int(v * scale) for v in (x, y, x + w, y + h))
-        region = blurred.crop(box)
-        tint = Image.new("RGB", region.size, background)
-        out.paste(Image.blend(region, tint, 0.55), box[:2])
-        draw = ImageDraw.Draw(out)
-        if border:
-            draw.rectangle(box, outline=accent if i == focused else tuple(c // 2 for c in accent), width=3)
+    levels = min(max(int(np.floor(np.log2(max(2 * setting(theme, "frost", 3) * scale, 1)) + 0.5)), 1), 6)
+    ctx = moderngl.create_standalone_context(backend="egl", require=330)
+    quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
+    world = half_world(ctx, theme, t, windows, focused, levels, **answers)
+    frost = ctx.texture(PIXELS, 4)
+    ctx.framebuffer([frost]).use()
+    copy = ctx.program(vertex_shader=VERTEX, fragment_shader="#version 330 core\n" + DITHER + (ROOT / "plugin/copy.glsl").read_text())
+    copy["level"].value, copy["size"].value = levels - 1.0, PIXELS
+    world.use(0)
+    ctx.vertex_array(copy, [(quad, "2f", "pos")]).render(moderngl.TRIANGLE_STRIP)
+
+    shown = ctx.texture(PIXELS, 4, image.convert("RGBA").transpose(Image.FLIP_TOP_BOTTOM).tobytes())
+    ctx.framebuffer([shown]).use()
+    program = ctx.program(vertex_shader=WINDOW, fragment_shader=surface(theme, colors))
+    vao = ctx.vertex_array(program, [(quad, "2f", "pos")])
+    program["size"].value = PIXELS
+    program["tex"].value, program["blurredBG"].value, program["alpha"].value = 0, 1, 0.999
+    frost.use(1)
+    ink = lambda name: tuple(int(c * 255) for c in colors.get(name, (1, 1, 1))) + (255,)
+    for x, y, w, h in windows:
+        x, y, w, h = (round(v * scale) for v in (x, y, w, h))
+        app = Image.new("RGBA", (w, h), ink("background"))
+        draw = ImageDraw.Draw(app)
         for row in range(6):
-            ty = box[1] + 60 + row * 44
-            draw.rectangle((box[0] + 50, ty, box[0] + 50 + int((box[2] - box[0]) * (0.75 - 0.08 * (row % 3))), ty + 14), fill=foreground)
+            ty = 60 + row * 44
+            draw.rectangle((50, ty, 50 + int(w * (0.75 - 0.08 * (row % 3))), ty + 14), fill=ink("muted" if row % 3 == 2 else "foreground"))
+        tex = ctx.texture((w, h), 4, app.tobytes())
+        tex.use(0)
+        program["box"].value = (x, y, w, h)
+        program["uvSize"].value, program["uvOffset"].value = (w / PIXELS[0], -h / PIXELS[1]), (x / PIXELS[0], 1 - y / PIXELS[1])
+        vao.render(moderngl.TRIANGLE_STRIP)
+    out = Image.frombytes("RGBA", PIXELS, shown.read()).transpose(Image.FLIP_TOP_BOTTOM).convert("RGB")
+    ctx.release()
+    if border:
+        draw = ImageDraw.Draw(out)
+        accent = ink("accent")[:3]
+        for i, (x, y, w, h) in enumerate(windows):
+            box = tuple(int(v * scale) for v in (x, y, x + w, y + h))
+            draw.rectangle(box, outline=accent if i == focused else tuple(c // 2 for c in accent), width=3)
     return out
 
 
@@ -256,8 +354,8 @@ def answers(theme, t, out):
     """The four storyboard frames side by side, two by two, at half size."""
     tiles = []
     for _, wins, f, extra in storyboard():
-        image, colors = render(theme, t, wins, f, **extra)
-        shown = with_frames(theme, glass(image, wins, colors, f, border=not framed(theme)), t, wins, f, **extra)
+        image, _ = render(theme, t, wins, f, **extra)
+        shown = with_frames(theme, glass(theme, image, t, wins, f, border=not framed(theme), **extra), t, wins, f, **extra)
         tiles.append(shown.resize((PIXELS[0] // 2, PIXELS[1] // 2)))
     sheet = Image.new("RGB", PIXELS)
     for k, tile in enumerate(tiles):
@@ -280,8 +378,8 @@ def main():
         empty, _ = render(theme, t, [], 0)
         empty.save(out / f"{theme.name}-empty-{t:g}.png")
         windows = layout()
-        backdrop, colors = render(theme, t, windows, 0)
-        with_frames(theme, glass(backdrop, windows, colors, 0, border=not framed(theme)), t, windows, 0).save(out / f"{theme.name}-windows-{t:g}.png")
+        backdrop, _ = render(theme, t, windows, 0)
+        with_frames(theme, glass(theme, backdrop, t, windows, 0, border=not framed(theme)), t, windows, 0).save(out / f"{theme.name}-windows-{t:g}.png")
         print(out / f"{theme.name}-empty-{t:g}.png")
         print(out / f"{theme.name}-windows-{t:g}.png")
 
