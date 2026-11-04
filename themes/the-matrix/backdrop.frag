@@ -313,7 +313,7 @@ vec4 backdrop(vec2 px) {
 float pace(vec2 px) {
     if (feedPresence > 0.0) return EVERY_FRAME;
     if (reserved.x <= 0.0) return 0.0;
-    float edge = glowLine(max(abs(px.y - reserved.x) - PACE_REACH, 0.0), 1.6) * 1.8;
+    float edge = glowLine(max(abs(px.y - reserved.x) - PACE_REACH, 0.0), 1.6) * 3.6;
     float span = resolution.x + 600.0;
     float behind = fract(cycle(9.0) - (px.x + 300.0) / span) * span;
     return max(passing(behind, span / 9.0, 260.0, edge), passing(span - behind, span / 9.0, 6.0, edge));

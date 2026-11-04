@@ -287,8 +287,11 @@ float pace(vec2 px) {
     wake += 2.0 * exp(-toFocus / 40.0) + 0.35 * exp(-toFocus / 500.0);
     p = max(p, changing(0.25 * min(wake, 2.5)));
     float ring = octagon(px - focused.xy - focused.zw * 0.5);
-    for (int k = 0; k < 2; k++)
-        if (abs(ring - fract(cycle(12.0) + float(k) * 0.5) * 1800.0) < 215.0 + PACE_REACH + 150.0 * PACE_AHEAD) return EVERY_FRAME;
+    // A ring at r, and the one born at the centre as it comes round.
+    for (int k = 0; k < 2; k++) {
+        float r = fract(cycle(12.0) + float(k) * 0.5) * 1800.0;
+        if (min(abs(ring - r), abs(ring - r + 1800.0)) < 215.0 + PACE_REACH + 150.0 * PACE_AHEAD) return EVERY_FRAME;
+    }
     // The hazard stripes' edges are a pixel wide: every frame.
     return reserved.x > 0.0 && px.y > reserved.x - PACE_REACH && px.y < reserved.x + 11.0 + PACE_REACH ? EVERY_FRAME : p;
 }

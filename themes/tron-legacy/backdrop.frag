@@ -225,26 +225,16 @@ vec4 backdrop(vec2 px) {
 }
 
 // How often the Grid changes on its own (contract.glsl, pace()). The floor
-// glides toward the viewer, a row dy below the horizon at 20 dy^2 / (140 H)
-// px a second; the light cycles ride their lanes; two pulses run round each
-// window's circuit and two along the bar; the high cloud drifts a level in
-// seconds.
+// glides toward the viewer, its light cycles riding it; two pulses run round
+// each window's circuit and two along the bar; the high cloud drifts a level
+// in seconds.
 float pace(vec2 px) {
     float horizon = resolution.y * 0.40;
     float p = changing(0.01);
-    float dy = px.y + PACE_REACH - horizon;
-    if (dy > 0.0) {
-        // Toward the horizon its lines crowd finer than a pixel and shimmer
-        // as they glide, about 14 a second.
-        p = max(p, max(14.0, moving(8.0 * CELL / 16.0 * dy * dy / (140.0 * resolution.y))));
-        // A lane runs from the middle of the horizon, `lane` floor units
-        // across; the windows' weight bends it a few px.
-        for (int k = 0; k < 3; k++) {
-            float lane = (k == 0 ? -3.0 : k == 1 ? 2.0 : 6.0) * CELL;
-            float x = resolution.x * 0.5 + lane * max(px.y - horizon, 0.0) / 140.0;
-            if (abs(px.x - x) < 20.0 + PACE_REACH * (1.0 + abs(lane) / 140.0)) return EVERY_FRAME;
-        }
-    }
+    // The floor's lines are a pixel or two wide and, toward the horizon,
+    // finer than a pixel: as they glide, wherever one is it needs every frame
+    // (tools/pace-check at full size), and they are everywhere on it.
+    if (px.y + PACE_REACH > horizon) return EVERY_FRAME;
     for (int i = 0; i < windowCount; i++) {
         Window w = window(px, i);
         if (w.d < -PACE_REACH || w.d > 60.0 + PACE_REACH) continue;

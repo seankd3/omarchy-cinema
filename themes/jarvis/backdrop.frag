@@ -377,7 +377,8 @@ float pace(vec2 px) {
     // The rings out past the window's edges, as backdrop() draws them (the
     // swing is 0 at rest): only their dashes' ends move.
     if (abs(r - reach * 1.04) < 30.0 + PACE_REACH) p = max(p, dashPace(a, r, 120.0, 0.45, -cycle(120.0), 120.0));
-    if (abs(r - reach * 1.12) < 130.0 + PACE_REACH) p = max(p, max(dashPace(a, r, 6.0, 0.06, cycle(24.0), 24.0), dashPace(a, r, 1.0, 0.05, -cycle(24.0), 24.0)));
+    // Their ends are crisp, so they step a quarter pixel (twice moving()).
+    if (abs(r - reach * 1.12) < 130.0 + PACE_REACH) p = max(p, 2.0 * max(dashPace(a, r, 6.0, 0.06, cycle(24.0), 24.0), dashPace(a, r, 1.0, 0.05, -cycle(24.0), 24.0)));
     // The seams' light flows about 0.8 of its strength a second.
     float near = 0.0;
     for (int i = 0; i < windowCount; i++) near += exp(-max(window(px, i).d - PACE_REACH, 0.0) / 110.0);
@@ -393,7 +394,7 @@ float pace(vec2 px) {
     if (reserved.x > 0.0) {
         float edge = glowLine(max(abs(px.y - reserved.x) - PACE_REACH, 0.0), 2.0, HALO) * 1.3;
         float off = abs(px.x - cycle(12.0) * resolution.x);
-        p = max(p, passing(min(off, resolution.x - off), resolution.x / 12.0, 50.0, edge));
+        p = max(p, wrapping(12.0) && abs(px.y - reserved.x) < 40.0 + PACE_REACH ? EVERY_FRAME : passing(min(off, resolution.x - off), resolution.x / 12.0, 50.0, edge));
     }
     return p;
 }

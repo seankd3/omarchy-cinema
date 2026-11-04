@@ -354,6 +354,12 @@ Shape:
   half a pixel of motion or two levels. It samples; a change that came and
   went inside one wait, the plugin's rounding of rates and caps, are not
   checked (rounding only shortens the wait, caps lengthen it on purpose).
+  All six pass it at full size (a random time and nine of the films' cycle
+  wraps). It set what the estimates had wrong: thin lines and dots need a
+  quarter pixel a step, so Tron's and Roadster's floors, whose lines and
+  dots are everywhere below the horizon, are every frame; a ring born or a
+  sweep jumping back as its cycle comes round needs every frame then
+  (`wrapping()`).
 
 Deleted: typing and speech-start impulses (no film answered them, and now
 each keystroke would have drawn the whole world for 3 s), the key listener,

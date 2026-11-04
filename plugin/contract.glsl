@@ -354,6 +354,13 @@ float passing(float d, float speed, float soft, float strength) {
     return from <= 0.0 ? EVERY_FRAME : changing(strength * speed / soft * exp(-from / soft));
 }
 
+// Whether cycle(seconds) comes round within PACE_AHEAD: a sweep that jumps
+// back then takes its glow away from where it was at once, so the whole
+// glow needs every frame.
+bool wrapping(float seconds) {
+    return cycle(seconds) > 1.0 - PACE_AHEAD / seconds;
+}
+
 // What a film defines. backdrop(px): the colour of the world at px. And,
 // optionally, frame(px, i): window i's edge in that world (specs/depth.md,
 // part 2), a premultiplied colour over a band reaching 48 px outside the
