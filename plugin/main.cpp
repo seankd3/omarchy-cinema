@@ -741,24 +741,29 @@ void main() {
         std::erase_if(g->closed, [&](const auto& entry) { return !alive.contains(entry.first); });
     }
 
-    // Whether Hyprland covers what is under window w opaque, its own pixels
-    // plus the frost under the rest. A film session blends the frost in the
-    // window's own shader (render:use_shader_blur_blend, which film.lua sets
-    // and the glass runs in), where every pixel of a blurred surface comes out
-    // opaque, its colour and alpha plus the frost under the rest, whatever its
-    // opacity or fade (0.57.0 surface.frag, OpenGL.cpp:1488). What is left is
-    // whether Hyprland draws w that way over all of its rect: blurred with its
-    // plain blur (variant 0; another may blur live or move on its own),
-    // not transformed, not proportional, and the client's visible region, if
-    // any, all of it.
-    bool frosted(const PHLWINDOW& w, const Render::SWindowRenderPresentation& drawn) {
+    // Whether Hyprland, drawing window w with `drawn` in `ctx`, covers what is
+    // under it opaque, its own pixels plus the frost under the rest. A film
+    // session blends the frost in the window's own shader
+    // (render:use_shader_blur_blend, which film.lua sets and the glass runs
+    // in), where every pixel of a blurred surface comes out opaque, its colour
+    // and alpha plus the frost under the rest, whatever its opacity or fade
+    // (0.57.0 surface.frag, OpenGL.cpp:1488). What is left is whether
+    // renderWindow draws w that way over all of its rect: blurred at all (not
+    // in a snapshot, Renderer.cpp:663) with its plain blur (variant 0;
+    // another may blur live or move on its own), not transformed, not
+    // proportional, the client's visible region, if any, all of it, and a
+    // surface smaller than its window not fading: renderWindow puts a frost of
+    // its own under one, faded with the window (Renderer.cpp:740).
+    bool frosted(Render::CRenderContext& ctx, const PHLWINDOW& w, const Render::SWindowRenderPresentation& drawn) {
         static auto BLEND        = CConfigValue<Config::INTEGER>("render:use_shader_blur_blend");
         static auto VARIANT      = CConfigValue<Config::INTEGER>("decoration:blur:variant");
         static auto PROPORTIONAL = CConfigValue<Config::INTEGER>("decoration:blur:proportional");
         const auto  surface      = w->wlSurface();
         const bool  whole        = surface && surface->resource() &&
             (surface->m_visibleRegion.empty() || CRegion(CBox{{}, surface->resource()->m_current.bufferSize}).subtract(surface->m_visibleRegion).empty());
-        return *BLEND && *VARIANT == 0 && !*PROPORTIONAL && w->shouldBlur(drawn) && !w->effects().hasActiveTransformers() && whole;
+        const bool  small        = surface && surface->small() && !surface->m_fillIgnoreSmall;
+        return !ctx.m_renderingSnapshot && *BLEND && *VARIANT == 0 && !*PROPORTIONAL && w->shouldBlur(drawn) && !w->effects().hasActiveTransformers() && whole &&
+            (!small || drawn.fadeAlpha >= 1.F);
     }
 
     // Where renderWindow draws w on `monitor` with the presentation it draws
@@ -1648,7 +1653,7 @@ vec4 cinemaGlass(vec4 c) {{
                 return;
             if (m_layer == DECORATION_LAYER_OVER && g->framed && g->depth->value() > 0)
                 Render::IHyprRenderer::addPassElement(ctx, makeUnique<CFramePass>(monitor, window->metadata().stableID(), a, float(window->presentation().borderSize())));
-            else if (m_layer == DECORATION_LAYER_UNDER && frosted(window, drawn)) {
+            else if (m_layer == DECORATION_LAYER_UNDER && frosted(ctx, window, drawn)) {
                 const auto [position, size] = drawnBox(window, drawn, monitor);
                 Render::IHyprRenderer::addPassElement(ctx, makeUnique<CGlassPass>(monitor, CBox{position, size}.expand(-window->presentation().rounding() - 2.0)));
             }
