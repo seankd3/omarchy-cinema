@@ -1,12 +1,12 @@
 # The Matrix rains your agents' output
 
-**Sentence:** a backdrop can draw live text, and The Matrix's rain is made of
-everything the agents on this machine are producing, mirrored like the film's
-code.
+**Sentence:** a backdrop can draw text, and The Matrix's rain is made of its
+own code, or, once the user turns it on, of everything the agents on this
+machine are producing, mirrored like the film's code.
 
 Everything they produce counts: replies, commands, thinking and tool
-output. With no agent running there is no rain. It is off until the user
-turns it on ("Exposure", below).
+output. It is off until the user turns it on ("Exposure", below); with it
+off, or no agent running, the rain reads the theme's own `backdrop.frag`.
 
 ## Shape
 
@@ -56,21 +56,21 @@ Two pieces joined by one socket.
    restarted service, counting from zero again, is taken at once.
    The theme ships `glyphs.png`, a 16 by 6 atlas of ASCII 32 to 127 in the
    film's lettering, loaded with the theme; a theme without one does no feed
-   work. The contract gains `feed`, `feedCount` (valid characters, 0 for none)
-   and `feedPos`, with a helper that returns the character `i` back from the
-   newest, and `glyphs`; and `feedPresence`, which eases from 0 to 1 over
-   about three seconds while the feed has text and back to 0 when it
-   empties, so a backdrop can let its text drain away rather than vanish.
-3. **The Matrix** rains only the agents' text: each falling column is a
-   stretch of the feed, newest at the stream's head, through its mirrored
-   atlas, keeping the columns' depth, tails, splashes and window interaction,
-   all scaled by `feedPresence`. With no agent running there is no rain: the
-   film's black, the phosphor line under the bar and the windows' edge glow.
+   work. Its text is one ring: the feed's newest snapshot while the feed is
+   alive and has text, else the theme's own `backdrop.frag`, cut as the feed
+   cuts text; going back to it draws the world at once, so an agent's text
+   leaves the screen with the service. `tools/preview.py` fills it the same
+   way. The contract gains `feed`, `feedCount` (valid characters, 0 without
+   lettering), `feedPos` and `glyphs`, with a helper that returns the
+   character `i` back from the newest.
+3. **The Matrix** rains whatever the ring reads: each falling column is a
+   stretch of it, newest at the stream's head, through its mirrored atlas,
+   keeping the columns' depth, tails, splashes and window interaction.
 
 ## What it deletes
 
-The hashed 3 by 3 glyph builder in The Matrix's shader: with no agents there
-is no rain to draw, so it has no job left.
+The hashed 3 by 3 glyph builder in The Matrix's shader, and `feedPresence`
+with its easing: the rain always has text.
 
 ## Non-goals
 
@@ -95,8 +95,8 @@ but not token by token.
 
 1. With agents working, The Matrix's columns carry their text within a
    second of it reaching the logs, mirrored. Two minutes after the last agent
-   writes, or ten seconds after the service stops, the rain drains away over
-   about three seconds, and it returns when an agent writes again.
+   writes, or ten seconds after the service stops, the rain reads its own
+   code again.
 2. Frame cost within 10% of today's Matrix at 2880x1800, measured.
 3. Plugin changes tested in the hidden desktop first, including the service
    absent, restarting and sending malformed snapshots, a ring that wraps,

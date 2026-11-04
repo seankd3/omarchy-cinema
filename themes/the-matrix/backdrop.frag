@@ -1,17 +1,15 @@
-// omarchy-cinema contract 9
-// The Matrix: the code, and the code is what the agents on this machine are
-// writing (specs/agent-rain.md). Their text rains down the black screen in
-// mirrored glyphs, each stream led by a white-hot head carrying the newest
-// characters and leaving a fading phosphor tail. The rain stands at three
+// omarchy-cinema contract 10
+// The Matrix: the code, and the code is this very shader, or what the agents
+// on this machine are writing once the user turns that on
+// (specs/agent-rain.md). It rains down the black screen in mirrored glyphs,
+// each stream led by a white-hot head carrying the newest characters and
+// leaving a fading phosphor tail. The rain stands at three
 // distances, nearer columns larger, brighter and faster: the far rain out of
 // focus, soft dots whose letters are lost in the air, and the mid rain, both
 // behind the windows, so the glass shows them and the windows shade them;
 // the near rain at the windows' own depth, falling round them, so it never
-// shows through their glass and no window shades it. When no agent is
-// running there is no rain: it drains away, leaving the black, the windows' glow and the line
-// under the bar. The rain parts round the
-// windows: drops flare where they strike a
-// window's top edge, and streams run down its sides, brightest beside the
+// shows through their glass and no window shades it. The rain parts round
+// the windows: drops flare where they strike a window's top edge, and streams run down its sides, brightest beside the
 // focused window. The gaps between windows glow faintly green.
 //
 // The windows stand in the rain (specs/depth.md): each shelters the rain
@@ -57,7 +55,7 @@ vec3 column(vec2 at, vec2 cell, float id, float span, float period, float phase,
     float across = 1.0 - abs(fract(at.x) - 0.5) * 2.0;
     float glow = lit.x * across * across;
     if (lit.x < 0.01 || feedCount == 0) return vec3(0.0, 0.0, glow);
-    // Each stream carries its own stretch of the agents' text, the newest of
+    // Each stream carries its own stretch of the text, the newest of
     // it at the head and older characters up its tail, so the text falls
     // with the drop.
     int start = int(hash(vec2(id, 3.3)) * float(feedCount));
@@ -206,14 +204,9 @@ vec4 backdrop(vec2 px) {
 
     // Three distances: far columns small, slow and out of focus; near ones
     // large and fast, at the windows' depth, so never behind their glass.
-    // No agents, no rain.
-    vec2 far = vec2(0.0);
-    vec3 mid = vec3(0.0), close = vec3(0.0);
-    if (feedPresence > 0.0) {
-        far = blurred(px, FAR_RAIN, 2.0, shift * 0.2) * feedPresence;
-        mid = rain(px, MID_RAIN, 1.0, shift * 0.5) * feedPresence;
-        if (open > 0.0) close = rain(px, NEAR_RAIN, 0.0, shift) * feedPresence * open;
-    }
+    vec2 far = blurred(px, FAR_RAIN, 2.0, shift * 0.2);
+    vec3 mid = rain(px, MID_RAIN, 1.0, shift * 0.5), close = vec3(0.0);
+    if (open > 0.0) close = rain(px, NEAR_RAIN, 0.0, shift) * open;
     // The far rain is cooler and dimmer, as if seen through more air; the
     // heads are white-hot at every depth.
     vec3 behind = green * vec3(0.55, 0.75, 0.7) * (far.x * 0.3 + far.y * 0.35)
@@ -231,7 +224,7 @@ vec4 backdrop(vec2 px) {
 
     // The rain parts round the windows: drops flare where they strike a
     // window's top edge, and streams run down its sides.
-    if (closest >= 0 && nearest > 0.0 && nearest < 40.0 && feedPresence > 0.0) {
+    if (closest >= 0 && nearest > 0.0 && nearest < 40.0) {
         Window c = window(px, closest);
         vec4 rect = c.rect;
         float fade = c.alpha;
@@ -251,7 +244,7 @@ vec4 backdrop(vec2 px) {
             float period = 4.0 + floor(hash(vec2(id, 91.0)) * 3.0);
             vec3 stream = column(at, cell, id * 5.3, 960.0, period, hash(vec2(id, 93.0)), 700.0) * band;
             light *= 1.0 - 0.6 * band * fade;
-            light += (green * (stream.x * 1.3 + stream.z * 0.14) + HEAD * stream.y * 1.8) * focus * fade * feedPresence;
+            light += (green * (stream.x * 1.3 + stream.z * 0.14) + HEAD * stream.y * 1.8) * focus * fade;
         }
         if (over > 0.0 && px.x > rect.x && px.x < rect.x + rect.z) {
             // Where a near column's head reaches the top edge, it flares and
@@ -262,15 +255,15 @@ vec4 backdrop(vec2 px) {
                 vec3 lit = drops(rect.y - 1.0, NEAR_RAIN.y, d.y, d.x, d.z, d.w);
                 float splash = (lit.y * 1.5 + lit.x * lit.x * 0.4) * exp(-over / 5.0)
                     * exp(-abs(fract(at) - 0.5) * NEAR_RAIN.x / 8.0);
-                light += mix(green, HEAD, 0.6) * splash * (0.6 + focus) * fade * feedPresence;
+                light += mix(green, HEAD, 0.6) * splash * (0.6 + focus) * fade;
             }
         }
     }
 
-    // The answers' own glow, with or without rain, and a landing's glyphs,
-    // only while there is rain, read only where a landing reaches.
+    // The answers' own glow, and a landing's glyphs, read only where a
+    // landing reaches.
     float ink = answer.z > 0.0 && feedCount > 0 ? nearInk(px, shift) : 0.0;
-    light += green * answer.x + (green * answer.z * 1.2 + HEAD * min(answer.w, 2.0) * 1.4) * ink * feedPresence;
+    light += green * answer.x + (green * answer.z * 1.2 + HEAD * min(answer.w, 2.0) * 1.4) * ink;
 
     // The gaps between windows glow faintly green, a little more as you
     // speak, and less in the windows' shelter.

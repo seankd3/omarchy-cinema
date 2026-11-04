@@ -30,14 +30,6 @@ if [[ ${1:-} == --inside ]]; then
 
   # A home with Files' own folders, and only them.
   mkdir -p ~/{Documents,Downloads,Music,Pictures,Videos}
-  # An agent at work, writing this checkout's spec, for the backdrops that
-  # rain the agents' text, as if the user had turned it on; it idles under
-  # the other films.
-  mkdir -p ~/.claude/projects/preview
-  jq -nc --rawfile text "$here/SPEC.md" \
-    '{type: "assistant", timestamp: (now | todate), message: {content: [{type: "text", text: $text}]}}' \
-    >~/.claude/projects/preview/session.jsonl
-  launch "python3 '$here/feed/cinema-feed.py' agents"
 
   # The stock previews tile, whatever layout the hidden screen's workspace has
   # saved (Omarchy gives each screen its own block of ten). Each new window

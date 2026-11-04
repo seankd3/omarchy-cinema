@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 9
+// omarchy-cinema contract 10
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -83,22 +83,17 @@ uniform int impulseCount;
 // loudness: nothing of what is said reaches the shader.
 uniform float voice;
 
-// Text a backdrop can draw: the newest plaintext of the agents on this machine
-// (specs/agent-rain.md), a ring of 16384 characters 128 to a row, of which
-// feedCount are real and the next goes at feedPos. When the agents stop, the
-// last text stays while feedPresence falls, and feedCount is 0 once it is gone.
-// The theme's glyphs.png is its lettering for them; without one, feedCount is
-// always 0. Read them through feedChar() and glyph(). The text changes only
-// when the whole world is drawn again, so a world holding still holds the
-// text it shows.
+// Text a backdrop can draw: the theme's own backdrop.frag, or, once the user
+// turns them on, the newest plaintext of the agents on this machine while any
+// is running (specs/agent-rain.md); a ring of 16384 characters 128 to a row,
+// of which feedCount are real and the next goes at feedPos. The theme's
+// glyphs.png is its lettering for them; without one, feedCount is 0. Read
+// them through feedChar() and glyph(). The text changes only when the whole
+// world is drawn again, so a world holding still holds the text it shows.
 uniform sampler2D feed;
 uniform int feedCount;
 uniform int feedPos;
 uniform sampler2D glyphs;
-// How present the text is: easing to 1 over about three seconds while there is
-// text, and back to 0 when there is none (no agent running), so a backdrop
-// can let its text drain away rather than vanish.
-uniform float feedPresence;
 
 const float TAU = 6.28318530718;
 const float FAR = 1e5;

@@ -79,15 +79,14 @@ def framed(theme):
     return re.search(r"\bvec4\s+frame\s*\(", (theme / "backdrop.frag").read_text()) is not None
 
 
-def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=None, voice=0.0, world=None, feed=True):
+def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=None, voice=0.0, world=None):
     """The film's program in `ctx` with everything the plugin would give it,
     as a function that draws it over the bound framebuffer. velocity: (vx, vy)
     per window; impulses: (x, y, age, strength, kind,
     window), newest last, window -1 for none. With `frame` set to a window's
     index, it draws that window's frame (premultiplied) instead of the
     backdrop, reading `world`, the backdrop drawn at half size, as the
-    plugin's frames do. `feed` False is a film that writes text with no agent
-    running."""
+    plugin's frames do."""
     contract = (ROOT / "plugin/contract.glsl").read_text().replace("#version 300 es", "#version 330 core")
     source = contract + "\n#line 1\n" + (theme / "backdrop.frag").read_text() + (BACKDROP_MAIN if frame is None else FRAME_MAIN)
     program = ctx.program(vertex_shader=VERTEX, fragment_shader=source)
@@ -134,24 +133,23 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
         program["Windows"].binding = 0
     textures = []
 
-    # A theme's lettering, for whatever it writes, and the agents' text for a
-    # film that rains it: the preview fills the feed with this repository's
-    # spec, as if agents were writing it.
+    # A theme's lettering, and the text it writes with no agent's text turned
+    # on: its own backdrop.frag, as the plugin cuts it (main.cpp, readTheme()).
     glyphs_png = theme / "glyphs.png"
-    lettered = glyphs_png.exists()
-    if lettered and "glyphs" in program:
+    count = 0
+    if glyphs_png.exists() and "glyphs" in program:
         atlas = Image.open(glyphs_png).convert("RGBA").getchannel("A")
         glyphs = ctx.texture(atlas.size, 1, atlas.tobytes())
         glyphs.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        text = " ".join("".join(c if " " <= c <= "~" else " " for c in (ROOT / "SPEC.md").read_text()).split())
-        ring = (text * (16384 // max(len(text), 1) + 1))[:16384].encode("ascii")
-        letters = ctx.texture((128, 128), 1, ring)
+        text = " ".join("".join(c if " " < c <= "~" else " " for c in (theme / "backdrop.frag").read_text()).split())[-16384:]
+        count = len(text)
+        letters = ctx.texture((128, 128), 1, text.ljust(16384).encode("ascii"))
         letters.filter = (moderngl.NEAREST, moderngl.NEAREST)
         textures += [glyphs, letters]
         for name, value in {"glyphs": 0, "feed": 1}.items():
             if name in program:
                 program[name].value = value
-    for name, value in {"feedCount": 16384 if lettered and feed else 0, "feedPos": 0, "feedPresence": 1.0 if lettered and feed else 0.0}.items():
+    for name, value in {"feedCount": count, "feedPos": count % 16384}.items():
         if name in program:
             program[name].value = value
 

@@ -16,9 +16,10 @@
 // eases to a stop after them (contract.glsl, `time`), so a still desktop
 // draws nothing and asks for no frames.
 //
-// A backdrop can also draw text: the cinema-feed service sends the newest
-// plaintext of the agents on this machine to a datagram socket the plugin owns,
-// and a theme that ships glyphs.png draws it (specs/agent-rain.md).
+// A backdrop can also draw text: a theme that ships glyphs.png reads its own
+// backdrop.frag, or, once the user turns it on, the newest plaintext of the
+// agents on this machine, which the cinema-feed service sends to a datagram
+// socket the plugin owns (specs/agent-rain.md).
 
 #define WLR_USE_UNSTABLE
 
@@ -100,7 +101,6 @@ namespace {
     constexpr size_t FEED_HEADER = 20;
     constexpr int    FEED_BUDGET = 8; // datagrams taken per wakeup, at most
     constexpr auto   FEED_STALE  = std::chrono::seconds(10);
-    constexpr float  FEED_EASE   = 3.F; // seconds for the text to come or drain away
     // Voice (specs/depth.md): "CVO1", loudness (f32, 0 to 1), speaking (u32).
     // A reading older than VOICE_STALE is silence: the feed or Voxtype stopped.
     constexpr size_t VOICE_SIZE  = 12;
@@ -191,12 +191,10 @@ void main() {
     };
 
     // What the world shows besides the windows: what it answers (specs/depth.md,
-    // part 3), the agents' text and its own clock. A change here draws it
-    // again, glass and all.
+    // part 3) and its own clock. A change here draws it again, glass and all.
     struct SAnswer {
         uint64_t             impulses = 0; // the impulse ring's generation
         float                voice    = 0; // speech loudness, 0 to 1
-        float                presence = 0; // how present the agents' text is (contract.glsl, feedPresence)
         float                time     = 0; // the world's clock (contract.glsl, `time`)
         bool                 operator==(const SAnswer&) const = default;
     };
@@ -254,7 +252,7 @@ void main() {
     struct SProgram {
         GLuint id = 0;
         GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowCount, focusedIndex, focusAlpha;
-        GLint  feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
+        GLint  feedUniform, feedCount, feedPos, glyphsUniform;
         GLint  impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder, drawnWorld, worldProj;
     };
 
@@ -339,30 +337,25 @@ void main() {
         // a client can destroy it in the same call that closes it, and
         // rounding() reads only its rules and the config.
         PHLWINDOW                               closing;
-        // The agents' text: the newest valid snapshot the feed sent, counted
-        // by changes taken (a restarted feed counts its generations from 0
-        // again), and when any valid one last came, which says it is alive.
-        // The socket's path belongs to whichever Hyprland holds feed.lock.
+        // The feed, and when any valid snapshot last came, which says it is
+        // alive. The socket's path belongs to whichever Hyprland holds
+        // feed.lock.
         int                                     feedFd     = -1, feedLock = -1;
         std::string                             feedPath;
         wl_event_source*                        feedSource = nullptr;
         // When what the feed last said runs out with no datagram to say so,
-        // and what it said as last heard: voice and whether there is text
-        // (heard()).
+        // and what it said as last heard: voice and whether the agents' text
+        // is read (heard()).
         wl_event_source*                        stale = nullptr;
         std::pair<float, bool>                  heard{0.F, false};
-        std::vector<uint8_t>                    feedRing   = std::vector<uint8_t>(FEED_RING, ' ');
-        uint64_t                                feedGeneration = 0, feedChanges = 0;
-        uint32_t                                feedCount = 0, feedPos = 0;
         std::chrono::steady_clock::time_point   feedReceived;
-        // The feed said no agent is running: its last text is kept, to drain.
-        bool                                    feedEmpty = true;
-        // How present the text is: a timed move toward whether there is any,
-        // from where it stood when that last changed, read against the clock
-        // whenever it is drawn, so it takes FEED_EASE at any frame rate.
-        bool                                    presenceTarget = false;
-        float                                   presenceFrom   = 0;
-        std::chrono::steady_clock::time_point   presenceChanged;
+        // What the text reads (contract.glsl, `feed`), counted by changes: the
+        // agents' newest text while the feed is alive and has some
+        // (`agents`), else the theme's own words (`own`, ownWords()).
+        std::vector<uint8_t>                    feedRing = std::vector<uint8_t>(FEED_RING, ' '), own = feedRing;
+        uint32_t                                feedCount = 0, feedPos = 0, ownCount = 0;
+        uint64_t                                feedChanges = 0;
+        bool                                    agents = false;
         // The theme's lettering (glyphs.png) as coverage, one byte a pixel,
         // and the file it was decoded from, so an unchanged one is not
         // decoded again on every config reload.
@@ -374,6 +367,7 @@ void main() {
     UP<SState> g;
 
     void settle();
+    void ownWords();
 
     std::string themeDir() {
         const char* state = getenv("XDG_STATE_HOME");
@@ -515,6 +509,24 @@ void main() {
         }
 
         readGlyphs(dir + "/glyphs.png");
+        // The theme's own words, for its text while no agent's is read: its
+        // backdrop.frag as printable ASCII (anything else a space, runs of
+        // space as one), its last FEED_RING characters, as the feed cuts an
+        // agent's (cinema-feed.py, printable() and snapshot()).
+        std::string words;
+        for (const char c : readFile(dir + "/backdrop.frag"))
+            if (c > ' ' && c <= '~')
+                words += c;
+            else if (!words.empty() && words.back() != ' ')
+                words += ' ';
+        if (!words.empty() && words.back() == ' ')
+            words.pop_back();
+        words       = words.substr(words.size() - std::min(words.size(), FEED_RING));
+        g->ownCount = words.size();
+        std::ranges::fill(g->own, ' ');
+        std::ranges::copy(words, g->own.begin());
+        if (!g->agents)
+            ownWords();
         g->generation++;
         settle();
     }
@@ -597,7 +609,6 @@ void main() {
         p.feedCount     = at("feedCount");
         p.feedPos       = at("feedPos");
         p.glyphsUniform = at("glyphs");
-        p.feedPresence  = at("feedPresence");
         p.impulses      = at("impulses");
         p.impulseKinds  = at("impulseKinds");
         p.impulseWindows = at("impulseWindows");
@@ -963,8 +974,6 @@ void main() {
         return scene;
     }
 
-    float feedPresence(std::chrono::steady_clock::time_point now);
-
     // The impulse ring as it stands, after letting go of impulses that have
     // run out, voice, the agents' text and the world's clock.
     SAnswer readAnswer() {
@@ -976,13 +985,12 @@ void main() {
         // A window not drawn for ten seconds is closed or out of sight; it
         // starts still if it comes back.
         std::erase_if(g->motion, [&](const auto& entry) { return now - entry.second.seen > std::chrono::seconds(10); });
-        const float presence = feedPresence(now);
         if (!answering()) {
             letGo();
-            return {g->impulseGeneration, 0.F, presence, g->time};
+            return {g->impulseGeneration, 0.F, g->time};
         }
         const float voice = now - g->voiceReceived <= VOICE_STALE ? g->voice : 0.F;
-        return {g->impulseGeneration, voice, presence, g->time};
+        return {g->impulseGeneration, voice, g->time};
     }
 
     bool covered(PHLMONITOR monitor) {
@@ -1077,26 +1085,45 @@ void main() {
 
     void wake();
 
+    // Puts `count` characters in the text read (the next going at `pos`),
+    // counted as a change only when it is one.
+    void setText(const uint8_t* ring, uint32_t count, uint32_t pos) {
+        if (count == g->feedCount && pos == g->feedPos && std::equal(ring, ring + FEED_RING, g->feedRing.begin()))
+            return;
+        std::copy(ring, ring + FEED_RING, g->feedRing.begin());
+        g->feedCount = count;
+        g->feedPos   = pos;
+        g->feedChanges++;
+    }
+
+    // The text read is the theme's own words again.
+    void ownWords() {
+        g->agents = false;
+        setText(g->own.data(), g->ownCount, g->ownCount % FEED_RING);
+    }
+
     // What the feed says now, as the world hears it: voice until it is
-    // VOICE_STALE old, and whether there is text until the feed is
-    // FEED_STALE quiet. When that changes the world is drawn again, so voice
-    // and text answer, and ease away when they run out, though the desktop
-    // holds still; the timer waits for the next of them to run out.
+    // VOICE_STALE old, and the agents' text until the feed is FEED_STALE
+    // quiet, the theme's own words once it is. When that changes the world
+    // is drawn again, though the desktop holds still, so voice answers and
+    // the agents' text goes from the screen at once; the timer waits for
+    // the next of them to run out.
     void heard() {
         const auto now   = std::chrono::steady_clock::now();
         const bool voice = g->voice > 0 && now - g->voiceReceived <= VOICE_STALE;
-        feedPresence(now);
-        const std::pair<float, bool> heard{voice ? g->voice : 0.F, g->presenceTarget};
+        if (g->agents && now - g->feedReceived > FEED_STALE)
+            ownWords();
+        const std::pair<float, bool> heard{voice ? g->voice : 0.F, g->agents};
         if (heard != g->heard)
             wake();
         g->heard  = heard;
         auto ends = std::chrono::steady_clock::time_point::max();
         if (voice)
             ends = g->voiceReceived + VOICE_STALE;
-        if (g->presenceTarget)
+        if (g->agents)
             ends = std::min(ends, g->feedReceived + FEED_STALE);
-        // Each end is still to come (`voice`, and feedPresence()'s own
-        // staleness), so the wait is at least a millisecond; 0 disarms.
+        // Each end is still to come (`voice`, and the staleness just
+        // checked), so the wait is at least a millisecond; 0 disarms.
         const auto ms = ends == std::chrono::steady_clock::time_point::max() ? 0 : std::chrono::ceil<std::chrono::milliseconds>(ends - now).count() + 1;
         wl_event_source_timer_update(g->stale, int(ms));
     }
@@ -1121,26 +1148,22 @@ void main() {
             }
             if (size_t(length) != buffer.size() || std::memcmp(buffer.data(), "CFD1", 4) != 0)
                 continue;
-            uint64_t generation = 0;
             uint32_t count = 0, pos = 0;
-            std::memcpy(&generation, buffer.data() + 4, 8);
             std::memcpy(&count, buffer.data() + 12, 4);
             std::memcpy(&pos, buffer.data() + 16, 4);
             if (count > FEED_RING || pos >= FEED_RING)
                 continue;
             // Every valid snapshot is the feed's whole state: a restarted feed
-            // repeats generations, so only the content says whether it changed.
+            // repeats generations, so only the content says whether it
+            // changed. An empty one (no agent running) gives the text back to
+            // the theme.
             g->feedReceived = std::chrono::steady_clock::now();
-            g->feedEmpty    = count == 0;
-            if (count == 0)
-                continue; // the last text stays, for the backdrop to let it drain away
-            if (count == g->feedCount && pos == g->feedPos && std::equal(buffer.begin() + FEED_HEADER, buffer.end(), g->feedRing.begin()))
+            if (count == 0) {
+                ownWords();
                 continue;
-            std::copy(buffer.begin() + FEED_HEADER, buffer.end(), g->feedRing.begin());
-            g->feedGeneration = generation;
-            g->feedCount      = count;
-            g->feedPos        = pos;
-            g->feedChanges++;
+            }
+            g->agents = true;
+            setText(buffer.data() + FEED_HEADER, count, pos);
         }
         heard();
         return 0;
@@ -1337,23 +1360,6 @@ vec4 cinemaGlass(vec4 c) {{
             g->glassShader = wanted;
     }
 
-    // How present the agents' text is now: easing toward whether there is any,
-    // read against the clock, so it takes FEED_EASE at any frame rate.
-    float feedPresence(std::chrono::steady_clock::time_point now) {
-        const bool live     = g->feedFd >= 0 && now - g->feedReceived <= FEED_STALE;
-        const bool text     = !g->glyphPixels.empty() && live && !g->feedEmpty && g->feedCount > 0;
-        const auto presence = [&] {
-            const float moved = std::chrono::duration<float>(now - g->presenceChanged).count() / FEED_EASE;
-            return std::clamp(g->presenceFrom + (g->presenceTarget ? moved : -moved), 0.F, 1.F);
-        };
-        if (text != g->presenceTarget) {
-            g->presenceFrom    = presence();
-            g->presenceChanged = now;
-            g->presenceTarget  = text;
-        }
-        return presence();
-    }
-
     // Everything the contract gives a film, for program `p`, drawing `area`
     // (logical px) placed by `proj` on `monitor`, at `now`. The textures are
     // on units 4 to 6: the world drawn at half size, the lettering and the
@@ -1379,9 +1385,8 @@ vec4 cinemaGlass(vec4 c) {{
         glUniform1f(p.focusAlpha, scene.focusAlpha);
         glUniform1i(p.glyphsUniform, 5);
         glUniform1i(p.feedUniform, 6);
-        glUniform1i(p.feedCount, gpu.glyphsUploaded && answer.presence > 0 && kept.feedUploaded ? int(kept.feedCount) : 0);
+        glUniform1i(p.feedCount, gpu.glyphsUploaded && kept.feedUploaded ? int(kept.feedCount) : 0);
         glUniform1i(p.feedPos, int(kept.feedPos));
-        glUniform1f(p.feedPresence, answer.presence);
         glUniform1f(p.voice, answer.voice);
         // The impulses with their ages now, on this monitor's coordinates:
         // ages from the monotonic clock, so the hourly wrap of `time` never
