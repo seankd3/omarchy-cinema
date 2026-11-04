@@ -141,7 +141,6 @@ void main() {
     const char* FRAME_MAIN =
 #include "main-frame.inc"
         ;
-    // The frost's copy (copy.glsl) and the glass (glassShaderSource()).
     const char* COPY = "#version 300 es\nprecision highp float;\n"
 #include "dither.inc"
 #include "copy.inc"
@@ -1224,9 +1223,8 @@ void main() {
     // version in this very build, with one step added after the window's pixel
     // is read: a pixel in one of the theme's background colours (background,
     // dark, darker, lighter) becomes glass at the theme's glass, and every
-    // other pixel keeps exactly the opacity the app drew it with. An earlier
-    // colour-to-alpha un-mixing made grey text partly see-through. It runs only in the shader's
-    // blur variant (film.lua turns render:use_shader_blur_blend on), which
+    // other pixel keeps exactly the opacity the app drew it with. It runs
+    // only in the shader's blur variant (film.lua turns render:use_shader_blur_blend on), which
     // Hyprland uses only for windows it blurs: a solid browser, video or photo
     // is never touched. Hyprland reads shaders from a directory before its
     // built-in ones, so the patched shader is written to one of the plugin's

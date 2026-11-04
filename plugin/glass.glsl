@@ -24,13 +24,12 @@ vec4 cinemaShade(vec3 rgb) {
 // theme's background in place of the frost), dimming in its own hue on a dark theme, until it meets
 // 4.5:1 on a whole level. Where that shade, drawn solid, is itself short of
 // 4.5:1, it goes as far as the shade: the glass never reads worse than the
-// theme drawn solid. Text drawn opaque has no frost to hold.
+// theme drawn solid.
 #if USE_BLUR
 vec4 cinemaHold(vec4 pix, vec2 uv, float k) {
     // Where the frost cannot move a pixel a level (k to 1/255: an opaque
-    // pixel of a 0.999 window), it is the app's, neither held nor dithered,
-    // so text keeps its exact level whatever the theme's glass; dithered in
-    // full from two levels.
+    // pixel of a 0.999 window) it is the app's, so text keeps its exact
+    // level; dithered in full from two levels.
     vec4  c     = pix + texture(blurredBG, uv) * k;
     if (k * 255.0 <= 1.0) return c;
     c          += vec4(vec3(cinemaDither() * min(k * 255.0 - 1.0, 1.0)), 0.0);
