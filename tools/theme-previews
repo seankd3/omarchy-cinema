@@ -1,7 +1,8 @@
 #!/bin/bash
 # Captures each film theme's preview for Omarchy's theme picker from a real
-# desktop that is never on screen (tools/hidden-desktop, logged in with the
-# film applied): the stock previews' four windows (nvim, btop, a file listing
+# desktop that is never on screen (tools/hidden-desktop --fresh: a new Omarchy
+# user's, so it shows what anyone gets, logged in with the film applied): the
+# stock previews' four windows (nvim, btop, a file listing
 # and Files, two by two) at their 2560x1440, under the bar.
 #
 #   tools/theme-previews [slug ...]
@@ -71,11 +72,11 @@ trap 'rm -rf "$out"' EXIT
 for slug in "${slugs[@]}"; do
   [[ -f $here/themes/$slug/backdrop.frag ]] || { echo "theme-previews: $slug is not a film theme" >&2; exit 1; }
   # 1920x1080 a point, the density of the stock previews' text. A film takes
-  # about 20 s; one that stalls (a shader that hangs the renderer, a window or
-  # a capture that never comes) ends its whole sandbox at two minutes and
-  # writes nothing.
+  # about a minute with the new user's first login; one that stalls (a shader
+  # that hangs the renderer, a window or a capture that never comes) ends its
+  # whole sandbox at four minutes and writes nothing.
   mkdir "$out/$slug"
-  if ! timeout 120 "$here/tools/hidden-desktop" --size 2560x1440 --scale 1.333333 --theme "$slug" --out "$out/$slug" \
+  if ! timeout 240 "$here/tools/hidden-desktop" --fresh --size 2560x1440 --scale 1.333333 --theme "$slug" --out "$out/$slug" \
     "$here/tools/theme-previews" --inside "$slug" "$out/$slug"; then
     echo "theme-previews: $slug failed; $out/$slug/hypr.*/*/hyprland.log and desktop.log say what the desktop did" >&2
     trap - EXIT
