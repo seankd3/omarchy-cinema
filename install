@@ -262,10 +262,9 @@ fi
 # (specs/agent-rain.md). omarchy-cinema-feed, on, sends speech's loudness;
 # omarchy-cinema-agents, off until the user turns it on (README), sends the
 # agents' text, which would show on the desktop. Each is started or stopped
-# only while its unit is as the install wrote it. One running is restarted,
-# whoever's unit it is, onto the script its unit names: a feed from before
-# this checkout sent the agents' text. With no user manager (a console, a
-# sandbox) neither starts.
+# only while its unit is as the install wrote it; one running is restarted
+# onto this checkout, since a feed from before it sent the agents' text. With
+# no user manager (a console, a sandbox) neither starts.
 feed=~/.config/systemd/user/omarchy-cinema-feed.service
 agents=~/.config/systemd/user/omarchy-cinema-agents.service
 feedunit() {
@@ -284,17 +283,19 @@ StandardOutput=null
 [Install]
 WantedBy=graphical-session.target
 EOF
-  ours "$1" || echo "$1 is not as the install wrote it, so it is left as it is" >&2
+  ours "$1" || echo "$1 is not as the install wrote it, so it is left as it is$4" >&2
 }
 if [[ -n $remove ]]; then
   for unit in "$feed" "$agents"; do
     if ours "$unit"; then systemctl --user disable --now "${unit##*/}" >/dev/null 2>&1 || true; fi
   done
 else
-  feedunit "$feed" "speech's loudness for the backdrop" ""
+  feedunit "$feed" "speech's loudness for the backdrop" "" "; one from an install before 2026-11-04 sends the agents' text: systemctl --user disable --now omarchy-cinema-feed, remove it, then run install again"
   feedunit "$agents" "the agents' text for backdrops that draw it" " agents"
   systemctl --user daemon-reload >/dev/null 2>&1 || true
-  systemctl --user try-restart omarchy-cinema-feed.service omarchy-cinema-agents.service >/dev/null 2>&1 || true
+  for unit in "$feed" "$agents"; do
+    if ours "$unit"; then systemctl --user try-restart "${unit##*/}" >/dev/null 2>&1 || true; fi
+  done
   if ours "$feed" && ! systemctl --user enable --now omarchy-cinema-feed.service >/dev/null 2>&1; then
     echo "omarchy-cinema-feed did not start: systemctl --user status omarchy-cinema-feed" >&2
   fi
