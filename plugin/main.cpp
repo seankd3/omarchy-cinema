@@ -1270,9 +1270,10 @@ vec4 cinemaShade(vec3 rgb) {{
 {}
 vec4 cinemaHold(vec4 pix, vec2 uv, float k) {{
     if (k <= 0.0) return pix;
-    // Dithered as much as it is frost, in full on the theme's glass: an
-    // opaque pixel of a 0.999 window (k 0.001) keeps its exact level.
-    vec4  c     = pix + texture(blurredBG, uv) * k + vec4(vec3(cinemaDither() * min(k / (1.0 - CINEMA_GLASS), 1.0)), 0.0);
+    // Dithered only where the frost can move it a level (k past 1/255), in
+    // full from two: an opaque pixel of a 0.999 window (k 0.001) keeps its
+    // exact level, whatever the theme's glass.
+    vec4  c     = pix + texture(blurredBG, uv) * k + vec4(vec3(cinemaDither() * clamp(k * 255.0 - 1.0, 0.0, 1.0)), 0.0);
     float m     = cinemaLuminance(CINEMA_MUTED), side = sign(m - cinemaLuminance(CINEMA_BACKGROUND));
     float limit = side > 0.0 ? (m + 0.05) / 4.5 - 0.05 : 4.5 * (m + 0.05) - 0.05;
     vec3  shown = round(c.rgb * 255.0) / 255.0;
