@@ -1,4 +1,4 @@
-// omarchy-cinema contract 5
+// omarchy-cinema contract 6
 // Roadster: the 2026 Roadster's cockpit, drawn like a fighter jet's display.
 // A floor of red dots runs out to a thin white horizon and rushes toward the
 // viewer, with streaks of speed along it. A wireframe wedge turns slowly on
@@ -107,7 +107,6 @@ vec3 answers(vec2 px, vec3 red, float horizon, out float lit) {
         float age = e.z;
         if (age > 1.2) break;
         if (age > 1.0 && kind != LAND) continue;
-        if (kind == TYPE || kind == VOICE) continue;
         if (kind == CLOSE) {
             // One red ring spreads where the window was and fades.
             float front = closingFront(px, e);
@@ -353,6 +352,45 @@ vec4 backdrop(vec2 px) {
 
     // Bright light saturates toward white, as it does on film.
     return vec4(background + (1.0 - exp(-light * 1.3)), 1.0);
+}
+
+// How often the cockpit changes on its own (contract.glsl, pace()). The
+// floor's dots come toward the viewer a cell a second, a row `below` px
+// down the screen at below^2 / (CAMERA H) px a second; a dash of speed races
+// in along a lane; the wedge turns; the marker sweeps the bar.
+float pace(vec2 px) {
+    float horizon = resolution.y * 0.42;
+    float p = 0.0;
+    float below = px.y + PACE_REACH - horizon;
+    if (below > 0.0) {
+        p = moving(below * below / (CAMERA * resolution.y));
+        // The lanes the tile reaches (the windows bow them 34 px at most),
+        // and in each with a streak, where its dash is: it lights 27 cells
+        // of depth behind its head, which comes 160 cells in 3 s.
+        float near = px.y + PACE_REACH - horizon, far = max(px.y - PACE_REACH - horizon, 0.5);
+        float lo = (px.x - PACE_REACH - 34.0 - resolution.x * 0.5) * CAMERA / (px.x < resolution.x * 0.5 ? far : near);
+        float hi = (px.x + PACE_REACH + 34.0 - resolution.x * 0.5) * CAMERA / (px.x < resolution.x * 0.5 ? near : far);
+        if (hi - lo > 24.0) return EVERY_FRAME;
+        float deep = CAMERA * resolution.y / far, shallow = CAMERA * resolution.y / near;
+        for (float lane = floor(lo); lane <= hi; lane++) {
+            float seed = hash(vec2(lane, 5.3));
+            if (seed <= 0.86) continue;
+            float head = (1.0 - fract(cycle(3.0) + seed * 9.0)) * 160.0;
+            if (deep > head - 160.0 / 3.0 * PACE_AHEAD - 1.0 && shallow < head + 27.0) return EVERY_FRAME;
+        }
+    }
+    // The wedge's points turn at most 0.14 of its size a second.
+    float size = min(focused.z / 2.8, focused.w / 1.4);
+    vec2 at = vec2(focused.x + focused.z * 0.5, clamp(horizon + size * 0.5, focused.y + 0.7 * size, focused.y + focused.w - 0.7 * size));
+    vec2 reach = abs(px - at) - vec2(1.4, 0.7) * size;
+    if (size > 8.0 && max(reach.x, reach.y) < 24.0 + PACE_REACH) p = max(p, moving(0.14 * size));
+    if (reserved.x > 0.0) {
+        float edge = glowLine(max(abs(px.y - reserved.x) - PACE_REACH, 0.0), 1.1) * 3.3;
+        float span = resolution.x + 600.0;
+        float off = abs(px.x + 300.0 - cycle(8.0) * span);
+        p = max(p, passing(min(off, span - off), span / 8.0, 45.0, edge));
+    }
+    return p;
 }
 
 // Each window's edge (specs/depth.md, part 2): a cockpit display's bezel. A

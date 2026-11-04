@@ -1,4 +1,4 @@
-// omarchy-cinema contract 5
+// omarchy-cinema contract 6
 // Evangelion: NERV's displays. A honeycomb of hexagonal cells lies across
 // the dark and wakes like an AT field around the windows: cells light orange
 // along every window's edge and in the seams between windows, brightest at
@@ -266,6 +266,31 @@ vec4 backdrop(vec2 px) {
 
     // Bright light saturates toward white, as it does on film.
     return vec4(background + (1.0 - exp(-light * 1.3)), 1.0);
+}
+
+// How often NERV's field changes on its own (contract.glsl, pace()). The
+// haze and the far lattice breathe a level in a tenth of a second
+// everywhere; the honeycomb's patches swell as fast as the cells near the
+// focus are awake; two octagonal rings spread from the focused window's
+// centre at 150 px a second, lighting the cells they cross 200 px about
+// their fronts; the hazard stripes crawl along under the bar.
+float pace(vec2 px) {
+    float p = changing(0.08);
+    Seen seen = UNSEEN;
+    float wake = 0.0;
+    for (int i = 0; i < windowCount; i++) {
+        Window w = window(px, i);
+        see(seen, w);
+        wake += 0.6 * exp(-max(abs(w.d) - PACE_REACH, 0.0) / 28.0);
+    }
+    float toFocus = max(abs(seen.focus) - PACE_REACH, 0.0);
+    wake += 2.0 * exp(-toFocus / 40.0) + 0.35 * exp(-toFocus / 500.0);
+    p = max(p, changing(0.25 * min(wake, 2.5)));
+    float ring = octagon(px - focused.xy - focused.zw * 0.5);
+    for (int k = 0; k < 2; k++)
+        if (abs(ring - fract(cycle(12.0) + float(k) * 0.5) * 1800.0) < 215.0 + PACE_REACH + 150.0 * PACE_AHEAD) return EVERY_FRAME;
+    // The hazard stripes' edges are a pixel wide: every frame.
+    return reserved.x > 0.0 && px.y > reserved.x - PACE_REACH && px.y < reserved.x + 11.0 + PACE_REACH ? EVERY_FRAME : p;
 }
 
 // Each window's edge (specs/depth.md, part 2): its own AT field. A wall of

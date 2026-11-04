@@ -10,7 +10,8 @@ computer UIs should be mind blowing"; "how can we make the programs feel like
 they have depth?"; "could we make the workspace changes live as 3d items?";
 "lets try lots of stuff". Asked how far windows go in 3D (glass only,
 physical glass that tilts with momentum, a full 3D desktop): "lets try all".
-Asked what the world reacts to: window motion, the pointer, typing and voice.
+Asked what the world reacts to: window motion, the pointer, typing and voice
+(typing has no answer since contract 6).
 
 Standing rules from SPEC.md stay: same frame as the windows, cheap at rest,
 no HUD, no full-screen post shader, text opaque. New one, implied by the
@@ -44,9 +45,13 @@ Each is one fact with one source; nothing is stored that can be computed.
   `render.pre` from Hyprland's pointer.
 - **Impulses.** One ring of the last 32 things that happened, each a point,
   an age in seconds, a strength and a kind: `OPEN`, `CLOSE`, `LAND`,
-  `FOCUS`, `TYPE`, `VOICE`. Every film reads the same ring and answers each
-  kind its own way (Tron's grid ripples, Evangelion's AT field flares, the
-  Matrix's rain splashes). This one ring replaces a uniform per event.
+  `FOCUS`. Every film reads the same ring and answers each kind its own way
+  (Tron's grid ripples, Evangelion's AT field flares, the Matrix's rain
+  splashes). This one ring replaces a uniform per event. Typing and the start
+  of speech were kinds too; no film answered them (Sean, 2026-10-29: calm
+  while you work), and an answer draws the whole world every frame while it
+  lives, so contract 6 deleted them (specs/smoothness.md, "Cost follows
+  change").
   - *Time.* The plugin stamps each impulse on the monotonic clock and uploads
     its age, so the shader never subtracts on the hourly-wrapping `time`. An
     impulse lives 3 s of real time and is then gone. What happens while the
@@ -56,21 +61,12 @@ Each is one fact with one source; nothing is stored that can be computed.
     when a window stops moving: its drawn position was changing last frame
     and is not this frame (the same per-frame position the velocity comes
     from, so a tiling animation, a drag and a keyboard move all land the same
-    way, with no event of their own to miss). `TYPE`: typing, defined by what was pressed, not where it went (this
-    laptop is aarch64, where Hyprland's function hooks do nothing, so the
-    point where a key reaches a client cannot be observed): a key whose
-    keysym in the keyboard's current xkb state is printable, pressed with no
-    modifier held but Shift, while a client window has keyboard focus, no
-    input method holds a grab and the session is not locked. No binding of
-    Omarchy's is a printable key without a modifier (that would break
-    typing). Placed along the focused window's lower edge; the keycode and
-    keysym are used only to decide this and are not kept. `VOICE`: the voice-activity
-    edges below.
-  - *Disclosure.* Nothing about keys or voice is stored or logged. The
-    screen does show that typing or speech is happening, when, and how loud,
-    to anyone who sees it, live or in a recording or share, password entry
-    included: the plugin cannot tell a password field, and Voxtype's
-    loudness shows whether or not a call carries the voice. That is the
+    way, with no event of their own to miss). Voice is only its loudness
+    (`voice`, below).
+  - *Disclosure.* Nothing about voice is stored or logged, and the plugin no
+    longer reads keys. The screen does show that speech is happening, when,
+    and how loud, to anyone who sees it, live or in a recording or share:
+    Voxtype's loudness shows whether or not a call carries the voice. That is the
     boundary, stated rather than hidden; `plugin:backdrop:depth 0` turns
     every answer off.
 - **Voice.** `voice`: Voxtype's speech loudness, 0 to 1. The feed service is

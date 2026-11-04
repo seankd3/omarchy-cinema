@@ -1,0 +1,151 @@
+#!/usr/bin/env -S uv run -q --script
+# /// script
+# dependencies = ["moderngl", "numpy", "pillow"]
+# ///
+"""Checks that a film's pace() covers how its world changes (contract.glsl):
+a tile of the screen, drawn again only when its pace asks, must never show
+the world further from where it is than half a pixel of motion or two levels
+of 255. Off screen, through tools/preview.py's scene: workspace 1 and the
+empty desktop at many times, a film that writes text with and without it.
+
+    tools/pace-check [--scale S] [--times N] SLUG ...
+
+From each time it follows each tile as the plugin draws it: a pace of
+EVERY_FRAME is drawn every frame; one of 10 or more, after 1/pace; a slower
+one is read again every PACE_AHEAD, and drawn at the first reading whose
+pace says its turn has come (2 s at most). Until then each pixel may differ
+from the world by 2 levels plus 0.6 of the steepest step round it (half a
+pixel of motion of an edge); a level more fails. Prints per film and scene
+the tiles that fail and where, and what the pace costs: the share of drawing
+the whole screen every frame at 120 a second, each tile grown as the plugin
+damages it, beside the least pace that would pass. --scale draws at a share
+of 2880x1800 (0.5 while Sean is at the machine). Run it under the hidden
+desktop's lock: it shares the GPU.
+"""
+import math
+import sys
+from pathlib import Path
+
+import moderngl
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import preview as P  # noqa: E402
+
+TILE, EVERY, AHEAD, LONGEST = 32, 255, 0.1, 2.0
+GROW = 24 + 16 / 1.25 + 2  # logical px: paceGrowth() at Sean's blur and scale
+# The intervals the world is drawn after: 1/pace rounded up to one of these.
+STEPS = [1 / r for r in (120, 110, 100, 90, 80, 70, 60, 55, 50, 45, 40, 36, 32, 28, 25, 22, 20, 18, 16, 14, 12, 11, 10)]
+
+
+def main():
+    args = sys.argv[1:]
+    scale = float(args[args.index("--scale") + 1]) if "--scale" in args else 1.0
+    count = int(args[args.index("--times") + 1]) if "--times" in args else 12
+    films = [a for k, a in enumerate(args) if not a.startswith("--") and (k == 0 or args[k - 1] not in ("--scale", "--times"))]
+    pixels = (round(P.PIXELS[0] * scale), round(P.PIXELS[1] * scale))
+    tiles = (P.LOGICAL[0] // TILE, P.LOGICAL[1] // TILE)
+    per = pixels[0] // tiles[0]
+    ctx = moderngl.create_standalone_context(backend="egl", require=330)
+    world_fb = ctx.simple_framebuffer(pixels, components=4)
+    pace_fb = ctx.simple_framebuffer(tiles, components=4)
+    # Random times through the hour, and just before the wraps of periods
+    # the films use, where a cycle jumps.
+    times = list(np.random.default_rng(7).uniform(0, 3600, count)) + [k * p - 0.03 for p, k in ((16, 7), (24, 11), (60, 3), (12, 50), (9, 101), (8, 77), (15, 33), (20, 41), (6, 99))]
+    failed = False
+    for slug in films:
+        theme = P.ROOT / "themes" / slug
+        feeds = [True, False] if (theme / "glyphs.png").exists() else [True]
+        for name, windows in (("ws1", P.layout()), ("empty", [])):
+            for feed in feeds:
+                label = f"{slug} {name}" + ("" if len(feeds) == 1 else (" text" if feed else " no-text"))
+                stale, cost, least, where = 0, [], [], []
+                for t in times:
+                    worlds, paces = {}, {}
+
+                    def world(dt):
+                        if dt not in worlds:
+                            world_fb.use()
+                            world_fb.clear()
+                            P.scene(ctx, theme, t + dt, windows, 0, feed=feed)()
+                            image = np.frombuffer(world_fb.read(components=3), dtype=np.uint8).reshape(pixels[1], pixels[0], 3)[::-1].astype(np.int16)
+                            worlds[dt] = (image, steepest(image))
+                        return worlds[dt]
+
+                    def pace(dt):
+                        if dt not in paces:
+                            pace_fb.use()
+                            pace_fb.clear()
+                            P.scene(ctx, theme, t + dt, windows, 0, feed=feed, main=P.PACE_MAIN)()
+                            paces[dt] = np.frombuffer(pace_fb.read(components=4), dtype=np.uint8).reshape(tiles[1], tiles[0], 4)[::-1, :, 0].astype(float)
+                        return paces[dt]
+
+                    def excess(dt):
+                        """How far past its allowance each tile's worst pixel is after dt."""
+                        (now, g0), (later, g1) = world(0.0), world(dt)
+                        over = np.abs(later - now).max(axis=2) - (2 + 0.6 * np.maximum(g0, g1))
+                        return over[: tiles[1] * per, : tiles[0] * per].reshape(tiles[1], per, tiles[0], per).max(axis=(1, 3))
+
+                    first = pace(0.0)
+                    bad = np.zeros(tiles[::-1], bool)
+                    # Paces of 10 or more: drawn again after 1/pace.
+                    for step in STEPS:
+                        due = (first < EVERY) & (first >= 10) & (np.array([[min(s for s in STEPS if s >= 1 / max(p, 1e-9) - 1e-9) if 10 <= p < EVERY else 0 for p in row] for row in first]) == step)
+                        if due.any():
+                            bad |= due & (excess(step) >= 1)
+                    # Slower ones: read again every PACE_AHEAD until their turn.
+                    waiting = first < 10
+                    drawn_at = np.zeros(tiles[::-1])
+                    k = 1
+                    while waiting.any() and k * AHEAD <= LONGEST + 1e-9:
+                        dt = round(k * AHEAD, 6)
+                        bad |= waiting & (excess(dt) >= 1)
+                        p = pace(dt)
+                        turn = (p >= EVERY) | ((p > 0) & (dt >= 1 / np.maximum(p, 1e-9) - 1e-9))
+                        drawn_at[waiting & turn] = dt
+                        waiting &= ~turn
+                        k += 1
+                    for y, x in zip(*np.nonzero(bad)):
+                        where.append(f"t={t:.2f} tile ({x * TILE},{y * TILE}) pace {first[y, x]:.0f}")
+                    stale += int(bad.sum())
+                    # The least pace that would pass: the longest interval
+                    # through which the tile stays within its allowance.
+                    ok_until = np.zeros(tiles[::-1])
+                    alive = np.ones(tiles[::-1], bool)
+                    for dt in STEPS + [AHEAD * k for k in range(2, int(LONGEST / AHEAD) + 1)]:
+                        alive &= excess(round(dt, 6)) < 1
+                        ok_until[alive] = dt
+                    need = np.where(ok_until >= LONGEST - 1e-9, 0.0, np.where(ok_until == 0, EVERY, 1 / np.maximum(ok_until, 1e-9)))
+                    cost.append(price(first))
+                    least.append(price(need))
+                failed |= stale > 0
+                print(f"{label:28} cost {np.mean(cost) * 100:5.1f}% (least {np.mean(least) * 100:5.1f}%)  stale tiles {stale}", flush=True)
+                for line in where[:8]:
+                    print("    " + line)
+    sys.exit(1 if failed else 0)
+
+
+def steepest(image):
+    """The largest step to a neighbour round each pixel, in levels."""
+    g = image.max(axis=2)
+    step = np.zeros(g.shape, np.int16)
+    for dy, dx in ((0, 1), (1, 0), (1, 1), (1, -1)):
+        d = np.abs(np.roll(g, (dy, dx), (0, 1)) - g)
+        step = np.maximum(step, np.maximum(d, np.roll(d, (-dy, -dx), (0, 1))))
+    return step
+
+
+def price(pace):
+    """Drawing each tile at its pace, grown as the plugin damages it, as a
+    share of the whole screen every frame at 120."""
+    rate = np.where(pace >= EVERY, 1.0, np.minimum(pace, 120.0) / 120.0)
+    reach = math.ceil(GROW / TILE)
+    padded = np.pad(rate, reach)
+    grown = rate.copy()
+    for dy in range(-reach, reach + 1):
+        for dx in range(-reach, reach + 1):
+            grown = np.maximum(grown, padded[reach + dy: reach + dy + rate.shape[0], reach + dx: reach + dx + rate.shape[1]])
+    return grown.mean()
+
+
+main()

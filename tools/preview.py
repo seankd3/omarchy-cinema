@@ -13,7 +13,7 @@ Writes <theme-dir>/../../scratch/preview/<theme>-{empty,windows}-<t>.png at
 the P16's 2880 x 1800 (2304 x 1440 logical at 1.25). With --answers it writes
 <theme>-answers-<t>.png instead: the film answering the desktop
 (specs/depth.md) in four frames, at rest, a window dragged with the pointer on
-it, a window just landed while you type and speak into the focused one, and a
+it, a window just landed while you speak into the focused one, and a
 window opening, one closing and focus moving.
 """
 
@@ -45,6 +45,7 @@ void main() {
 # The plugin links one of these after the film's shader (plugin/main-*.glsl).
 BACKDROP_MAIN = (ROOT / "plugin/main-backdrop.glsl").read_text()
 FRAME_MAIN = (ROOT / "plugin/main-frame.glsl").read_text()
+PACE_MAIN = (ROOT / "plugin/main-pace.glsl").read_text()
 
 
 def palette(theme):
@@ -72,23 +73,24 @@ def layout():
 
 
 # Impulse kinds, as contract.glsl names them.
-OPEN, CLOSE, LAND, FOCUS, TYPE, VOICE = range(1, 7)
+OPEN, CLOSE, LAND, FOCUS = range(1, 5)
 
 
 def framed(theme):
     return re.search(r"\bvec4\s+frame\s*\(", (theme / "backdrop.frag").read_text()) is not None
 
 
-def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses=(), frame=None, voice=0.0, world=None):
+def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses=(), frame=None, voice=0.0, world=None, feed=True, main=None):
     """The film's program in `ctx` with everything the plugin would give it,
     as a function that draws it over the bound framebuffer. velocity: (vx, vy)
     per window; pointer: (x, y, vx, vy); impulses: (x, y, age, strength, kind,
     window), newest last, window -1 for none. With `frame` set to a window's
     index, it draws that window's frame (premultiplied) instead of the
     backdrop, reading `world`, the backdrop drawn at half size, as the
-    plugin's frames do."""
+    plugin's frames do; with `main` (PACE_MAIN), that main instead. `feed`
+    False is a film that writes text with no agent running."""
     contract = (ROOT / "plugin/contract.glsl").read_text().replace("#version 300 es", "#version 330 core")
-    source = contract + "\n#line 1\n" + (theme / "backdrop.frag").read_text() + (BACKDROP_MAIN if frame is None else FRAME_MAIN)
+    source = contract + "\n#line 1\n" + (theme / "backdrop.frag").read_text() + (main or (BACKDROP_MAIN if frame is None else FRAME_MAIN))
     program = ctx.program(vertex_shader=VERTEX, fragment_shader=source)
     if frame is not None:
         program["frameWindow"].value = frame
@@ -138,18 +140,22 @@ def scene(ctx, theme, t, windows, focused, velocity=None, pointer=None, impulses
     # film that rains it: the preview fills the feed with this repository's
     # spec, as if agents were writing it.
     glyphs_png = theme / "glyphs.png"
-    if glyphs_png.exists() and "glyphs" in program:
+    lettered = glyphs_png.exists()
+    if lettered and "glyphs" in program:
         atlas = Image.open(glyphs_png).convert("RGBA").getchannel("A")
         glyphs = ctx.texture(atlas.size, 1, atlas.tobytes())
         glyphs.filter = (moderngl.LINEAR, moderngl.LINEAR)
         text = " ".join("".join(c if " " <= c <= "~" else " " for c in (ROOT / "SPEC.md").read_text()).split())
         ring = (text * (16384 // max(len(text), 1) + 1))[:16384].encode("ascii")
-        feed = ctx.texture((128, 128), 1, ring)
-        feed.filter = (moderngl.NEAREST, moderngl.NEAREST)
-        textures += [glyphs, feed]
-        for name, value in {"glyphs": 1, "feed": 2, "feedCount": 16384, "feedPos": 0, "feedPresence": 1.0}.items():
+        letters = ctx.texture((128, 128), 1, ring)
+        letters.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        textures += [glyphs, letters]
+        for name, value in {"glyphs": 1, "feed": 2}.items():
             if name in program:
                 program[name].value = value
+    for name, value in {"feedCount": 16384 if lettered and feed else 0, "feedPos": 0, "feedPresence": 1.0 if lettered and feed else 0.0}.items():
+        if name in program:
+            program[name].value = value
 
     if world is not None and "drawnWorld" in program:
         textures.append(world)
@@ -233,8 +239,8 @@ def glass(image, windows, colors, focused, border=True):
 def storyboard():
     """The four moments --answers shows, as (name, windows, focused, answers):
     at rest, a window dragged with the pointer on it, a window just landed
-    while you type and speak into the focused one, and a window opening, one
-    closing and focus moving."""
+    while you speak into the focused one, and a window opening, one closing
+    and focus moving."""
     windows = layout()
     (lx, ly, lw, lh), (rx, ry, rw, rh) = windows[0], windows[1]
     moved = list(windows)
@@ -243,8 +249,7 @@ def storyboard():
         ("rest", windows, 0, {}),
         ("drag", moved, 1, dict(velocity=[(0, 0), (-1800, 600), (0, 0)], pointer=(moved[1][0] + 200, moved[1][1] + 18, -1800, 600))),
         ("land", windows, 0, dict(pointer=(lx + lw * 0.6, ly + lh * 0.4, 0, 0), voice=0.7,
-                                  impulses=[(lx + lw / 2, ly + lh, 0.6, 1.0, VOICE, 0), (rx + rw / 2, ry + rh / 2, 0.25, 0.8, LAND, 1)]
-                                  + [(lx + lw * f, ly + lh, a, 0.5, TYPE, 0) for f, a in ((0.2, 0.9), (0.42, 0.6), (0.64, 0.3), (0.86, 0.08))])),
+                                  impulses=[(rx + rw / 2, ry + rh / 2, 0.25, 0.8, LAND, 1)])),
         ("open", windows[:2], 1, dict(impulses=[(rx + rw / 2, ry + rh * 1.5 + GAP, 0.3, 1.0, CLOSE, -1), (lx + lw / 2, ly + lh / 2, 0.5, 1.0, OPEN, 0),
                                                 (rx + rw / 2, ry + rh / 2, 0.15, 0.6, FOCUS, 1)])),
     ]

@@ -299,3 +299,71 @@ take about 1 ms off at rest, nothing while windows move (polish.md, item 8).
 After a config reload (a theme switch is one) a film session costs the same
 (Tron 4.07 ms before `hyprctl reload`, 4.02 after): Hyprland's own blur, which
 grew about three times dearer after a reload, no longer runs in one.
+
+## Cost follows change (2026-11-04, films/batch-4, contract 6)
+
+**Sentence:** the world is drawn only where and as often as it changes on
+its own, at a pace each film states, and what it drew is kept.
+
+Coordinator's direction (Sean: "insanely light weight and use next to
+nothing"): what does not change is drawn once and kept; ambient motion is
+small moving parts or slow changes, damaging only their own pixels.
+
+What the films' ambient motion is, measured off screen (scratch/batch4/
+change.py: each film at t and t + 1/120 s, workspace 1): the pixels that
+change in a frame are few, Tron 9.1%, Jarvis 10.7%, Oblivion 0.1%,
+Evangelion 3.5%, the Matrix 3.0% with the agents' rain, Roadster 2.5%, but
+in five films they are spread over the screen: Tron's and Roadster's floors
+glide toward the viewer over the lower screen, Jarvis's rings and globe and
+Evangelion's octagonal rings sweep large areas, and the Matrix's rain falls
+everywhere. Only Oblivion, and the Matrix with no agent running, are small
+parts and slow drifts. So the direction holds for the mechanism, and for
+most films "next to nothing" at rest needs their rest motion to change
+(taste sheet 7).
+
+Shape:
+- **pace().** Each film says how often its world changes at a point, in
+  frames a second (contract.glsl: `pace`, `moving`, `changing`, `passing`).
+  The plugin reads it a 32 px tile at a time after every frame shown (a
+  small draw read back while the GPU is idle) and damages the tiles whose
+  turn has come, grown by how far the frost and the frames carry a change.
+  A tile's rate is its pace rounded up to 60 halved a whole number of
+  times, on shared slots of the clock: Hyprland draws each frame's damage
+  again in the next two (its three buffers rotate) and merges scattered
+  damage into one box, so turns spread over every frame drew the screen
+  every frame. With no tile due, nothing asks for a frame; the pace is read
+  again within PACE_AHEAD (0.1 s).
+- **Kept.** The world at full size and at half size are kept per monitor.
+  The film's shader draws only where the world changed or nothing is kept
+  yet; the rest of Hyprland's damage is a copy. The frost is drawn only
+  where the world changed. Both copies are drawn, not blitted: a blit over
+  part of a framebuffer cost as much as over all of it (0.6 ms at 1440x900).
+- **Whole while things move.** A scene or answer change draws the whole
+  world, and the frame after it too, since easing goes on after a change;
+  while an answer is alive (3 s) every frame is whole.
+- **tools/pace-check** holds each film's pace to its world: at sampled
+  times every tile, drawn only at its pace, stays within half a pixel of
+  motion or two levels of where the world is.
+
+Deleted: typing and speech-start impulses (no film answered them, and now
+each keystroke would have drawn the whole world for 3 s), the key listener,
+`asked`, the per-monitor rate timer arithmetic.
+
+Found on the way: Tron's floor brightness jumped every 16 s (its fade read
+the gliding floor, so it dropped 12% as the glide came round: 17% of pixels
+changed at the wrap against 5% a frame); its fade now follows depth on the
+screen alone, at the old mean.
+
+Measured at 1440x900 in the hidden desktop (Sean at the machine), 60 Hz,
+three terminals, 8 s at rest after the windows' answers end, GPU busy ms a
+second at rest (frames' GPU time summed), 5ecdd5c against this:
+
+| film | rest, ms/s | whole frame at rest | whole frame moving |
+|---|---|---|---|
+| stock (Tokyo Night) | 2 to 15 | | |
+| Jarvis | 148 / 132 | 1.83 / 1.93 | 1.82 / 1.93 |
+| Tron Legacy | 154 / 103 | 1.52 / 1.54 | 1.50 / 1.53 |
+| Oblivion | 147 / 89 | 1.86 / 1.44 | 1.87 / 1.53 |
+| The Matrix (agents writing) | 150 / 131 | 1.60 / 1.70 | 1.61 / 1.70 |
+| Evangelion | 155 / 122 | 1.90 / 1.97 | 1.89 / 1.97 |
+| Roadster | 133 / 103 | 1.69 / 1.69 | 1.70 / 1.67 |

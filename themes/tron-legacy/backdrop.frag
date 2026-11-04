@@ -1,4 +1,4 @@
-// omarchy-cinema contract 5
+// omarchy-cinema contract 6
 // Tron Legacy: the Grid. A floor of light lines runs out to the horizon under
 // a black sky, and light cycles race along it, trailing light. Around every
 // window a circuit line is drawn, and pulses run along it; around the focused
@@ -150,7 +150,9 @@ vec4 backdrop(vec2 px) {
         vec2 aa = max(stride / CELL, vec2(1e-4));
         vec2 lines = abs(fract(cell + 0.5) - 0.5) / aa;
         float grid = max(1.0 - smoothstep(0.0, 1.3, lines.x), 1.0 - smoothstep(0.0, 1.3, lines.y));
-        float fade = exp(-world.y / 2600.0);
+        // The floor fades into the distance by its depth on the screen, so
+        // its glide never jumps when it comes round.
+        float fade = exp(-(world.y - cycle(16.0) * 8.0 * CELL + 4.0 * CELL) / 2600.0);
         float shade = 1.0 - 0.7 * shadow;
         float lit = gridLit(px);
         light += cyan * grid * fade * (0.35 + 0.9 * near) * (1.0 + lit) * shade;
@@ -220,6 +222,46 @@ vec4 backdrop(vec2 px) {
     }
 
     return vec4(col + (1.0 - exp(-light * 1.3)), 1.0);
+}
+
+// How often the Grid changes on its own (contract.glsl, pace()). The floor
+// glides toward the viewer, a row dy below the horizon at 20 dy^2 / (140 H)
+// px a second; the light cycles ride their lanes; two pulses run round each
+// window's circuit and two along the bar; the high cloud drifts a level in
+// seconds.
+float pace(vec2 px) {
+    float horizon = resolution.y * 0.40;
+    float p = changing(0.01);
+    float dy = px.y + PACE_REACH - horizon;
+    if (dy > 0.0) {
+        // Toward the horizon its lines crowd finer than a pixel and shimmer
+        // as they glide, about 14 a second.
+        p = max(p, max(14.0, moving(8.0 * CELL / 16.0 * dy * dy / (140.0 * resolution.y))));
+        // A lane runs from the middle of the horizon, `lane` floor units
+        // across; the windows' weight bends it a few px.
+        for (int k = 0; k < 3; k++) {
+            float lane = (k == 0 ? -3.0 : k == 1 ? 2.0 : 6.0) * CELL;
+            float x = resolution.x * 0.5 + lane * max(px.y - horizon, 0.0) / 140.0;
+            if (abs(px.x - x) < 20.0 + PACE_REACH * (1.0 + abs(lane) / 140.0)) return EVERY_FRAME;
+        }
+    }
+    for (int i = 0; i < windowCount; i++) {
+        Window w = window(px, i);
+        if (w.d < -PACE_REACH || w.d > 60.0 + PACE_REACH) continue;
+        float lap = 2.0 * (w.rect.z + w.rect.w);
+        float circuit = glowLine(max(abs(w.d - 7.0) - PACE_REACH, 0.0), 1.1, HALO);
+        for (int k = 0; k < 2; k++) {
+            float behind = fract(cycle(i == focusedIndex ? 4.0 : 8.0) - around(px, w.rect) + float(k) * 0.5) * lap;
+            p = max(p, passing(min(behind, lap - behind), lap / (i == focusedIndex ? 4.0 : 8.0), lap / 30.0, 3.9 * circuit));
+        }
+    }
+    if (reserved.x > 0.0) {
+        float edge = glowLine(max(abs(px.y - reserved.x) - PACE_REACH, 0.0), 1.2, HALO);
+        float w = resolution.x;
+        float one = fract(cycle(6.0) - px.x / w) * w, two = fract(px.x / w - cycle(10.0)) * w;
+        p = max(p, max(passing(min(one, w - one), w / 6.0, w / 25.0, 3.3 * edge), passing(min(two, w - two), w / 10.0, w / 25.0, 2.0 * edge)));
+    }
+    return p;
 }
 
 // Each window's edge (specs/depth.md, part 2): a slab of glass standing on the

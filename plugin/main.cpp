@@ -12,10 +12,10 @@
 // frame's damage. At render.pre the plugin reads the windows as they will be
 // drawn; if they differ from what it last drew, it damages the whole monitor
 // and the glass, so this same frame draws the new backdrop. The backdrop's own
-// motion runs on the display's frames: each frame shown asks for the next, and
-// the frames it asked for move the world on by their own time. Plugged in that
-// is every vblank, on battery 30 a second
-// (plugin:backdrop:fps, plugin:backdrop:battery_fps).
+// motion costs only where and as often as it changes: the film says the pace
+// of each part of the screen (contract.glsl, pace()), and each frame shown
+// draws again only the parts whose turn has come, at most every frame, on
+// battery 30 a second (plugin:backdrop:fps, plugin:backdrop:battery_fps).
 //
 // A backdrop can also draw text: the cinema-feed service sends the newest
 // plaintext of the agents on this machine to a datagram socket the plugin owns,
@@ -35,10 +35,7 @@
 #include <hyprland/src/desktop/view/window/WindowEffectsController.hpp>
 #include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprland/src/event/EventBus.hpp>
-#include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/managers/SessionLockManager.hpp>
-#include <hyprland/src/managers/input/InputManager.hpp>
-#include <hyprland/src/protocols/InputMethodV2.hpp>
 #include <hyprland/src/pointer/PointerManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/output/Monitor.hpp>
@@ -95,8 +92,6 @@ namespace {
         IMPULSE_CLOSE,
         IMPULSE_LAND,
         IMPULSE_FOCUS,
-        IMPULSE_TYPE,
-        IMPULSE_VOICE,
     };
     // Texels per row of the window data texture: three per window.
     constexpr int    DATA_WIDTH = 256;
@@ -143,8 +138,35 @@ void main() {
     const char* FRAME_MAIN =
 #include "main-frame.inc"
         ;
+    // The plugin's own copy of a texture's level over the framebuffer
+    // bound, pixel for pixel (`size` is the framebuffer's): drawn, as a blit
+    // over part of a framebuffer costs as much as over all of it here.
+    const char* COPY = R"(#version 300 es
+precision highp float;
+uniform sampler2D source;
+uniform float level;
+uniform vec2 size;
+out vec4 fragColor;
+void main() {
+    fragColor = textureLod(source, gl_FragCoord.xy / size, level);
+}
+)";
     // How far outside a window its frame may draw, in logical px.
     constexpr double FRAME_BAND = 48.0;
+    // The film's pace is read a tile of PACE_TILE logical px at a time; its
+    // values are frames a second, EVERY_FRAME meaning each frame shown, and
+    // it holds for PACE_AHEAD seconds at most (contract.glsl, pace()).
+    constexpr int    PACE_TILE   = 32;
+    constexpr int    EVERY_FRAME = 255;
+    constexpr double PACE_AHEAD  = 0.1;
+    // How far round a part of the world that changes the screen changes with
+    // it, in logical px: a frame reads the world up to 24 px from its own
+    // pixel (contract.glsl, worldAt()), and the frost spreads it further
+    // (paceGrowth()).
+    constexpr double FRAME_LOOK = 24.0;
+    const char*      PACE_MAIN  =
+#include "main-pace.inc"
+        ;
 
     using Rect = std::array<float, 4>;
 
@@ -223,15 +245,25 @@ void main() {
         float                                 alphaFrom = 0;
         std::chrono::steady_clock::time_point focusMoved;
         bool                                  seen = false;
-        // When the world last moved here, whether the frame being drawn was
-        // asked for, and what asks for a frame a capped rate makes due later.
-        std::chrono::steady_clock::time_point moved;
-        bool                                  asked = false;
-        wl_event_source*                      due   = nullptr;
+        // Whether the frame being drawn changes the scene or the answers,
+        // which keep easing after it: the next frame is drawn whole too.
+        bool                                  changed = false;
+        // The film's pace over the monitor, a tile at a time, as last read,
+        // and when each tile was last drawn; and what wakes the world when
+        // the next tile is due with no frame coming.
+        std::vector<uint8_t>                               pace;
+        std::vector<std::chrono::steady_clock::time_point> paced;
+        int                                                tilesX = 0, tilesY = 0;
+        wl_event_source*                                   due    = nullptr;
+        // Where the world changed since it was last drawn here, logical px;
+        // whole while `wholeWorld`: the coarse world and the frost are drawn
+        // again only there, whatever else the frame draws.
+        CRegion                                            world;
+        bool                                               wholeWorld = true;
     };
 
-    // One of the film's programs, the backdrop's or the frame's, and where its
-    // uniforms are.
+    // One of the film's programs, the backdrop's, the frame's or the pace's,
+    // and where its uniforms are.
     struct SProgram {
         GLuint id = 0;
         GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
@@ -243,9 +275,17 @@ void main() {
     // as soft as the film's frost (soft, a framebuffer on that level); `proj`
     // places the monitor in it, for the frames that read it (worldAt()).
     struct SCoarse {
-        GLuint  texture = 0, fbo = 0, soft = 0;
-        int     width = 0, height = 0, levels = 0;
-        Mat3x3  proj;
+        GLuint   texture = 0, fbo = 0, soft = 0;
+        int      width = 0, height = 0, levels = 0;
+        Mat3x3   proj;
+        // The frost target last drawn whole: its framebuffer and size.
+        GLuint   frosted = 0;
+        Vector2D frostedSize;
+        // The world at full size, kept between frames, and where what is
+        // kept is the world as it is now (the target's damage space).
+        GLuint   full = 0, fullFbo = 0;
+        Vector2D fullSize;
+        CRegion  kept;
     };
 
     // What the film's programs draw with: the unit square and the textures,
@@ -254,7 +294,13 @@ void main() {
         GLuint   vao = 0, vbo = 0, data = 0, feed = 0, glyphs = 0;
         uint64_t feedUploaded   = 0; // the feed change in the texture
         bool     glyphsUploaded = false;
-        SProgram backdrop, frame;
+        SProgram backdrop, frame, pace;
+        // COPY's program, and where its uniforms are.
+        GLuint   copy = 0;
+        GLint    copyProj = -1, copyArea = -1, copySource = -1, copyLevel = -1, copySize = -1;
+        // Where the pace is drawn, a texel a tile, to be read back.
+        GLuint   paceTexture = 0, paceFbo = 0;
+        int      paceWidth = 0, paceHeight = 0;
         std::unordered_map<MONITORID, SCoarse> coarse;
     };
 
@@ -271,11 +317,12 @@ void main() {
         uint64_t                                compiled   = 0;
         bool                                    framed     = false; // the film's shader defines frame()
         SGpu                                    gpu;
-        // Frames a second of the backdrop's own motion, plugged in and on
-        // battery; 0 is the display's own rate. Sean: "keep it native? or
-        // atleast 30". Idle on the P16 the display's 120 cost about 9 W and 30
-        // about 3.5 W (measured 2026-10-28), so native is for mains power.
-        // Windows are followed every frame whatever these are.
+        // The most frames a second the backdrop's own motion is drawn in,
+        // plugged in and on battery; 0 is the display's own rate. Sean: "keep
+        // it native? or atleast 30". Idle on the P16 the display's 120 cost
+        // about 9 W and 30 about 3.5 W (measured 2026-10-28, before the world
+        // was drawn at its pace), so native is for mains power. Windows are
+        // followed every frame whatever these are.
         SP<Config::Values::CIntValue>           fps;
         SP<Config::Values::CIntValue>           batteryFps;
         // How far the windows' depth goes (specs/depth.md, "Tiers"): 0 is the
@@ -295,10 +342,8 @@ void main() {
         std::unordered_map<uint64_t, SMotion>   motion; // each window's, by stable id
         std::deque<SImpulse>                    impulses;
         uint64_t                                impulseGeneration = 0;
-        uint64_t                                typed             = 0; // TYPE impulses so far
-        // Voxtype's speech, as the feed last sent it.
-        float                                   voice    = 0;
-        bool                                    speaking = false;
+        // Voxtype's loudness, as the feed last sent it.
+        float                                   voice = 0;
         std::chrono::steady_clock::time_point   voiceReceived;
         // Hyprland keeps a closed window's rounding inside its fadeout, out of
         // reach, and forgets which window it was, so the plugin keeps both
@@ -504,9 +549,13 @@ void main() {
 
     void deleteProgram() {
         auto& gpu = g->gpu;
-        for (const auto program : {gpu.backdrop.id, gpu.frame.id})
+        for (const auto program : {gpu.backdrop.id, gpu.frame.id, gpu.pace.id, gpu.copy})
             if (program)
                 glDeleteProgram(program);
+        if (gpu.paceFbo)
+            glDeleteFramebuffers(1, &gpu.paceFbo);
+        if (gpu.paceTexture)
+            glDeleteTextures(1, &gpu.paceTexture);
         if (gpu.vbo)
             glDeleteBuffers(1, &gpu.vbo);
         if (gpu.vao)
@@ -515,6 +564,8 @@ void main() {
             if (texture)
                 glDeleteTextures(1, &texture);
         for (const auto& [id, coarse] : gpu.coarse) {
+            glDeleteFramebuffers(1, &coarse.fullFbo);
+            glDeleteTextures(1, &coarse.full);
             glDeleteFramebuffers(1, &coarse.soft);
             glDeleteFramebuffers(1, &coarse.fbo);
             glDeleteTextures(1, &coarse.texture);
@@ -585,7 +636,8 @@ void main() {
     // Builds the film's programs once per theme read; called with the render
     // context current. A backdrop that does not compile leaves the plugin
     // idle until the theme is read again; a frame that does not compile
-    // leaves the windows without one.
+    // leaves the windows without one, and a pace that does not, the world
+    // drawn whole every frame.
     bool program() {
         if (g->compiled == g->generation)
             return g->gpu.backdrop.id != 0;
@@ -595,6 +647,24 @@ void main() {
             return false;
         if (g->framed)
             link(g->gpu.frame, FRAME_MAIN, "frame()");
+        link(g->gpu.pace, PACE_MAIN, "pace()");
+        {
+            std::string  log;
+            const GLuint vert = compileStage(GL_VERTEX_SHADER, VERTEX, log), frag = compileStage(GL_FRAGMENT_SHADER, COPY, log);
+            auto&        gpu  = g->gpu;
+            gpu.copy          = glCreateProgram();
+            glAttachShader(gpu.copy, vert);
+            glAttachShader(gpu.copy, frag);
+            glBindAttribLocation(gpu.copy, 0, "pos");
+            glLinkProgram(gpu.copy);
+            glDeleteShader(vert);
+            glDeleteShader(frag);
+            gpu.copyProj   = glGetUniformLocation(gpu.copy, "proj");
+            gpu.copyArea   = glGetUniformLocation(gpu.copy, "area");
+            gpu.copySource = glGetUniformLocation(gpu.copy, "source");
+            gpu.copyLevel  = glGetUniformLocation(gpu.copy, "level");
+            gpu.copySize   = glGetUniformLocation(gpu.copy, "size");
+        }
 
         auto& gpu = g->gpu;
         GLint vao = 0, buffer = 0;
@@ -680,8 +750,7 @@ void main() {
         if (!g)
             return;
         forgetImpulses();
-        g->voice    = 0;
-        g->speaking = false;
+        g->voice = 0;
     }
 
     void forgetImpulses() {
@@ -947,6 +1016,22 @@ void main() {
         g_pHyprRenderer->damageMonitor(monitor);
         monitor->m_blurFBDirty        = true;
         monitor->m_blurFBShouldRender = true;
+        // Every tile of the world is drawn now.
+        if (g) {
+            auto& state = g->monitors[monitor->m_id];
+            std::ranges::fill(state.paced, std::chrono::steady_clock::now());
+            state.wholeWorld = true;
+        }
+    }
+
+    // How many levels the coarse world's mipmap has: as soft as the glass's
+    // frost (Hyprland's blur size, which film.lua sets from the film's
+    // frost): a blur of that size in two passes spreads a point over about
+    // twice its size, in the monitor's pixels, of which the coarse world has
+    // one in two.
+    int frostLevels(const PHLMONITOR& monitor) {
+        static auto SIZE = CConfigValue<Config::INTEGER>("decoration:blur:size");
+        return std::clamp(int(std::round(std::log2(std::max(2.0 * *SIZE * monitor->m_scale, 1.0)))), 1, 6);
     }
 
     // Uploads the shapes, three texels each: (x, y, w, h), (alpha, rounding,
@@ -1002,30 +1087,15 @@ void main() {
     // FEED_BUDGET datagrams a wakeup, never waiting: a truncated, oversized or
     // malformed one is dropped, and any valid one, a repeat too, says the
     // feed is alive.
-    // A voice reading: the loudness now, and speech starting is an impulse
-    // where dictated text arrives, along the focused window's lower edge.
+    // A voice reading: the loudness now (whether speech is on, which the
+    // feed also sends, no film answers).
     void onVoice(const uint8_t* data) {
-        float    level    = 0;
-        uint32_t speaking = 0;
+        float level = 0;
         std::memcpy(&level, data, 4);
-        std::memcpy(&speaking, data + 4, 4);
         if (!std::isfinite(level))
             return;
-        if (!answering()) {
-            g->voice    = 0;
-            g->speaking = false;
-            return;
-        }
-        g->voice         = std::clamp(level, 0.F, 1.F);
+        g->voice         = answering() ? std::clamp(level, 0.F, 1.F) : 0.F;
         g->voiceReceived = std::chrono::steady_clock::now();
-        if (speaking && !g->speaking) {
-            if (const auto window = Desktop::focusState()->window(); window && window->m_workspace && window->m_workspace->visible()) {
-                const auto at   = window->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-                const auto size = window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-                addImpulse({at.x + size.x / 2.0, at.y + size.y}, 1.F, IMPULSE_VOICE, window);
-            }
-        }
-        g->speaking = speaking != 0;
     }
 
     int onFeed(int fd, uint32_t, void*) {
@@ -1272,10 +1342,18 @@ vec4 cinemaGlass(vec4 c) {{
         return presence();
     }
 
+    // The backdrop's time at `now`: as it last moved, and on by the clock
+    // since while the world moves.
+    float timeAt(std::chrono::steady_clock::time_point now) {
+        if (g->moved == std::chrono::steady_clock::time_point{})
+            return g->time;
+        return std::fmod(g->time + std::chrono::duration<float>(now - g->moved).count(), 3600.F);
+    }
+
     // Everything the contract gives a film, for program `p`, drawing `area`
-    // (logical px) placed by `proj` on `monitor`. The textures are on units
-    // 4 to 7: the world drawn at half size, the lettering, the feed and the
-    // windows.
+    // (logical px) placed by `proj` on `monitor`, at `now`. The textures are
+    // on units 4 to 7: the world drawn at half size, the lettering, the feed
+    // and the windows.
     void setUniforms(const SProgram& p, const PHLMONITOR& monitor, const SScene& scene, const SAnswer& answer, const Mat3x3& proj, const CBox& area,
                      std::chrono::steady_clock::time_point now) {
         const bool  lettered = !g->glyphPixels.empty();
@@ -1284,7 +1362,7 @@ vec4 cinemaGlass(vec4 c) {{
         glUniformMatrix3fv(p.proj, 1, GL_TRUE, proj.getMatrix().data());
         glUniform4f(p.area, area.x, area.y, area.w, area.h);
         glUniform2f(p.resolution, monitor->m_size.x, monitor->m_size.y);
-        glUniform1f(p.time, g->time);
+        glUniform1f(p.time, timeAt(now));
         glUniform3fv(p.accent, 1, g->accent.data());
         glUniform3fv(p.background, 1, g->background.data());
         glUniform3fv(p.foreground, 1, g->foreground.data());
@@ -1376,15 +1454,38 @@ vec4 cinemaGlass(vec4 c) {{
         g_pHyprOpenGL->disableScissor();
     }
 
+    // `texture`'s `level` copied over each of `boxes` (the bound
+    // framebuffer's pixels, `size` of them), as COPY draws it.
+    void copy(Render::CRenderContext& ctx, GLuint texture, float level, const Vector2D& size, const std::vector<CBox>& boxes) {
+        auto& gpu = g->gpu;
+        glActiveTexture(GL_TEXTURE4);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glUseProgram(gpu.copy);
+        const Mat3x3 whole(std::array<float, 9>{2, 0, -1, 0, 2, -1, 0, 0, 1});
+        glUniformMatrix3fv(gpu.copyProj, 1, GL_TRUE, whole.getMatrix().data());
+        glUniform4f(gpu.copyArea, 0, 0, 1, 1);
+        glUniform1i(gpu.copySource, 4);
+        glUniform1f(gpu.copyLevel, level);
+        glUniform2f(gpu.copySize, size.x, size.y);
+        glBindVertexArray(gpu.vao);
+        for (const auto& box : boxes) {
+            g_pHyprOpenGL->scissor(ctx, box, false);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        }
+        g_pHyprOpenGL->disableScissor();
+    }
+
     // The glass's frost: the coarse world softened through its mipmap into
     // the framebuffer Hyprland's glass reads, so Hyprland need not blur the
-    // screen itself. `level` is the coarse world's level as soft as the
-    // film's frost.
-    void frost(PHLMONITOR monitor, const SCoarse& coarse) {
+    // screen itself, over `changed` (the target's pixels, as scissored);
+    // `coarse.soft` is the coarse world's level as soft as the film's frost.
+    void frost(Render::CRenderContext& ctx, PHLMONITOR monitor, SCoarse& coarse, const std::vector<CBox>& changed) {
         const auto resources = monitor->resources();
         auto*      target    = resources ? dynamic_cast<Render::GL::CGLFramebuffer*>(resources->m_blurFB.get()) : nullptr;
         if (!target || !target->isAllocated())
             return;
+        coarse.frosted     = target->getFBID();
+        coarse.frostedSize = target->m_size;
         GLint draw = 0, read = 0;
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
         glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
@@ -1393,10 +1494,12 @@ vec4 cinemaGlass(vec4 c) {{
             glBindTexture(GL_TEXTURE_2D, coarse.texture);
             glGenerateMipmap(GL_TEXTURE_2D);
         }
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, coarse.soft);
+        std::array<GLint, 4> viewport{};
+        glGetIntegerv(GL_VIEWPORT, viewport.data());
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target->getFBID());
-        glBlitFramebuffer(0, 0, std::max(coarse.width >> (coarse.levels - 1), 1), std::max(coarse.height >> (coarse.levels - 1), 1), 0, 0, target->m_size.x, target->m_size.y,
-                          GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        glViewport(0, 0, target->m_size.x, target->m_size.y);
+        copy(ctx, coarse.texture, float(coarse.levels - 1), target->m_size, changed);
+        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
         glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
     }
@@ -1456,13 +1559,13 @@ vec4 cinemaGlass(vec4 c) {{
             // same projection, softened into the glass's frost (frost()).
             auto&     coarse = gpu.coarse[monitor->m_id];
             const int width = (monitor->m_transformedSize.x + 1) / 2, height = (monitor->m_transformedSize.y + 1) / 2;
-            // As soft as the glass's frost (Hyprland's blur size, which
-            // film.lua sets from the film's frost): a blur of that size in two
-            // passes spreads a point over about twice its size, in the
-            // monitor's pixels, of which the coarse world has one in two.
-            static auto SIZE   = CConfigValue<Config::INTEGER>("decoration:blur:size");
-            const int   levels = std::clamp(int(std::round(std::log2(std::max(2.0 * *SIZE * monitor->m_scale, 1.0)))), 1, 6);
+            const int levels = frostLevels(monitor);
+            // A new coarse world, and a new frost target, are drawn whole.
+            const auto resources = monitor->resources();
+            auto*      target    = resources ? dynamic_cast<Render::GL::CGLFramebuffer*>(resources->m_blurFB.get()) : nullptr;
+            bool       whole     = !target || target->getFBID() != coarse.frosted || target->m_size != coarse.frostedSize;
             if (coarse.width != width || coarse.height != height || coarse.levels != levels) {
+                whole = true;
                 if (coarse.fbo) {
                     glDeleteTextures(1, &coarse.texture);
                     glDeleteFramebuffers(1, &coarse.fbo);
@@ -1474,7 +1577,8 @@ vec4 cinemaGlass(vec4 c) {{
                 glActiveTexture(GL_TEXTURE4);
                 glBindTexture(GL_TEXTURE_2D, coarse.texture);
                 glTexStorage2D(GL_TEXTURE_2D, levels, GL_RGB10_A2, width, height);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                // Its levels for the frost, level 0 for the frames (worldAt()).
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -1487,6 +1591,35 @@ vec4 cinemaGlass(vec4 c) {{
                 coarse.height = height;
                 coarse.levels = levels;
             }
+            // The coarse world and the frost are drawn again only where the
+            // world changed since they were last drawn (its due tiles, all
+            // of it when the scene changed), not over all Hyprland draws:
+            // its damage holds the last frames' too, for its rotating
+            // buffers, and every client's. In the target's pixels, and the
+            // coarse world's half of them.
+            auto& state = g->monitors[monitor->m_id];
+            whole       = whole || state.wholeWorld;
+            CRegion world;
+            if (whole)
+                world = CRegion(CBox{{}, monitor->m_transformedSize});
+            else {
+                state.world.forEachRect([&](const auto& rect) {
+                    CBox box = CBox{double(rect.x1), double(rect.y1), double(rect.x2 - rect.x1), double(rect.y2 - rect.y1)}.scale(monitor->m_scale).round();
+                    box.transform(Math::wlTransformToHyprutils(monitor->m_transform), monitor->m_size.x * monitor->m_scale, monitor->m_size.y * monitor->m_scale);
+                    world.add(box);
+                });
+                world.intersect(CBox{{}, monitor->m_transformedSize});
+            }
+            state.world.clear();
+            state.wholeWorld = false;
+            std::vector<CBox> changed;
+            const auto        turned = Math::wlTransformToHyprutils(Math::invertTransform(monitor->m_transform));
+            world.forEachRect([&](const auto& rect) {
+                CBox box = {double(rect.x1), double(rect.y1), double(rect.x2 - rect.x1), double(rect.y2 - rect.y1)};
+                if (ctx.m_data.transformDamage)
+                    box.transform(turned, monitor->m_transformedSize.x, monitor->m_transformedSize.y);
+                changed.push_back(box);
+            });
             GLint draw = 0, read = 0;
             glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
             glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
@@ -1495,17 +1628,63 @@ vec4 cinemaGlass(vec4 c) {{
             glBindFramebuffer(GL_FRAMEBUFFER, coarse.fbo);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.texture, 0);
             glViewport(0, 0, width, height);
-            g_pHyprOpenGL->disableScissor();
             coarse.proj = proj;
             prepare(0, set);
-            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            for (const auto& box : changed) {
+                const double left = std::floor(box.x / 2.0), top = std::floor(box.y / 2.0);
+                g_pHyprOpenGL->scissor(ctx, CBox{left, top, std::ceil((box.x + box.w) / 2.0) - left, std::ceil((box.y + box.h) / 2.0) - top}, false);
+                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            }
+            g_pHyprOpenGL->disableScissor();
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
             glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
             glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-            frost(monitor, coarse);
-            // At full size over the damage Hyprland leaves it: all of it but
-            // what frosted windows cover (CGlassPass).
-            drawSquare(ctx, coarse.texture, ctx.m_data.damage, set);
+            frost(ctx, monitor, coarse, changed);
+            // At full size over the damage Hyprland leaves it, all of it but
+            // what frosted windows cover (CGlassPass): drawn once and kept.
+            // The film draws only where the world changed or nothing is kept
+            // yet; the rest of Hyprland's damage, which holds its last two
+            // frames' too (its buffers rotate) and every client's, is a copy.
+            if (coarse.fullSize != monitor->m_transformedSize) {
+                if (coarse.fullFbo) {
+                    glDeleteTextures(1, &coarse.full);
+                    glDeleteFramebuffers(1, &coarse.fullFbo);
+                }
+                glGenTextures(1, &coarse.full);
+                glGenFramebuffers(1, &coarse.fullFbo);
+                glActiveTexture(GL_TEXTURE4);
+                glBindTexture(GL_TEXTURE_2D, coarse.full);
+                glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGB10_A2, monitor->m_transformedSize.x, monitor->m_transformedSize.y);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glBindFramebuffer(GL_FRAMEBUFFER, coarse.fullFbo);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.full, 0);
+                coarse.fullSize = monitor->m_transformedSize;
+                coarse.kept.clear();
+            }
+            // With the whole world changed, the film draws on the screen and
+            // nothing is kept: the next frame at rest keeps what it draws.
+            if (whole) {
+                coarse.kept.clear();
+                drawSquare(ctx, coarse.texture, ctx.m_data.damage, set);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
+                return {};
+            }
+            coarse.kept.subtract(world);
+            const CRegion fresh = ctx.m_data.damage.copy().subtract(coarse.kept);
+            glBindFramebuffer(GL_FRAMEBUFFER, coarse.fullFbo);
+            drawSquare(ctx, coarse.texture, fresh, set);
+            coarse.kept.add(fresh);
+            glBindFramebuffer(GL_FRAMEBUFFER, draw);
+            std::vector<CBox> shown;
+            ctx.m_data.damage.forEachRect([&](const auto& rect) {
+                CBox box = {double(rect.x1), double(rect.y1), double(rect.x2 - rect.x1), double(rect.y2 - rect.y1)};
+                if (ctx.m_data.transformDamage)
+                    box.transform(turned, monitor->m_transformedSize.x, monitor->m_transformedSize.y);
+                shown.push_back(box);
+            });
+            copy(ctx, coarse.full, 0.F, coarse.fullSize, shown);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
             return {};
         }
 
@@ -1697,24 +1876,94 @@ vec4 cinemaGlass(vec4 c) {{
         return false;
     }
 
-    // The least time between the frames the world moves in; 0 is every frame.
-    std::chrono::duration<double> interval() {
+    // The most frames a second the world's own motion is drawn in now; 0 is
+    // every frame.
+    int rateCap() {
         const auto now = std::chrono::steady_clock::now();
         if (now - g->lastPowerCheck > std::chrono::seconds(2)) {
             g->plugged        = plugged();
             g->lastPowerCheck = now;
         }
-        const auto rate = (g->plugged ? g->fps : g->batteryFps)->value();
-        return std::chrono::duration<double>(rate > 0 ? 1.0 / rate : 0.0);
+        return (g->plugged ? g->fps : g->batteryFps)->value();
     }
 
-    // Asks for the monitor's next frame with the world moved on, glass
-    // included: made dirty before render.pre, the blur runs only when a window
-    // or an xray layer shows glass (Hyprland 0.57.0 src/render/GLRenderer.cpp:386).
-    void ask(const PHLMONITOR& monitor) {
-        g_pHyprRenderer->damageMonitor(monitor);
-        monitor->m_blurFBDirty           = true;
-        g->monitors[monitor->m_id].asked = true;
+    // How far round a changed part of the world the screen changes with it,
+    // in logical px: as far as a frame looks for the world, and as far as the
+    // frost spreads it (two texels of its level, a monitor pixel being half a
+    // texel of the coarse world's first).
+    double paceGrowth(const PHLMONITOR& monitor) {
+        return FRAME_LOOK + std::exp2(frostLevels(monitor) + 1) / monitor->m_scale + 2.0;
+    }
+
+    // Reads the film's pace over `monitor` at `now` into its tiles, with the
+    // scene last drawn there (contract.glsl, pace()). It runs outside any
+    // frame, so it is a guest in Hyprland's context like any pass, and the
+    // read waits only for its own small draw. False with no pace to read.
+    bool readPace(const PHLMONITOR& monitor, SMonitor& state, std::chrono::steady_clock::time_point now) {
+        auto& gpu = g->gpu;
+        if (!gpu.pace.id)
+            return false;
+        const int width = int(std::ceil(monitor->m_size.x / PACE_TILE)), height = int(std::ceil(monitor->m_size.y / PACE_TILE));
+        g_pHyprOpenGL->makeEGLCurrent();
+        const SGuest         guest;
+        GLint                fbo = 0, packBuffer = 0, alignment = 0, rowLength = 0, skipRows = 0, skipPixels = 0;
+        std::array<GLint, 4> viewport{};
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+        glGetIntegerv(GL_VIEWPORT, viewport.data());
+        glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &packBuffer);
+        glGetIntegerv(GL_PACK_ALIGNMENT, &alignment);
+        glGetIntegerv(GL_PACK_ROW_LENGTH, &rowLength);
+        glGetIntegerv(GL_PACK_SKIP_ROWS, &skipRows);
+        glGetIntegerv(GL_PACK_SKIP_PIXELS, &skipPixels);
+        if (gpu.paceWidth < width || gpu.paceHeight < height) {
+            if (!gpu.paceFbo)
+                glGenFramebuffers(1, &gpu.paceFbo);
+            if (gpu.paceTexture)
+                glDeleteTextures(1, &gpu.paceTexture);
+            gpu.paceWidth  = std::max(gpu.paceWidth, width);
+            gpu.paceHeight = std::max(gpu.paceHeight, height);
+            glGenTextures(1, &gpu.paceTexture);
+            glActiveTexture(GL_TEXTURE4);
+            glBindTexture(GL_TEXTURE_2D, gpu.paceTexture);
+            glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, gpu.paceWidth, gpu.paceHeight);
+            glBindFramebuffer(GL_FRAMEBUFFER, gpu.paceFbo);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gpu.paceTexture, 0);
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, gpu.paceFbo);
+        glViewport(0, 0, width, height);
+        g_pHyprOpenGL->disableScissor();
+        g_pHyprRenderer->blend(false);
+        glActiveTexture(GL_TEXTURE7);
+        glBindTexture(GL_TEXTURE_2D, gpu.data);
+        uploadShapes(state.drawn.shapes);
+        // A texel a tile, its middle at the tile's: the unit square over the
+        // whole target, top row first.
+        const Mat3x3 proj(std::array<float, 9>{2, 0, -1, 0, 2, -1, 0, 0, 1});
+        prepare(0, [&] { setUniforms(gpu.pace, monitor, state.drawn, state.answered, proj, CBox{0, 0, double(width * PACE_TILE), double(height * PACE_TILE)}, now); });
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        std::vector<uint8_t> texels(size_t(width) * height * 4);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+        glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, texels.data());
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, packBuffer);
+        glPixelStorei(GL_PACK_ALIGNMENT, alignment);
+        glPixelStorei(GL_PACK_ROW_LENGTH, rowLength);
+        glPixelStorei(GL_PACK_SKIP_ROWS, skipRows);
+        glPixelStorei(GL_PACK_SKIP_PIXELS, skipPixels);
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        if (state.tilesX != width || state.tilesY != height) {
+            state.tilesX = width;
+            state.tilesY = height;
+            state.paced.assign(size_t(width) * height, {});
+        }
+        state.pace.resize(size_t(width) * height);
+        for (size_t i = 0; i < state.pace.size(); i++)
+            state.pace[i] = texels[4 * i];
+        return true;
     }
 
     // While the world moves nowhere, time stands still: the next frame it
@@ -1724,14 +1973,77 @@ vec4 cinemaGlass(vec4 c) {{
             g->moved = {};
     }
 
+    int onDue(void* id);
+
+    // The world moves on at its pace on `monitor` (contract.glsl, pace()).
+    // After a frame there that changed the scene or the answers, which ease
+    // on after it, and while an answer is alive, the next frame draws it
+    // whole. Otherwise the tiles whose turn has come are drawn again, grown
+    // by what changes with them; the frame that draws them ticks again when
+    // it is shown, and with none due the world wakes when the next one is,
+    // and within PACE_AHEAD to read the pace again.
+    void tick(const PHLMONITOR& monitor) {
+        if (!g || g->source.empty())
+            return;
+        if (!moves(monitor))
+            return standStill();
+        auto&      state = g->monitors[monitor->m_id];
+        const auto now   = std::chrono::steady_clock::now();
+        if (state.changed || !g->impulses.empty() || !readPace(monitor, state, now))
+            return redraw(monitor);
+        // A tile's turn comes at its rate's own slots of the clock, the rate
+        // being its pace rounded up to 60 halved a whole number of times, so
+        // the turns of every slower rate fall on those of the faster ones:
+        // the slow tiles are drawn all together in few frames. Hyprland
+        // draws each frame's damage again in the next two (its buffers
+        // rotate), and merges scattered damage into one box, so turns spread
+        // over every frame would draw the screen every frame.
+        static constexpr std::array<double, 7> RATES = {0.9375, 1.875, 3.75, 7.5, 15, 30, 60};
+        const int  cap   = rateCap();
+        const auto clock = [](std::chrono::steady_clock::time_point at) { return std::chrono::duration<double>(at.time_since_epoch()).count(); };
+        CRegion    due;
+        double     next = clock(now) + PACE_AHEAD;
+        for (size_t i = 0; i < state.pace.size(); i++) {
+            const int pace = cap > 0 ? std::min<int>(state.pace[i], cap) : state.pace[i];
+            if (pace == 0)
+                continue;
+            const auto rate = std::ranges::find_if(RATES, [&](double r) { return r >= pace; });
+            if (rate == RATES.end() || std::floor(clock(now) * *rate) > std::floor(clock(state.paced[i]) * *rate)) {
+                due.add(CBox{double(int(i) % state.tilesX * PACE_TILE), double(int(i) / state.tilesX * PACE_TILE), double(PACE_TILE), double(PACE_TILE)});
+                state.paced[i] = now;
+            } else
+                next = std::min(next, (std::floor(clock(now) * *rate) + 1.0) / *rate);
+        }
+        if (!due.empty()) {
+            const double grow = paceGrowth(monitor);
+            due.forEachRect([&](const auto& rect) {
+                const auto box = CBox{double(rect.x1), double(rect.y1), double(rect.x2 - rect.x1), double(rect.y2 - rect.y1)}.expand(grow);
+                state.world.add(box);
+                monitor->addDamage(box.copy().scale(monitor->m_scale).round());
+            });
+            return;
+        }
+        if (!state.due)
+            state.due = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onDue, reinterpret_cast<void*>(intptr_t(monitor->m_id)));
+        wl_event_source_timer_update(state.due, std::max(1, int(std::ceil((next - clock(now)) * 1000.0))));
+    }
+
+    int onDue(void* id) {
+        for (const auto& monitor : State::monitorState()->monitors())
+            if (monitor->m_id == MONITORID(intptr_t(id)))
+                tick(monitor);
+        return 0;
+    }
+
     // Once Hyprland has finished a change that may move the glass or start
     // or stop the world (a theme read or config change; a lock or a monitor
     // leaving, both announced before Hyprland marks them; a window going
     // fullscreen; a monitor coming, sleeping or waking): the glass the theme
     // asks for;
     // answers let go if the world no longer answers, so turning depth or
-    // animations off and on again brings nothing back; and the world started
-    // where it moves and standing still where it does not.
+    // animations off and on again brings nothing back; and the world drawn
+    // whole where it moves, which starts it at its pace, and standing still
+    // where it does not.
     void settled(void*) {
         if (!g)
             return;
@@ -1742,7 +2054,7 @@ vec4 cinemaGlass(vec4 c) {{
         if (!g->source.empty())
             for (const auto& monitor : State::monitorState()->monitors())
                 if (moves(monitor))
-                    ask(monitor);
+                    redraw(monitor);
         standStill();
     }
 
@@ -1751,44 +2063,26 @@ vec4 cinemaGlass(vec4 c) {{
             g->settling = wl_event_loop_add_idle(g_pCompositor->m_wlEventLoop, settled, nullptr);
     }
 
-    int onDue(void* id) {
-        for (const auto& monitor : State::monitorState()->monitors())
-            if (monitor->m_id == MONITORID(intptr_t(id)) && moves(monitor))
-                ask(monitor);
-        return 0;
-    }
-
-    // A frame shown where the world moves asks for the next: at once, or,
-    // with a capped rate, once the last frame it moved in here started that
-    // long ago. Any frame shown starts the world again.
+    // A frame shown ticks the world on where it moves (tick()).
     void onPresented(const PHLMONITOR& monitor) {
-        if (!g)
-            return;
-        if (!moves(monitor))
-            return standStill();
-        auto&      state = g->monitors[monitor->m_id];
-        const auto wait  = std::chrono::duration<double, std::milli>(state.moved + interval() - std::chrono::steady_clock::now()).count();
-        if (wait < 1)
-            return ask(monitor);
-        if (!state.due)
-            state.due = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onDue, reinterpret_cast<void*>(intptr_t(monitor->m_id)));
-        wl_event_source_timer_update(state.due, int(std::ceil(wait)));
+        tick(monitor);
     }
 
     void onPre(PHLMONITOR monitor) {
         if (!g || g->source.empty())
             return;
         auto& state = g->monitors[monitor->m_id];
-        // A frame asked for moves the world on to now, as it starts drawing
-        // just after the vblank before the one it is shown at.
-        if (std::exchange(state.asked, false) && moves(monitor)) {
+        // The world moves on by the clock while it moves here; each frame
+        // draws it at its render.pre, just after the vblank before the one
+        // it is shown at.
+        if (moves(monitor)) {
             const auto now = std::chrono::steady_clock::now();
-            if (g->moved != std::chrono::steady_clock::time_point{})
-                g->time = std::fmod(g->time + std::chrono::duration<float>(now - g->moved).count(), 3600.F);
-            g->moved = state.moved = now;
+            g->time        = timeAt(now);
+            g->moved       = now;
         }
         state.pending = readScene(monitor, state);
         state.answer  = readAnswer(monitor, state);
+        state.changed = state.pending != state.drawn || state.answer != state.answered;
         if (state.pending != state.drawn)
             redraw(monitor);
         else if (state.answer != state.answered)
@@ -1867,33 +2161,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (const auto monitor = State::monitorState()->query().vec(at).run())
             g_pHyprRenderer->damageMonitor(monitor);
     });
-    // Typing (specs/depth.md, part 1): a printable key, with no modifier held
-    // but Shift (AltGr still types), into a client window holding the
-    // keyboard, with no input method grab and the session unlocked. The key
-    // only decides this; nothing of it is kept.
-    static auto KEY = Event::bus()->m_events.input.keyboard.key.listen([](const IKeyboard::SKeyEvent& event, Event::SCallbackInfo&) {
-        if (!g || g->source.empty() || event.state != WL_KEYBOARD_KEY_STATE_PRESSED || g_pSessionLockManager->isSessionLocked())
-            return;
-        const auto window   = Desktop::focusState()->window();
-        const auto keyboard = g_pSeatManager->m_keyboard.lock();
-        if (!window || !keyboard || !keyboard->m_xkbState || g_pSeatManager->m_state.keyboardFocus.lock() != window->wlSurface()->resource())
-            return;
-        if (const auto ime = g_pInputManager->m_relay.m_inputMethod.lock(); ime && ime->hasGrab())
-            return;
-        for (const char* mod : {XKB_MOD_NAME_CTRL, XKB_MOD_NAME_ALT, XKB_MOD_NAME_LOGO})
-            if (xkb_state_mod_name_is_active(keyboard->m_xkbState, mod, XKB_STATE_MODS_EFFECTIVE) > 0)
-                return;
-        const auto code = xkb_keysym_to_utf32(xkb_state_key_get_one_sym(keyboard->m_xkbState, event.keycode + 8));
-        if (code < 0x20 || code == 0x7f)
-            return;
-        // Along the window's lower edge, spread by the golden ratio so a burst
-        // of typing walks across it.
-        const auto   at    = window->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-        const auto   size  = window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-        const double along = std::fmod(0.5 + double(g->typed++) * 0.6180339887, 1.0);
-        if (window->m_workspace && window->m_workspace->visible())
-            addImpulse({at.x + size.x * along, at.y + size.y}, 0.5F, IMPULSE_TYPE, window);
-    });
     static auto RELOADED = Event::bus()->m_events.config.reloaded.listen([] {
         if (!g)
             return;
@@ -1927,6 +2194,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     static auto REMOVED = Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) {
         if (const auto coarse = g->gpu.coarse.find(monitor->m_id); coarse != g->gpu.coarse.end()) {
             g_pHyprOpenGL->makeEGLCurrent();
+            glDeleteFramebuffers(1, &coarse->second.fullFbo);
+            glDeleteTextures(1, &coarse->second.full);
             glDeleteFramebuffers(1, &coarse->second.soft);
             glDeleteFramebuffers(1, &coarse->second.fbo);
             glDeleteTextures(1, &coarse->second.texture);

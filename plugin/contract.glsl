@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 5
+// omarchy-cinema contract 6
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -58,27 +58,21 @@ uniform vec4 pointer;
 
 // What happened lately (specs/depth.md): the last 32 things, newest last, each
 // a point, its age in seconds (it is gone after 3), a strength from 0 to 1 and
-// a kind. Every film answers each kind its own way. Typing is a printable key
-// pressed into a window, placed along that window's lower edge; nothing of the
-// key itself reaches the shader.
+// a kind. Every film answers each kind its own way; while one is alive the
+// plugin draws the whole world every frame.
 const int OPEN = 1;   // a window opened, at its middle
 const int CLOSE = 2;  // a window closed, at its middle
 const int LAND = 3;   // a window stopped moving, at its middle; stronger the faster it came
 const int FOCUS = 4;  // a window took focus, at its middle
-const int TYPE = 5;   // a key typed into the focused window
-const int VOICE = 6;  // speech began (Voxtype)
 uniform vec4 impulses[32]; // x, y, age, strength
 uniform int impulseKinds[32];
-// The window each happened to (typing and speech: the one typed or spoken
-// into), as its index this frame; -1 for none, a window closed or not drawn
-// here.
+// The window each happened to, as its index this frame; -1 for none, a window
+// closed or not drawn here.
 uniform int impulseWindows[32];
 uniform int impulseCount;
 
 // How loud speech is while Voxtype records, 0 to 1 (0 when it does not). Only
-// loudness: nothing of what is said reaches the shader. A VOICE impulse marks
-// each start of speech, along the focused window's lower edge, where the
-// dictated text arrives.
+// loudness: nothing of what is said reaches the shader.
 uniform float voice;
 
 // Text a backdrop can draw: the newest plaintext of the agents on this machine
@@ -326,6 +320,40 @@ vec4 worldAt(vec2 px) {
     return textureLod(drawnWorld, at.xy * 0.5 + 0.5, 0.0);
 }
 
+// How often the world at px changes on its own, in frames a second
+// (specs/smoothness.md, "Cost follows change"): 0 where it holds still while
+// the desktop does, EVERY_FRAME where every frame shown must draw it. The
+// plugin draws each part of the screen only as often as its pace asks, so the
+// world costs where it moves and as fast as it moves; while a window, the
+// focus, the pointer, voice, the agents' text coming or going, or an answer
+// (above) changes, it draws all of it every frame. pace(px) speaks for every
+// point within PACE_REACH px of px, over the next PACE_AHEAD seconds: a part
+// that will start moving there within that time counts already. moving(v)
+// is the pace of a part moving v px a second, changing(f) of one whose light
+// changes by f of full scale a second: then no frame shows it more than half
+// a pixel, or two levels of 255, from where it is (tools/pace-check holds a
+// film to that).
+const float EVERY_FRAME = 255.0;
+const float PACE_REACH = 32.0;
+const float PACE_AHEAD = 0.1;
+float moving(float pxPerSecond) {
+    return pxPerSecond * 2.0;
+}
+float changing(float perSecond) {
+    return perSecond * 127.5;
+}
+
+// The pace `d` px from the head of a glow that runs at `speed` px a second,
+// `strength` bright at its head and fading as exp(-d / soft): every frame at
+// its head, which counts as there from PACE_AHEAD before it comes, and as
+// fast as its light changes behind it. For a glow that fades on one side
+// only, `d` is the nearer of the way behind it and the way it still has to
+// come.
+float passing(float d, float speed, float soft, float strength) {
+    float from = d - PACE_REACH - speed * PACE_AHEAD;
+    return from <= 0.0 ? EVERY_FRAME : changing(strength * speed / soft * exp(-from / soft));
+}
+
 // What a film defines. backdrop(px): the colour of the world at px. And,
 // optionally, frame(px, i): window i's edge in that world (specs/depth.md,
 // part 2), a premultiplied colour over a band reaching 48 px outside the
@@ -336,3 +364,6 @@ vec4 worldAt(vec2 px) {
 // border ring with the film's edge.
 vec4 backdrop(vec2 px);
 vec4 frame(vec2 px, int i);
+// And pace(px), above: how often the world and the frames at px change on
+// their own.
+float pace(vec2 px);

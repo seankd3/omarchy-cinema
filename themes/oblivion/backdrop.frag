@@ -1,4 +1,4 @@
-// omarchy-cinema contract 5
+// omarchy-cinema contract 6
 // Oblivion: Tower 49 at dawn. A high pale sky over a sea of cloud that slides
 // slowly toward the tower, the sun low on the horizon and the broken moon faint
 // in the daylight. Every window is a pane of the tower's glass, traced by a fine
@@ -176,7 +176,7 @@ float ink(float d, float w) {
 
 // The sky answering what happened lately, briefly and softly, at px: how far
 // it lifts toward white (x) and toward the sun's gold (y), and how much of
-// the drone's blue ink it lays there (z). Typing and voice get no answer.
+// the drone's blue ink it lays there (z).
 vec3 answers(vec2 px) {
     vec3 a = vec3(0.0);
     // Newest first: the ring is newest last, so past the first one older
@@ -187,7 +187,6 @@ vec3 answers(vec2 px) {
         float age = e.z;
         if (age > 1.2) break;
         if (age > 1.0 && kind != LAND) continue;
-        if (kind == TYPE || kind == VOICE) continue;
         if (kind == CLOSE) {
             // A faint ring of vapour spreads where the pane was and thins.
             float front = closingFront(px, e);
@@ -414,6 +413,42 @@ vec4 backdrop(vec2 px) {
     }
 
     return vec4(col, 1.0);
+}
+
+// How often the sky changes on its own (contract.glsl, pace()). The cirrus
+// drifts a level in seconds, the deck a pixel in a fraction of one, faster
+// nearer; under a pane the washed light holds still. What runs: the glint
+// along each pane's upper rim, the drone's ring with its fading trail, and
+// the glint along the bar; each jumps back at the end of its run.
+float pace(vec2 px) {
+    float horizon = horizonY();
+    Seen seen = UNSEEN;
+    for (int i = 0; i < windowCount; i++) see(seen, window(px, i));
+    if (seen.nearest < -1.0 - PACE_REACH) return 0.0;
+    float p = px.y < horizon + PACE_REACH ? changing(0.02) : 0.0;
+    // A row dy below the horizon slides dy^2 / (90 H) px for each of the
+    // deck's 1.6 units a second, its warp about as much again; its sunlit
+    // rims turn over quicker than that, about 12 a second anywhere.
+    float dy = px.y + PACE_REACH - horizon;
+    if (dy > 0.0) p = max(p, max(12.0, moving(4.0 * dy * dy / (90.0 * resolution.y))));
+    for (int i = 0; i < windowCount; i++) {
+        Window w = window(px, i);
+        if (w.d > 15.0 + PACE_REACH || px.y > w.rect.y + w.rect.w * 0.5 + PACE_REACH) continue;
+        float off = abs(px.x - w.rect.x - cycle(20.0) * w.rect.z);
+        p = max(p, passing(min(off, w.rect.z - off), w.rect.z / 20.0, 140.0, 0.5));
+    }
+    if (focusAlpha > 0.0 && abs(rectDistance(px, focused, 0.0) - RING) < 12.0 + PACE_REACH) {
+        vec4 ring = focused + vec4(-RING, -RING, 2.0 * RING, 2.0 * RING);
+        float lap = 2.0 * (ring.z + ring.w);
+        float behind = fract(cycle(12.0) - around(px, ring)) * lap;
+        p = max(p, passing(min(behind, lap - behind), lap / 12.0, 380.0, 1.3));
+    }
+    if (reserved.x > 0.0 && abs(px.y - reserved.x) < 40.0 + PACE_REACH) {
+        float span = resolution.x + 800.0;
+        float off = abs(px.x - cycle(15.0) * span + 400.0);
+        p = max(p, passing(min(off, span - off), span / 15.0, 120.0, 1.3));
+    }
+    return p;
 }
 
 // Each pane's edge (specs/depth.md, part 2): Tower 49's glass. A fine blue

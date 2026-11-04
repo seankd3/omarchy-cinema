@@ -1,4 +1,4 @@
-// omarchy-cinema contract 5
+// omarchy-cinema contract 6
 // The Matrix: the code, and the code is what the agents on this machine are
 // writing (specs/agent-rain.md). Their text rains down the black screen in
 // mirrored glyphs, each stream led by a white-hot head carrying the newest
@@ -305,6 +305,18 @@ vec4 backdrop(vec2 px) {
     }
 
     return vec4(background + (1.0 - exp(-light * 1.3)), 1.0);
+}
+
+// How often the code changes on its own (contract.glsl, pace()): while the
+// agents write, the rain falls everywhere, every frame; with no text, only
+// the drip of light along the bar runs.
+float pace(vec2 px) {
+    if (feedPresence > 0.0) return EVERY_FRAME;
+    if (reserved.x <= 0.0) return 0.0;
+    float edge = glowLine(max(abs(px.y - reserved.x) - PACE_REACH, 0.0), 1.6) * 1.8;
+    float span = resolution.x + 600.0;
+    float behind = fract(cycle(9.0) - (px.x + 300.0) / span) * span;
+    return max(passing(behind, span / 9.0, 260.0, edge), passing(span - behind, span / 9.0, 6.0, edge));
 }
 
 // Each window's edge (specs/depth.md, part 2): a phosphor line, a crisp

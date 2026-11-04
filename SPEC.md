@@ -47,23 +47,20 @@ very frame redraws the backdrop and the glass. Windows reach the shader as a
 float texture, so there is no window limit, and each pixel reads and measures
 each window once (contract.glsl's `window()`).
 
-**Cheap at rest, native when it can be.** The backdrop's own motion runs at
-the display's rate when any mains or USB-C supply is online and at 30 a second
-on battery (`plugin:backdrop:fps`, default 0 = the display's rate;
-`plugin:backdrop:battery_fps`, default 30; Sean: "keep it native? or atleast
-30"). The motion runs on the display's frames: each frame shown asks for
-the next while the world moves, and a frame asked for moves time on by its
-own clock and redraws the whole monitor and its glass, so what moves behind
-the glass moves with the backdrop around it (Sean, 2026-11-02: the glass
-trailing a fifth of a second behind showed). A free-running timer beat
-against the display instead (specs/smoothness.md). Hyprland blurs again only
-when a window on screen or an xray layer shows glass. Idle on workspace 1,
-measured 2026-10-28 on a busy machine with the glass at 5 a second: about
-+6 W native, +3 W at 30. On 2026-11-02, Tron Legacy with two glass terminals
-in the hidden desktop, three interleaved rounds: GPU 2.75 W with the glass at
-5 a second, 2.76 W at every backdrop frame. Time stands still, and nothing
-asks for frames, with animations off, the session locked, or every monitor
-asleep or fullscreen.
+**Cost follows change.** The film says, as data in its own shader, how often
+each part of its world changes on its own (contract.glsl, `pace()`): 0 where
+it holds still, a few times a second where it drifts, every frame where
+something runs past. Each frame shown reads that pace a tile of 32 px at a
+time and draws again only the tiles whose turn has come, at most every frame
+and on battery 30 a second (`plugin:backdrop:fps`, default 0 = the
+display's rate; `plugin:backdrop:battery_fps`, default 30; Sean: "keep it
+native? or atleast 30"); with no tile due nothing asks for a frame. The world
+at full size and at half size is kept between frames, so the film's shader
+runs only where the world changed, and the rest of what Hyprland draws again
+is a copy. While a window, the focus, the pointer, voice or an answer
+changes, the whole world is drawn every frame. Time stands still, and
+nothing asks for frames, with animations off, the session locked, or every
+monitor asleep or fullscreen (specs/smoothness.md, "Cost follows change").
 
 **Theme switch.** `omarchy-theme-set` swaps `current/theme` and reloads
 Hyprland. The plugin reads `backdrop.frag` and `colors.toml` from
