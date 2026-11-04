@@ -262,9 +262,10 @@ fi
 # (specs/agent-rain.md). omarchy-cinema-feed, on, sends speech's loudness;
 # omarchy-cinema-agents, off until the user turns it on (README), sends the
 # agents' text, which would show on the desktop. Each is started or stopped
-# only while its unit is as the install wrote it; the voice one is restarted
-# onto this checkout, so one from before it carries no text. With no user
-# manager (a console, a sandbox) neither starts.
+# only while its unit is as the install wrote it. One running is restarted,
+# whoever's unit it is, onto the script its unit names: a feed from before
+# this checkout sent the agents' text. With no user manager (a console, a
+# sandbox) neither starts.
 feed=~/.config/systemd/user/omarchy-cinema-feed.service
 agents=~/.config/systemd/user/omarchy-cinema-agents.service
 feedunit() {
@@ -293,7 +294,8 @@ else
   feedunit "$feed" "speech's loudness for the backdrop" ""
   feedunit "$agents" "the agents' text for backdrops that draw it" " agents"
   systemctl --user daemon-reload >/dev/null 2>&1 || true
-  if ours "$feed" && ! { systemctl --user enable omarchy-cinema-feed.service && systemctl --user restart omarchy-cinema-feed.service; } >/dev/null 2>&1; then
+  systemctl --user try-restart omarchy-cinema-feed.service omarchy-cinema-agents.service >/dev/null 2>&1 || true
+  if ours "$feed" && ! systemctl --user enable --now omarchy-cinema-feed.service >/dev/null 2>&1; then
     echo "omarchy-cinema-feed did not start: systemctl --user status omarchy-cinema-feed" >&2
   fi
 fi

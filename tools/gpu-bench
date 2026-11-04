@@ -5,8 +5,7 @@
 """GPU time of one 2880x1800 backdrop draw, per film and checkout: each
 checkout's own tools/preview.py scene (its contract, film and the uniforms its
 plugin gives), in one of the storyboard's moments, timed with a GL query over
-40 draws, five rounds interleaved, median. specs/depth.md budgets 1.5 ms;
-the empty pass is about 0.4.
+40 draws, five rounds interleaved, median. The empty pass is about 0.4 ms.
 
     tools/gpu-bench [--moment rest|drag|land|open] [--frames] [CHECKOUT:]SLUG ...
 

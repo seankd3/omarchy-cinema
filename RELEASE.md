@@ -150,7 +150,7 @@ Not yet tested:
   stock; Files already running; no animations on and off; a broken shader;
   a Hyprland update.
 - An install from before 2026-11-04 has no record, so its uninstall leaves
-  its two config lines and two templates, to take out by hand.
+  its two config lines, two templates and feed unit, to take out by hand.
 
 Plan items not built: glass follows glassy mode with film.lua's late
 overrides gone; theme assets from `colors.toml` roles; the `omarchy-cinema`

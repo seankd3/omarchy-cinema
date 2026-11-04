@@ -184,7 +184,7 @@ void main() {
     };
 
     // What the world shows besides the windows: what it answers (specs/depth.md,
-    // part 6), the agents' text and its own clock. A change here draws it
+    // part 3), the agents' text and its own clock. A change here draws it
     // again, glass and all.
     struct SAnswer {
         uint64_t             impulses = 0; // the impulse ring's generation
