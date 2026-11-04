@@ -62,10 +62,11 @@ data, Jarvis's glass 0.6) are in git history.
    contract 8): the five films' faint light round the pointer is gone, and
    with it the whole-world redraw every mouse move asked for. Measured at
    1440x900 in the hidden desktop, the pointer moving inside the focused
-   window (scratch/batch6/runs/p2, GPU shared with your session): a
-   frame while it moves cost 4.07 ms in Jarvis and 3.86 in the Matrix,
-   every one drawing the world whole, and now 0.18 and 0.19, none whole;
-   a stock theme's is 0.87 (its bar is a live blur). Stills, before and after with the
+   window (scratch/batch6/runs/p2, GPU shared with your session), median
+   traced frame while it moves: 4.07 ms in Jarvis and 3.86 in the Matrix
+   before, with 486 of 488 and 481 of 483 frames drawing the world whole,
+   and now 0.18 and 0.19, none of 129 and 130 whole; a stock theme's is
+   0.87 over 131 frames (its bar is a live blur). Stills, before and after with the
    pointer at the screen's middle: scratch/batch6/taste/pointer/. Asked:
    in every film, each mouse move drew the whole world again
    (the plugin damaged the monitor for the pointer's light), as moving a
