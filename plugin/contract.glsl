@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 8
+// omarchy-cinema contract 9
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -47,9 +47,13 @@ uniform vec3 background;
 uniform vec3 foreground;
 uniform vec4 focused;
 uniform vec4 reserved;
-// Three texels a window, 256 to a row: (x, y, w, h), (alpha, rounding,
-// lift, depth) and (velocity x, y). Read them through the window functions.
-uniform sampler2D windowData;
+// Three vec4s a window, at most 256 windows: (x, y, w, h), (alpha,
+// rounding, lift, depth) and (velocity x, y). A uniform block, which every
+// pixel reads as one constant, not a texture each pixel fetches. Read them
+// through the window functions.
+layout(std140) uniform Windows {
+    vec4 windowTexels[3 * 256];
+};
 uniform int windowCount;
 uniform int focusedIndex;
 // How present the focus is, for decorations that follow it: the focused
@@ -144,10 +148,6 @@ vec2 orbit(float seconds, float radius) {
     return vec2(cos(a), sin(a)) * radius;
 }
 
-vec4 windowTexel(int texel) {
-    return texelFetch(windowData, ivec2(texel % 256, texel / 256), 0);
-}
-
 // Distance from px to a rect's edge, rounded by `radius`: negative inside it.
 float rectDistance(vec2 px, vec4 rect, float radius) {
     vec2 half_ = rect.zw * 0.5;
@@ -173,8 +173,14 @@ struct Window {
 };
 
 Window window(vec2 px, int i) {
-    vec4 rect = windowTexel(3 * i), a = windowTexel(3 * i + 1);
-    return Window(i, rect, a.x, a.y, a.z, a.w, windowTexel(3 * i + 2).xy, rectDistance(px, rect, a.y) + (1.0 - a.x) * 200.0);
+    vec4 rect = windowTexels[3 * i], a = windowTexels[3 * i + 1];
+    return Window(i, rect, a.x, a.y, a.z, a.w, windowTexels[3 * i + 2].xy, rectDistance(px, rect, a.y) + (1.0 - a.x) * 200.0);
+}
+
+// The point's distance to window w's edge as it stands, without the push
+// its fade gives d.
+float edgeDistance(Window w) {
+    return w.d - (1.0 - w.alpha) * 200.0;
 }
 
 // What every film asks of the windows at a point, gathered by see() as its
@@ -267,7 +273,7 @@ vec2 edgeNormal(vec2 px, vec4 rect, float radius) {
 // own glass stays lit: 1 in full shadow.
 float windowShadow(vec2 px, Window w, vec2 offset, float soft) {
     float d = rectDistance(px - offset, w.rect, w.rounding);
-    return (1.0 - smoothstep(-soft, soft, d)) * smoothstep(-2.0, 3.0, rectDistance(px, w.rect, w.rounding)) * w.alpha;
+    return (1.0 - smoothstep(-soft, soft, d)) * smoothstep(-2.0, 3.0, edgeDistance(w)) * w.alpha;
 }
 
 // The light falling on window i's glass, for a backdrop to draw under it (the

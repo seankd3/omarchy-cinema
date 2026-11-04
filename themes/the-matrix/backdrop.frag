@@ -1,4 +1,4 @@
-// omarchy-cinema contract 8
+// omarchy-cinema contract 9
 // The Matrix: the code, and the code is what the agents on this machine are
 // writing (specs/agent-rain.md). Their text rains down the black screen in
 // mirrored glyphs, each stream led by a white-hot head carrying the newest
@@ -185,7 +185,9 @@ vec4 backdrop(vec2 px) {
         if (speed < 40.0) continue;
         float pace = min(speed / 1500.0, 1.0) * w.alpha;
         pull -= v.x * 0.02 * exp(-max(d, 0.0) / 80.0) * pace;
-        if (d < 0.0) continue;
+        // The wake reaches 300 px past where the window was in the last
+        // 0.14 s, its last ghost's lag.
+        if (d < 0.0 || edgeDistance(w) > 300.0 + speed * 0.14) continue;
         for (int k = 1; k <= 4; k++) {
             vec4 ghost = w.rect;
             ghost.xy -= v * 0.035 * float(k);

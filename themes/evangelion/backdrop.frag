@@ -1,4 +1,4 @@
-// omarchy-cinema contract 8
+// omarchy-cinema contract 9
 // Evangelion: NERV's displays. A honeycomb of hexagonal cells lies across
 // the dark and wakes like an AT field around the windows: cells light orange
 // along every window's edge and in the seams between windows, brightest at
@@ -195,7 +195,8 @@ vec4 backdrop(vec2 px) {
         float fc = fieldDistance(cell.xy, r);
         if (fc < 0.0) continue;
         stir += 2.2 * pace * exp(-fc / 160.0) * pow(0.5 + 0.5 * cos(fc / 26.0 - cycle(1.0) * TAU * 3.0), 3.0);
-        for (int k = 1; k <= 4; k++) {
+        // Its ghosts reach 260 px past where it was in the last 0.12 s.
+        for (int k = 1; k <= (fc < 260.0 + speed * 0.12 ? 4 : 0); k++) {
             vec4 ghost = r;
             ghost.xy -= v * 0.03 * float(k);
             stir += (1.4 - 0.3 * float(k)) * pace * exp(-abs(fieldDistance(cell.xy, ghost)) / 26.0);

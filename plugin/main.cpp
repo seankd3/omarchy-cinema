@@ -91,8 +91,9 @@ namespace {
         IMPULSE_LAND,
         IMPULSE_FOCUS,
     };
-    // Texels per row of the window data texture: three per window.
-    constexpr int    DATA_WIDTH = 256;
+    // The most windows a monitor's scene holds: the contract's Windows block
+    // has room for this many, three vec4s each.
+    constexpr size_t WINDOWS_MAX = 256;
     // The feed's snapshot: "CFD1", generation (u64), count and next position
     // (u32), little-endian like this machine, then the ring of characters.
     constexpr size_t FEED_RING   = 16384;
@@ -245,7 +246,7 @@ void main() {
     // its uniforms are.
     struct SProgram {
         GLuint id = 0;
-        GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowData, windowCount, focusedIndex, focusAlpha;
+        GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowCount, focusedIndex, focusAlpha;
         GLint  feedUniform, feedCount, feedPos, glyphsUniform, feedPresence;
         GLint  impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder, drawnWorld, worldProj;
     };
@@ -274,10 +275,11 @@ void main() {
                 glDeleteTextures(1, &texture);
     }
 
-    // What the film's programs draw with: the unit square and the textures,
-    // filled once a frame by the backdrop and read by every frame after it.
+    // What the film's programs draw with: the unit square, the windows'
+    // uniform buffer, filled once a frame by the backdrop and read by every
+    // frame after it, and the lettering.
     struct SGpu {
-        GLuint   vao = 0, vbo = 0, data = 0, glyphs = 0;
+        GLuint   vao = 0, vbo = 0, windows = 0, glyphs = 0;
         bool     glyphsUploaded = false;
         SProgram backdrop, frame;
         // COPY's program, and where its uniforms are.
@@ -532,13 +534,13 @@ void main() {
         for (const auto program : {gpu.backdrop.id, gpu.frame.id, gpu.copy})
             if (program)
                 glDeleteProgram(program);
-        if (gpu.vbo)
-            glDeleteBuffers(1, &gpu.vbo);
+        for (const auto buffer : {gpu.vbo, gpu.windows})
+            if (buffer)
+                glDeleteBuffers(1, &buffer);
         if (gpu.vao)
             glDeleteVertexArrays(1, &gpu.vao);
-        for (const auto texture : {gpu.data, gpu.glyphs})
-            if (texture)
-                glDeleteTextures(1, &texture);
+        if (gpu.glyphs)
+            glDeleteTextures(1, &gpu.glyphs);
         for (const auto& [id, coarse] : gpu.coarse)
             forget(coarse);
         gpu = {};
@@ -581,7 +583,6 @@ void main() {
         p.foreground    = at("foreground");
         p.focused       = at("focused");
         p.reserved      = at("reserved");
-        p.windowData    = at("windowData");
         p.windowCount   = at("windowCount");
         p.focusedIndex  = at("focusedIndex");
         p.focusAlpha    = at("focusAlpha");
@@ -600,6 +601,8 @@ void main() {
         p.frameBorder   = at("frameBorder");
         p.drawnWorld    = at("drawnWorld");
         p.worldProj     = at("worldProj");
+        if (const GLuint block = glGetUniformBlockIndex(p.id, "Windows"); block != GL_INVALID_INDEX)
+            glUniformBlockBinding(p.id, block, 0);
         return true;
     }
 
@@ -650,7 +653,7 @@ void main() {
         glBindVertexArray(vao);
         glBindBuffer(GL_ARRAY_BUFFER, buffer);
 
-        glGenTextures(1, &gpu.data);
+        glGenBuffers(1, &gpu.windows);
         glGenTextures(1, &gpu.glyphs);
         return true;
     }
@@ -811,7 +814,8 @@ void main() {
     }
 
     // The windows Hyprland draws on this monitor in this frame, and those
-    // fading out after closing, where they are drawn; and where attention is.
+    // fading out after closing, where they are drawn, the first WINDOWS_MAX
+    // of them; and where attention is.
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {
         const auto now = std::chrono::steady_clock::now();
         SScene     scene;
@@ -843,6 +847,8 @@ void main() {
 
         for (const auto& w : Desktop::windowState()->windows()) {
             order++;
+            if (scene.shapes.size() == WINDOWS_MAX)
+                break;
             if (!w->mapped() || w->isHidden() || !w->m_workspace || !g_pHyprRenderer->shouldRenderWindow(w, monitor))
                 continue;
             // Where and how faded renderWindow draws it, from the presentation
@@ -891,6 +897,8 @@ void main() {
         static auto ROUNDING = CConfigValue<Config::INTEGER>("decoration:rounding");
         for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
             const auto workspace = fadeout->workspace().lock();
+            if (scene.shapes.size() == WINDOWS_MAX)
+                break;
             if (fadeout->monitor() != monitor || !isWindowFadeout(fadeout) ||
                 (workspace && workspace != monitor->m_activeWorkspace && !(workspace->type() == Workspace::eWorkspaceType::SPECIAL && workspace->m_alpha->value() > 0.F)))
                 continue;
@@ -998,8 +1006,6 @@ void main() {
         return std::clamp(int(std::round(std::log2(std::max(2.0 * *SIZE * monitor->m_scale, 1.0)))), 1, 6);
     }
 
-    // Uploads the shapes, three texels each: (x, y, w, h), (alpha, rounding,
-    // lift, depth) and (velocity x, y).
     // Fills the texture bound on the active unit from `data`, with the
     // unpack state set plainly and put back after, since Hyprland's own
     // uploads rely on what they set.
@@ -1029,11 +1035,11 @@ void main() {
         glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
     }
 
+    // Fills the windows' uniform buffer, bound, with the shapes, three vec4s
+    // each: (x, y, w, h), (alpha, rounding, lift, depth) and (velocity x, y);
+    // the whole block, as a draw reads all of it.
     void uploadShapes(const std::vector<SShape>& shapes) {
-        const int          texels = std::max<int>(3 * shapes.size(), 1);
-        const int          width  = std::min(texels, DATA_WIDTH);
-        const int          height = (texels + DATA_WIDTH - 1) / DATA_WIDTH;
-        std::vector<float> data(size_t(width) * height * 4, 0.F);
+        std::vector<float> data(WINDOWS_MAX * 12, 0.F);
         for (size_t i = 0; i < shapes.size(); i++) {
             const auto at = data.begin() + i * 12;
             std::copy(shapes[i].rect.begin(), shapes[i].rect.end(), at);
@@ -1044,7 +1050,7 @@ void main() {
             at[8] = shapes[i].velocity[0];
             at[9]  = shapes[i].velocity[1];
         }
-        upload(GL_RGBA32F, width, height, GL_RGBA, GL_FLOAT, data.data(), GL_NEAREST);
+        glBufferData(GL_UNIFORM_BUFFER, data.size() * sizeof(float), data.data(), GL_STREAM_DRAW);
     }
 
     // Takes the newest valid snapshot waiting on the feed socket, at most
@@ -1343,8 +1349,8 @@ vec4 cinemaGlass(vec4 c) {{
 
     // Everything the contract gives a film, for program `p`, drawing `area`
     // (logical px) placed by `proj` on `monitor`, at `now`. The textures are
-    // on units 4 to 7: the world drawn at half size, the lettering, the feed
-    // and the windows.
+    // on units 4 to 6: the world drawn at half size, the lettering and the
+    // feed; the windows are uniform block 0.
     void setUniforms(const SProgram& p, const PHLMONITOR& monitor, const SScene& scene, const SAnswer& answer, const Mat3x3& proj, const CBox& area,
                      std::chrono::steady_clock::time_point now) {
         const auto& gpu  = g->gpu;
@@ -1359,7 +1365,6 @@ vec4 cinemaGlass(vec4 c) {{
         glUniform3fv(p.foreground, 1, g->foreground.data());
         glUniform4fv(p.focused, 1, scene.focus.data());
         glUniform4fv(p.reserved, 1, scene.reserved.data());
-        glUniform1i(p.windowData, 7);
         glUniform1i(p.drawnWorld, 4);
         glUniformMatrix3fv(p.worldProj, 1, GL_TRUE, kept.proj.getMatrix().data());
         glUniform1i(p.windowCount, scene.shapes.size());
@@ -1397,15 +1402,18 @@ vec4 cinemaGlass(vec4 c) {{
     // program or texture unit it believes is still current, so a pass holds
     // one of these from its first GL call to its last, uploads included, and
     // leaves all it changes as it found it: the program, the vertex array,
-    // the textures on the films' units 4 to 7 and the active unit.
+    // the textures on the films' units 4 to 6, the active unit and the
+    // uniform buffer bindings.
     struct SGuest {
-        GLint                program = 0, vao = 0, unit = 0;
-        std::array<GLint, 4> textures{};
+        GLint                program = 0, vao = 0, unit = 0, uniforms = 0, block = 0;
+        std::array<GLint, 3> textures{};
         SGuest() {
             glGetIntegerv(GL_CURRENT_PROGRAM, &program);
             glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
             glGetIntegerv(GL_ACTIVE_TEXTURE, &unit);
-            for (int i = 0; i < 4; i++) {
+            glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &uniforms);
+            glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, 0, &block);
+            for (int i = 0; i < 3; i++) {
                 glActiveTexture(GL_TEXTURE4 + i);
                 glGetIntegerv(GL_TEXTURE_BINDING_2D, &textures[i]);
             }
@@ -1413,7 +1421,9 @@ vec4 cinemaGlass(vec4 c) {{
         ~SGuest() {
             glBindVertexArray(vao);
             glUseProgram(program);
-            for (int i = 0; i < 4; i++) {
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, block);
+            glBindBuffer(GL_UNIFORM_BUFFER, uniforms);
+            for (int i = 0; i < 3; i++) {
                 glActiveTexture(GL_TEXTURE4 + i);
                 glBindTexture(GL_TEXTURE_2D, textures[i]);
             }
@@ -1422,14 +1432,15 @@ vec4 cinemaGlass(vec4 c) {{
     };
 
     // Binds the film's textures, with the kept world's text, and its world
-    // drawn at half size unless that is being drawn (`drawing`), sets the
-    // program's state with `set` and binds the square.
+    // drawn at half size unless that is being drawn (`drawing`), and the
+    // windows, sets the program's state with `set` and binds the square.
     void prepare(const SCoarse& kept, bool drawing, const std::function<void()>& set) {
         auto& gpu = g->gpu;
-        for (int unit = 0; unit < 4; unit++) {
+        for (int unit = 0; unit < 3; unit++) {
             glActiveTexture(GL_TEXTURE4 + unit);
-            glBindTexture(GL_TEXTURE_2D, std::array{drawing ? 0 : kept.texture, gpu.glyphs, kept.feed, gpu.data}[unit]);
+            glBindTexture(GL_TEXTURE_2D, std::array{drawing ? 0 : kept.texture, gpu.glyphs, kept.feed}[unit]);
         }
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, gpu.windows);
         set();
         glBindVertexArray(gpu.vao);
     }
@@ -1509,8 +1520,7 @@ vec4 cinemaGlass(vec4 c) {{
             // context is current; every frame drawn after reads them.
             const SGuest guest;
             auto&        gpu = g->gpu;
-            glActiveTexture(GL_TEXTURE7);
-            glBindTexture(GL_TEXTURE_2D, gpu.data);
+            glBindBuffer(GL_UNIFORM_BUFFER, gpu.windows);
             uploadShapes(m_scene.shapes);
             // The half-size world and the frost are kept, and drawn again
             // only when the world changed, or for a new size or frost target.

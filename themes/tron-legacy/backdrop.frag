@@ -1,4 +1,4 @@
-// omarchy-cinema contract 8
+// omarchy-cinema contract 9
 // Tron Legacy: the Grid. A floor of light lines runs out to the horizon under
 // a black sky, and light cycles race along it, trailing light. Around every
 // window a circuit line is drawn, and pulses run along it; around the focused
@@ -98,7 +98,8 @@ vec4 backdrop(vec2 px) {
     // it, seen through the glass, stays lit (1 in full shadow).
     //
     // A moving window leaves its circuit behind it as a fading light trail,
-    // outside the window itself.
+    // outside the window itself, reaching 80 px past where the window was in
+    // the last 0.125 s: its last ghost's lag.
     bool ground = px.y > horizon;
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0;
@@ -122,7 +123,7 @@ vec4 backdrop(vec2 px) {
             }
         }
         float speed = length(w.velocity);
-        if (speed >= 40.0) {
+        if (speed >= 40.0 && w.d > 0.0 && edgeDistance(w) < 80.0 + speed * 0.125) {
             float outside = smoothstep(0.0, 3.0, w.d);
             vec3 tint = i == focusedIndex ? ORANGE : cyan;
             for (int k = 1; k <= 5; k++) {

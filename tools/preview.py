@@ -124,14 +124,15 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
         owners = [int(i[5]) for i in impulses] + [-1] * (32 - len(impulses))
         program["impulseWindows"].write(np.array(owners, dtype="i4").tobytes())
 
-    data = np.zeros((max(3 * len(windows), 1), 4), dtype="f4")
+    data = np.zeros((3 * 256, 4), dtype="f4")
     for i, rect in enumerate(windows):
         data[3 * i] = rect
         data[3 * i + 1] = (1.0, 0.0, 1.0 if i == focused else 0.0, float(len(windows) - 1 - i))
         data[3 * i + 2] = (*(velocity[i] if velocity else (0.0, 0.0)), 0.0, 0.0)
-    window_data = ctx.texture((len(data), 1), 4, data.tobytes(), dtype="f4")
-    window_data.filter = (moderngl.NEAREST, moderngl.NEAREST)
-    textures = [window_data]
+    window_data = ctx.buffer(data.tobytes())
+    if "Windows" in program:
+        program["Windows"].binding = 0
+    textures = []
 
     # A theme's lettering, for whatever it writes, and the agents' text for a
     # film that rains it: the preview fills the feed with this repository's
@@ -147,7 +148,7 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
         letters = ctx.texture((128, 128), 1, ring)
         letters.filter = (moderngl.NEAREST, moderngl.NEAREST)
         textures += [glyphs, letters]
-        for name, value in {"glyphs": 1, "feed": 2}.items():
+        for name, value in {"glyphs": 0, "feed": 1}.items():
             if name in program:
                 program[name].value = value
     for name, value in {"feedCount": 16384 if lettered and feed else 0, "feedPos": 0, "feedPresence": 1.0 if lettered and feed else 0.0}.items():
@@ -164,6 +165,7 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
     vao = ctx.vertex_array(program, [(quad, "2f", "pos")])
 
     def draw():
+        window_data.bind_to_uniform_block(0)
         for unit, texture in enumerate(textures):
             texture.use(unit)
         vao.render(moderngl.TRIANGLE_STRIP)
