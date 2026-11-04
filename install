@@ -17,19 +17,16 @@ case ${1:-} in
   *) echo "usage: ./install [--uninstall]" >&2; exit 2 ;;
 esac
 
-# What is this install's own: whatever is named for it (omarchy-cinema), every
-# link into this checkout's themes, and what its record says (state/record,
-# a line each, kept from the first run on): a file or directory it made where
-# there was none, with what it wrote; a line it added to a file of the
-# user's; a Voxtype setting it changed, from what to what. The uninstall
-# undoes the record newest first and keeps what the user changed since. An
-# install from before the record (2026-11-04) has none, so its lines and
-# templates stay.
+# What is this install's own: its engine, every link into this checkout's
+# themes, and what its record says (state/record, a line for each change it
+# made, in order, from the first run on): a file or directory it wrote where
+# there was none, or over its own, with what it wrote; a line it added to a
+# file of the user's; a Voxtype setting it changed, from what to what. The
+# uninstall undoes the record newest first and keeps what the user changed
+# since. An install from before the record (2026-11-04) has none, so its
+# lines, templates, feed unit and Chrome hook stay.
 state=~/.local/state/omarchy-cinema
-record() {
-  mkdir -p "$state"
-  grep -qxF "$1" "$state/record" 2>/dev/null || printf '%s\n' "$1" >>"$state/record"
-}
+record() { mkdir -p "$state"; printf '%s\n' "$1" >>"$state/record"; }
 fingerprint() { sha256sum <"$1" | cut -c 1-64; }
 # The missing directories up to $1, each made and recorded.
 dirs() {
@@ -38,11 +35,17 @@ dirs() {
   mkdir "$1"
   record "made	$1	dir"
 }
-# File $1 from stdin, only where there is none.
+# File $1 from stdin (mode $2, else 644), where there is none or it is as
+# this last wrote it; one the user made or changed stays theirs.
 made() {
-  [[ -e $1 || -L $1 ]] && return 0
+  local new last; new=$(cat; echo .)
+  if [[ -e $1 || -L $1 ]]; then
+    last=$(awk -F '\t' -v path="$1" '$1 == "made" && $2 == path { s = $3 } END { print s }' "$state/record" 2>/dev/null)
+    [[ -f $1 && -n $last && $(fingerprint "$1") == "$last" && $last != $(printf '%s' "${new%.}" | fingerprint /dev/stdin) ]] || return 0
+  fi
   dirs "${1%/*}"
-  cat >"$1"
+  printf '%s' "${new%.}" >"$1"
+  chmod "${2:-644}" "$1"
   record "made	$1	$(fingerprint "$1")"
 }
 # A file's contents, trailing newlines and all.
@@ -52,6 +55,30 @@ contents() { local c; c=$(cat "$1"; echo .); printf '%s' "${c%.}"; }
 rewrite() {
   local new; new=$(mktemp "$1.XXXXXX")
   { printf '%s' "$2" >"$new" && chmod --reference="$1" "$new" && mv "$new" "$1"; } || { rm -f "$new"; exit 1; }
+}
+# Line $2 put into file $1 as a whole line just after its first line $3
+# (first of all with no $3), and taken out again, the first whole line that
+# is exactly it: each the other's undo, the file's last newline or its
+# absence kept.
+nl=$'\n'
+put_line() {
+  local c; c=$(contents "$1"; echo .); c=${c%.}
+  if [[ -z ${3:-} ]]; then c=$2$nl$c
+  elif [[ $c == "$3$nl"* ]]; then c=$3$nl$2$nl${c#"$3$nl"}
+  elif [[ $c == *"$nl$3$nl"* ]]; then c=${c/"$nl$3$nl"/"$nl$3$nl$2$nl"}
+  else c=$c$nl$2
+  fi
+  rewrite "$1" "$c"
+  record "line	$1	$2"
+}
+take_line() {
+  local c; c=$(contents "$1"; echo .); c=${c%.}
+  if [[ $c == "$2$nl"* ]]; then c=${c#"$2$nl"}
+  elif [[ $c == *"$nl$2$nl"* ]]; then c=${c/"$nl$2$nl"/$nl}
+  elif [[ $c == *"$nl$2" ]]; then c=${c%"$nl$2"}
+  elif [[ $c == "$2" ]]; then c=""
+  fi
+  rewrite "$1" "$c"
 }
 
 hypr=~/.config/hypr/hyprland.lua
@@ -115,15 +142,10 @@ fi
 # What is missing goes into the config's target just after Omarchy's
 # defaults, the plugin's line first.
 target=$(readlink -f "$hypr")
-if [[ -z $remove ]] && ! { grep -qxF "$plugin" "$target" && grep -qxF "$film" "$target"; }; then
-  for line in "$plugin" "$film"; do
-    grep -qxF "$line" "$target" || record "line	$target	$line"
+if [[ -z $remove ]]; then
+  for line in "$film" "$plugin"; do
+    grep -qxF "$line" "$target" || put_line "$target" "$line" 'require("default.hypr.omarchy")'
   done
-  config=$(awk -v plugin="$plugin" -v film="$film" '
-    BEGIN { while ((getline line < ARGV[1]) > 0) { if (line == plugin) p = 1; if (line == film) f = 1 } }
-    { print } $0 == "require(\"default.hypr.omarchy\")" { if (!p) print plugin; if (!f) print film }
-  ' "$target"; echo .)
-  rewrite "$target" "${config%.}"
 fi
 [[ -n $remove && $other == /usr/lib/omarchy-cinema/ ]] && rm -rf ~/.local/lib/omarchy-cinema
 
@@ -183,11 +205,7 @@ if [[ -z $remove ]]; then
   gtk=~/.config/gtk-4.0/gtk.css
   made "$gtk" </dev/null
   gtk=$(readlink -f "$gtk")
-  if ! grep -qxF "$import" "$gtk"; then
-    record "line	$gtk	$import"
-    kept=$(contents "$gtk"; echo .)
-    rewrite "$gtk" "$import"$'\n'"${kept%.}"
-  fi
+  grep -qxF "$import" "$gtk" || put_line "$gtk" "$import"
 fi
 
 # Voxtype's dictation popup follows the theme the same way: its style is the
@@ -197,7 +215,8 @@ fi
 # Its settings for that change only where they differ: its style is the
 # applied theme, drawn by its Quickshell OSD, and nothing pins it to one look
 # (a plugin path wins over the style; a palette other than Omarchy's stops it
-# following the theme). Voxtype reads them when it starts.
+# following the theme). Voxtype reads them when it starts, and keeps its own
+# config.toml.bak of each change.
 [[ -z $remove ]] && made ~/.config/omarchy/themed/voxtype-osd.toml.tpl <"$here/osd/voxtype-osd.toml.tpl"
 if [[ -z $remove ]] && command -v voxtype >/dev/null; then
   if [[ -d ${XDG_DATA_HOME:-$HOME/.local/share}/voxtype/quickshell || -d /usr/share/voxtype/quickshell ]]; then
@@ -230,11 +249,8 @@ fi
 unit=~/.config/systemd/user/omarchy-cinema-feed.service
 if [[ -n $remove ]]; then
   systemctl --user disable --now omarchy-cinema-feed.service >/dev/null 2>&1 || true
-  rm -f "$unit"
-  systemctl --user daemon-reload >/dev/null 2>&1 || true
 else
-  dirs "${unit%/*}"
-  cat >"$unit" <<EOF
+  made "$unit" <<EOF
 [Unit]
 Description=Omarchy Cinema: the agents' text for backdrops that draw it
 PartOf=graphical-session.target
@@ -260,48 +276,52 @@ fi
 # Without its package Chrome goes back to its own look at its next start.
 hook=~/.config/omarchy/hooks/theme-set.d/omarchy-cinema-chrome
 if [[ -n $remove ]]; then
-  rm -rf "$hook" ~/.local/share/omarchy-cinema/chrome
+  rm -rf ~/.local/share/omarchy-cinema/chrome
   [[ $(readlink /opt/google/chrome/extensions) == "$HOME/.local/share/omarchy-cinema/chrome" ]] &&
     echo "Chrome's extension directory links to the theme this wrote, now gone (root, once): sudo rm /opt/google/chrome/extensions" >&2
 else
-  dirs "${hook%/*}"
   dirs ~/.local/share/omarchy-cinema
-  printf '#!/bin/bash\n# Writes the applied theme as Google Chrome'"'"'s.\nexec %q\n' "$here/browser/chrome-theme" >"$hook"
-  chmod 755 "$hook"
+  printf '#!/bin/bash\n# Writes the applied theme as Google Chrome'"'"'s.\nexec %q\n' "$here/browser/chrome-theme" | made "$hook" 755
   "$here/browser/chrome-theme" || echo "browser/chrome-theme failed: Chrome keeps the look it has" >&2
 fi
 
 # The record undone, newest first: a line taken out as it went in, a file
 # removed while it is as the install wrote it, a directory once it is empty,
 # a setting put back while it is as the install set it (Voxtype's default
-# comes back as the default).
+# comes back as the default). A setting with no Voxtype to put it back stays
+# in the record for the next uninstall.
 if [[ -n $remove && -f $state/record ]]; then
+  : >"$state/left"
   while IFS=$'\t' read -r kind path was ours; do
     case $kind in
-      line)
-        if [[ -f $path ]]; then
-          kept=$(contents "$path"; echo .)
-          kept=${kept%.}
-          rewrite "$path" "${kept/"$was"$'\n'/}"
-        fi ;;
+      line) [[ -f $path ]] && take_line "$path" "$was" ;;
       made)
         if [[ $was == dir ]]; then
           rmdir "$path" 2>/dev/null || [[ ! -e $path ]] || echo "kept $path: something else is in it" >&2
         elif [[ -f $path && $(fingerprint "$path") == "$was" ]]; then
           rm "$path"
         elif [[ -e $path ]]; then
-          echo "kept $path: changed since the install made it" >&2
+          echo "kept $path: changed since the install wrote it" >&2
         fi ;;
       setting)
-        if [[ $(voxtype config get "$path") == "$ours" ]]; then
+        if ! command -v voxtype >/dev/null; then
+          printf '%s\t%s\t%s\t%s\n' "$kind" "$path" "$was" "$ours" >>"$state/left"
+        elif [[ $(voxtype config get "$path") == "$ours" ]]; then
           voxtype config unset "$path" >/dev/null
           [[ $(voxtype config get "$path") == "$was" ]] || voxtype config set "$path" "$was" >/dev/null
           echo "Voxtype's $path is as it was once Voxtype restarts: systemctl --user restart voxtype" >&2
         fi ;;
     esac
   done < <(tac "$state/record")
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  if [[ -s $state/left ]]; then
+    tac "$state/left" >"$state/record"
+    rm "$state/left"
+    echo "Voxtype is not here, so its settings are not put back yet: run ./install --uninstall again once it is ($state/record)" >&2
+  else
+    rm -rf "$state"
+  fi
 fi
-[[ -n $remove ]] && rm -rf "$state"
 
 # The applied theme is Omarchy's copy from its last switch: refresh it, as
 # Omarchy's own installers do, so it has what this changed (film values,

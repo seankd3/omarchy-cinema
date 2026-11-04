@@ -20,7 +20,13 @@ if [[ ${1:-} == --inside ]]; then
   film=$2 out=$3
   fail() { echo "fresh-user: $*; logs in $out" >&2; exit 1; }
   clean() { [[ -z $(hyprctl configerrors | tr -d '[:space:]') ]] || fail "config errors: $(hyprctl configerrors)"; }
-  [[ -s ~/.local/state/omarchy/first-run.log ]] || fail "Omarchy's first-run setup did not run at the first login"
+  # Every first-run step done, but for those the sandbox cannot give: it has
+  # no user systemd manager.
+  cannot='enable user systemd units'
+  grep -q 'Completed:' ~/.local/state/omarchy/first-run.log 2>/dev/null || fail "Omarchy's first-run setup did not run at the first login"
+  failed=$(sed -n 's/.*Failed: \(.*\) (exit code.*/\1/p' ~/.local/state/omarchy/first-run.log | sort -u)
+  [[ -z $(grep -vxF "$cannot" <<<"$failed") ]] || fail "first-run steps failed: $(grep -vxF "$cannot" <<<"$failed" | paste -sd ,)"
+  [[ -z $failed ]] || echo "fresh-user: not covered here (no user systemd manager): $cannot"
   hyprctl plugin list | grep -q '^Plugin backdrop ' || fail "the engine did not load at login"
   clean
   # The backdrop's draws, as frametrace logs each one's time.
