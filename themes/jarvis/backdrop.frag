@@ -133,14 +133,16 @@ vec3 holdLines(vec2 px, int i, vec3 cyan) {
 // I'm moving windows round ... then you can really make things shine"):
 // dashed afterimages of it where it just was over a wash of scanned light,
 // outside the window itself, and the lattice it sweeps across lit up
-// (`lattice`). It is gone as soon as the window stops, and reaches 60 px
-// past where the window was in the last 0.16 s: its last afterimage's lag.
+// (`lattice`). It is gone as soon as the window stops. Past 70 px from
+// where the window was in the last 0.16 s (its last afterimage's lag) the
+// wash is 0 and the dashes' glow, 4 x 0.28 exp(-70 / 7.5), moves no point
+// a twentieth of a display level, so it is not drawn there.
 vec3 afterimage(vec2 px, Window w, vec3 cyan, inout float lattice) {
     vec3 light = vec3(0.0);
     vec2 v = w.velocity;
     float speed = length(v);
     // Only a moving window pays for its wake, and only where it reaches.
-    if (speed >= 40.0 && w.d > 0.0 && edgeDistance(w) < 60.0 + speed * 0.16) {
+    if (speed >= 40.0 && w.d > 0.0 && edgeDistance(w) < 70.0 + speed * 0.16) {
         vec3 tint = w.i == focusedIndex ? mix(cyan, HOT, 0.35) : cyan;
         float wash = 0.0;
         float k = min(speed / 1200.0, 1.0) * w.alpha * smoothstep(0.0, 3.0, w.d);

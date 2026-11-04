@@ -98,8 +98,10 @@ vec4 backdrop(vec2 px) {
     // it, seen through the glass, stays lit (1 in full shadow).
     //
     // A moving window leaves its circuit behind it as a fading light trail,
-    // outside the window itself, reaching 80 px past where the window was in
-    // the last 0.125 s: its last ghost's lag.
+    // outside the window itself. Past 80 px from where the window was in the
+    // last 0.125 s (its last ghost's lag) the five glows, 1.8 x 0.25
+    // exp(-73 / 6.6), move no point a hundredth of a display level, so it is
+    // not drawn there.
     bool ground = px.y > horizon;
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0;
