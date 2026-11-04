@@ -38,7 +38,7 @@ if [[ ${1:-} == --inside ]]; then
   # the first, and each column then splits in two.
   workspace=$(hyprctl -j activeworkspace | jq -r .id)
   hyprctl eval "o.workspace_mode({ workspace = '$workspace', mode = 'dwindle' })" >/dev/null
-  open cinema-nvim "foot --app-id=cinema-nvim -D '$here' nvim +40 -c 'set splitkeep=cursor' -c 'Neotree show' install"
+  open cinema-nvim "foot --app-id=cinema-nvim -D '$here' nvim --listen '$XDG_RUNTIME_DIR/cinema-nvim' +40 -c 'set splitkeep=cursor' -c 'Neotree show' install"
   open cinema-btop "foot --app-id=cinema-btop btop"
   focus cinema-nvim
   open cinema-ls "foot --app-id=cinema-ls -D '$here' bash -ic 'eza -lh --group-directories-first --icons=auto; exec bash -i'"
@@ -51,6 +51,12 @@ if [[ ${1:-} == --inside ]]; then
   # captures a second apart (a desktop at rest draws nothing; Files' loading
   # spinner turns).
   sleep 6
+  # A new user's first login greets them (Omarchy's first-run notices), and
+  # with no network in the sandbox nvim's plugins keep saying they cannot
+  # download (noice's message split): neither is the theme, and the notices
+  # cover btop.
+  omarchy-shell -q notifications dismissAll
+  nvim --server "$XDG_RUNTIME_DIR/cinema-nvim" --remote-send "<Cmd>lua for _, w in ipairs(vim.api.nvim_list_wins()) do if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == 'noice' then pcall(vim.api.nvim_win_close, w, true) end end<CR>" || true
   box=$(hyprctl -j clients | jq -r '.[] | select(.class == "org.gnome.Nautilus") | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')
   grim -g "$box" "$out/a.png"
   until sleep 1; grim -g "$box" "$out/b.png"; cmp -s "$out/a.png" "$out/b.png"; do mv "$out/b.png" "$out/a.png"; done
