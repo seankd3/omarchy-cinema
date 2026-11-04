@@ -331,8 +331,8 @@ vec4 worldAt(vec2 px) {
 // that will start moving there within that time counts already. moving(v)
 // is the pace of a part moving v px a second, changing(f) of one whose light
 // changes by f of full scale a second: then no frame shows it more than half
-// a pixel, or two levels of 255, from where it is (tools/pace-check holds a
-// film to that).
+// a pixel, or two levels of 255, from where it is (tools/pace-check samples a
+// film for that at the ends of each tile's wait).
 const float EVERY_FRAME = 255.0;
 const float PACE_REACH = 32.0;
 const float PACE_AHEAD = 0.1;

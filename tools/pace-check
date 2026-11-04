@@ -2,10 +2,10 @@
 # /// script
 # dependencies = ["moderngl", "numpy", "pillow"]
 # ///
-"""Checks that a film's pace() covers how its world changes (contract.glsl):
-a tile of the screen, drawn again only when its pace asks, must never show
-the world further from where it is than half a pixel of motion or two levels
-of 255. Off screen, through tools/preview.py's scene: workspace 1 and the
+"""Samples whether a film's pace() covers how its world changes
+(contract.glsl): a tile of the screen, drawn again only when its pace asks,
+compared at the end of its wait with the world then, must be within half a
+pixel of motion or two levels of 255. Off screen, through tools/preview.py's scene: workspace 1 and the
 empty desktop at many times, a film that writes text with and without it.
 
     tools/pace-check [--scale S] [--times N] SLUG ...

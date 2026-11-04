@@ -348,9 +348,12 @@ Shape:
   A world holding still everywhere asks for no frame and reads no pace
   until something changes (the agents' text coming or going included).
   The rates are the cap halved (60 with none), so a cap is never passed.
-- **tools/pace-check** holds each film's pace to its world: at sampled
-  times every tile, drawn only at its pace, stays within half a pixel of
-  motion or two levels of where the world is.
+- **tools/pace-check** samples each film's pace against its world: at
+  sampled times each tile, drawn only at its pace, is compared with the
+  world at the end of its wait (and every PACE_AHEAD for slow tiles), within
+  half a pixel of motion or two levels. It samples; a change that came and
+  went inside one wait, the plugin's rounding of rates and caps, are not
+  checked (rounding only shortens the wait, caps lengthen it on purpose).
 
 Deleted: typing and speech-start impulses (no film answered them, and now
 each keystroke would have drawn the whole world for 3 s), the key listener,

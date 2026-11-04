@@ -1493,17 +1493,20 @@ vec4 cinemaGlass(vec4 c) {{
         std::array<GLint, 4> viewport{};
         glGetIntegerv(GL_VIEWPORT, viewport.data());
         // Each level from the one above it, a texel the mean of its four,
-        // only over what changed: a texel of level k is 2^(k+1) of the
-        // target's pixels. The level read is the texture's only one then,
-        // so the draw never reads the level it writes.
+        // only over what changed and as far round as a filter carries it: a
+        // texel of level k is 2^(k+1) of the target's pixels, and one more
+        // each side covers the linear read of an odd-sized level. The level
+        // read is the texture's only one then, so the draw never reads the
+        // level it writes. The frost, read linearly from the last level,
+        // spreads a change one of its texels further.
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.level);
         for (int k = 1; k < coarse.levels; k++) {
             const double            texel = std::exp2(k + 1);
             const Vector2D          size  = {double(std::max(coarse.width >> k, 1)), double(std::max(coarse.height >> k, 1))};
             std::vector<CBox>       boxes;
             for (const auto& box : changed) {
-                const double left = std::floor(box.x / texel), top = std::floor(box.y / texel);
-                boxes.push_back(CBox{left, top, std::ceil((box.x + box.w) / texel) - left, std::ceil((box.y + box.h) / texel) - top});
+                const double left = std::floor(box.x / texel) - 1.0, top = std::floor(box.y / texel) - 1.0;
+                boxes.push_back(CBox{left, top, std::ceil((box.x + box.w) / texel) + 1.0 - left, std::ceil((box.y + box.h) / texel) + 1.0 - top}.intersection(CBox{{}, size}));
             }
             glActiveTexture(GL_TEXTURE4);
             glBindTexture(GL_TEXTURE_2D, coarse.texture);
@@ -1519,7 +1522,10 @@ vec4 cinemaGlass(vec4 c) {{
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, coarse.levels - 1);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target->getFBID());
         glViewport(0, 0, target->m_size.x, target->m_size.y);
-        copy(ctx, coarse.texture, float(coarse.levels - 1), target->m_size, changed);
+        std::vector<CBox> spread;
+        for (const auto& box : changed)
+            spread.push_back(box.copy().expand(std::exp2(coarse.levels)).intersection(CBox{{}, target->m_size}));
+        copy(ctx, coarse.texture, float(coarse.levels - 1), target->m_size, spread);
         glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
         glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
@@ -1867,7 +1873,8 @@ vec4 cinemaGlass(vec4 c) {{
     // How far round a changed part of the world the screen changes with it,
     // in logical px: as far as a frame looks for the world, and as far as the
     // frost spreads it (two texels of its level, a monitor pixel being half a
-    // texel of the coarse world's first).
+    // texel of the coarse world's first). The frost is drawn again over this
+    // too, so its own spread lies inside what is damaged.
     double paceGrowth(const PHLMONITOR& monitor) {
         return FRAME_LOOK + std::exp2(frostLevels(monitor) + 1) / monitor->m_scale + 2.0;
     }
