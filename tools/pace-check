@@ -11,15 +11,21 @@ empty desktop at many times, a film that writes text with and without it.
     tools/pace-check [--scale S] [--times N] SLUG ...
 
 From each time it follows each tile as the plugin draws it: a pace of
-EVERY_FRAME is drawn every frame; one of 10 or more, after 1/pace; a slower
-one is read again every PACE_AHEAD, and drawn at the first reading whose
-pace says its turn has come (2 s at most). Until then each pixel may differ
-from the world by 2 levels plus 0.6 of the steepest step round it (half a
-pixel of motion of an edge); a level more fails. Prints per film and scene
-the tiles that fail and where, and what the pace costs: the share of drawing
-the whole screen every frame at 120 a second, each tile grown as the plugin
-damages it, beside the least pace that would pass. --scale draws at a share
-of 2880x1800 (0.5 while Sean is at the machine). Run it under the hidden
+EVERY_FRAME is drawn every frame; one of 10 or more, after 1/pace (the
+plugin's rate, rounded up, is never slower); a slower one is read again
+every PACE_AHEAD, and drawn at the first reading whose pace says its turn
+has come (2 s at most). A cap (fps, battery_fps) slows what it caps on
+purpose and is not checked. Until then each pixel may differ from the world
+by 2 levels plus 0.6 of the steepest step round it (half a pixel of motion of
+an edge); a level more fails. Frames are not drawn: no film's frame() reads
+the time, and the world they read is drawn again wherever a tile is, as far
+round as they look. Prints per film and scene the tiles that fail and
+where, and an estimate of the film's shader area: the share of drawing the
+whole screen every frame at 120 a second, each tile grown as the plugin
+damages it, beside the least pace that would pass (not what the plugin
+measures: copies and reads are left out). --scale draws at a share of
+2880x1800 (0.5 while Sean is at the machine; features finer than a pixel
+then alias, and fail where full size would not). Run it under the hidden
 desktop's lock: it shares the GPU.
 """
 import math

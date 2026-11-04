@@ -303,7 +303,7 @@ grew about three times dearer after a reload, no longer runs in one.
 ## Cost follows change (2026-11-04, films/batch-4, contract 6)
 
 **Sentence:** the world is drawn only where and as often as it changes on
-its own, at a pace each film states, and what it drew is kept.
+its own, at a pace each film states.
 
 Coordinator's direction (Sean: "insanely light weight and use next to
 nothing"): what does not change is drawn once and kept; ambient motion is
@@ -333,14 +333,21 @@ Shape:
   damage into one box, so turns spread over every frame drew the screen
   every frame. With no tile due, nothing asks for a frame; the pace is read
   again within PACE_AHEAD (0.1 s).
-- **Kept.** The world at full size and at half size are kept per monitor.
-  The film's shader draws only where the world changed or nothing is kept
-  yet; the rest of Hyprland's damage is a copy. The frost is drawn only
-  where the world changed. Both copies are drawn, not blitted: a blit over
-  part of a framebuffer cost as much as over all of it (0.6 ms at 1440x900).
+- **Kept.** The world at half size, which the frost and the frames read,
+  is kept per monitor and drawn again only where the world changed, and so
+  is each level of its mipmap and the frost made from it; the frost's
+  copies are drawn, not blitted (a blit cost 0.31 ms against 0.24). The
+  full-size world is drawn over Hyprland's damage as before. Kept too, and
+  copied over that damage, it cost more than it saved (Jarvis at rest 134
+  against 112 ms/s, moving 1.96 against 1.82 ms a frame): Hyprland's damage
+  is the last three frames' merged into few boxes, so most of it must be
+  drawn anyway.
 - **Whole while things move.** A scene or answer change draws the whole
-  world, and the frame after it too, since easing goes on after a change;
-  while an answer is alive (3 s) every frame is whole.
+  world in that frame, and the frame after it too, since easing goes on
+  after a change; while an answer is alive (3 s) every frame is whole.
+  A world holding still everywhere asks for no frame and reads no pace
+  until something changes (the agents' text coming or going included).
+  The rates are the cap halved (60 with none), so a cap is never passed.
 - **tools/pace-check** holds each film's pace to its world: at sampled
   times every tile, drawn only at its pace, stays within half a pixel of
   motion or two levels of where the world is.

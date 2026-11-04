@@ -55,9 +55,8 @@ time and draws again only the tiles whose turn has come, at most every frame
 and on battery 30 a second (`plugin:backdrop:fps`, default 0 = the
 display's rate; `plugin:backdrop:battery_fps`, default 30; Sean: "keep it
 native? or atleast 30"); with no tile due nothing asks for a frame. The world
-at full size and at half size is kept between frames, so the film's shader
-runs only where the world changed, and the rest of what Hyprland draws again
-is a copy. While a window, the focus, the pointer, voice or an answer
+at half size and the frost made from it are kept between frames and drawn
+again only where the world changed. While a window, the focus, the pointer, voice or an answer
 changes, the whole world is drawn every frame. Time stands still, and
 nothing asks for frames, with animations off, the session locked, or every
 monitor asleep or fullscreen (specs/smoothness.md, "Cost follows change").
