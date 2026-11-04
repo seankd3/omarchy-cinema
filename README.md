@@ -14,13 +14,15 @@ film moves while your windows do.
 
 ## Install
 
-Needs Omarchy 4 with Hyprland 0.57. The backdrop is a Hyprland plugin, and a
-plugin loads only at login, so the install runs from a console:
+Needs Omarchy 4 with Hyprland 0.57. This is a beta: it has been built and
+used on one aarch64 laptop with an NVIDIA GPU, and x86_64 and other GPUs are
+not tested yet. The backdrop is a Hyprland plugin, and a plugin loads only at
+login, so the install runs from a console:
 
 1. `git clone https://github.com/seankd3/omarchy-cinema ~/omarchy-cinema`
 2. Log out. At the login screen press Ctrl+Alt+F3 and log in there.
 3. `~/omarchy-cinema/install` (it builds the plugin, about a minute), then
-   `exit`, Ctrl+Alt+F1, and log in.
+   `exit`, back to the login screen (Ctrl+Alt+F1 or F2), and log in.
 4. Pick a film in the theme menu (Super+Ctrl+T), or `omarchy theme set jarvis`.
 
 After a Hyprland update, run `~/omarchy-cinema/install` again and log in
@@ -29,12 +31,17 @@ again: the plugin loads only into the Hyprland it was built for.
 Omarchy's own toggles tune it: *Glassy windows* or *Opaque windows*, and
 *No animations*, which holds the backdrop still.
 
+The Matrix rains the text your Claude Code and Codex agents write, read from
+their logs on this machine and kept only in memory, so whatever an agent
+prints can show on your desktop. With no agent running there is no rain.
+To turn it off: `systemctl --user disable --now omarchy-cinema-feed`.
+
 ## Uninstall
 
 Log out, and from the console (step 2):
-`~/omarchy-cinema/install --uninstall`. It takes away what the install added and only that, and puts
-back the Voxtype settings it changed; a film still applied gives way to
-Tokyo Night.
+`~/omarchy-cinema/install --uninstall`. It takes away what the install added
+and only that, keeps what you changed since, and puts back the Voxtype
+settings it changed; a film still applied gives way to Tokyo Night.
 
 ## Make your own
 

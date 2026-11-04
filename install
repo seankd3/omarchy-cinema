@@ -168,7 +168,7 @@ link() {
   ln -sfn "$1" "$2"
   linked[$2]=1
 }
-declare -A linked
+declare -A linked swept
 
 # Each theme's folder icons are an icon theme of their own. GTK finds it by
 # its directory name; the theme's icons.theme names it, and Omarchy sets it.
@@ -201,7 +201,10 @@ fi
 # for the uninstall, any film: it goes, so Omarchy's theme list and GTK's
 # icon themes show only the films.
 for old in ~/.config/omarchy/themes/* ~/.local/share/icons/*; do
-  [[ -L $old && -z ${linked[$old]:-} && $(readlink "$old") == "$here/themes/"* ]] && rm "$old"
+  if [[ -L $old && -z ${linked[$old]:-} && $(readlink "$old") == "$here/themes/"* ]]; then
+    rm "$old"
+    swept[$old]=1
+  fi
 done
 
 # GTK reads one stylesheet per user. It imports the applied theme's, which a
@@ -299,7 +302,7 @@ else
 fi
 
 # The record undone, newest first: a line taken out as it went in, a link
-# put back where nothing has taken its place, a file removed while it is as
+# put back where this run took the install's away, a file removed while it is as
 # the install wrote it, a directory once it is empty,
 # a setting put back while it is as the install set it (Voxtype's default
 # comes back as the default). A setting with no Voxtype to put it back stays
@@ -309,7 +312,7 @@ if [[ -n $remove && -f $state/record ]]; then
   while IFS=$'\t' read -r kind path was ours; do
     case $kind in
       line) [[ -f $path ]] && take_line "$path" "$was" ;;
-      link) [[ -e $path || -L $path ]] || ln -s "$was" "$path" ;;
+      link) [[ -n ${swept[$path]:-} ]] && ln -s "$was" "$path" ;;
       made)
         if [[ $was == dir ]]; then
           rmdir "$path" 2>/dev/null || [[ ! -e $path ]] || echo "kept $path: something else is in it" >&2

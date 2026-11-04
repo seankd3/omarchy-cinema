@@ -35,14 +35,16 @@ if [[ ${1:-} == --inside ]]; then
   [[ -z $failed ]] || echo "fresh-user: not covered here (no user systemd manager): $cannot"
   hyprctl plugin list | grep -q '^Plugin backdrop ' || fail "the engine did not load at login"
   clean
-  # The backdrop's draws, as frametrace logs each one's time.
+  # The backdrop's draws, as frametrace logs each one's time. Each switch
+  # waits for its hooks, as Omarchy's own installers do, so none is still
+  # writing when the uninstall runs.
   drawn() { grep -c '^t ' "$out/frames.log" || true; }
   before=$(drawn)
-  omarchy-theme-set "$film" >/dev/null 2>&1 || fail "omarchy-theme-set $film failed"
+  OMARCHY_THEME_WAIT=1 omarchy-theme-set "$film" >/dev/null 2>&1 || fail "omarchy-theme-set $film failed"
   for _ in {1..50}; do (($(drawn) > before)) && break; sleep 0.1; done
   (($(drawn) > before)) || fail "$film drew no backdrop"
   clean
-  omarchy-theme-set "Tokyo Night" >/dev/null 2>&1 || fail "omarchy-theme-set Tokyo Night failed"
+  OMARCHY_THEME_WAIT=1 omarchy-theme-set "Tokyo Night" >/dev/null 2>&1 || fail "omarchy-theme-set Tokyo Night failed"
   ! "$here/install" --uninstall 2>/dev/null || fail "the uninstall ran while Hyprland did"
   hyprctl dispatch 'hl.dsp.exit()' >/dev/null 2>&1 || true
   while pgrep -x Hyprland >/dev/null || compgen -G "$XDG_RUNTIME_DIR/hypr/*/.socket.sock" >/dev/null; do sleep 0.1; done
