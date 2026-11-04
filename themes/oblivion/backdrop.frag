@@ -279,22 +279,21 @@ vec4 backdrop(vec2 px) {
     float lean = focusedIndex < 0 ? 0.0 : window(px, focusedIndex).velocity.x * 0.012;
     // The sun is low beyond the deck, so each puff's far rim catches it: where
     // its tops climb going down the screen. Their slope is a derivative, which
-    // is undefined on some drivers unless every pixel of a 2x2 quad takes it,
-    // so the deck is worked out from a quad's height above the horizon down,
-    // and below the horizon every quad takes it whole. Down the screen, not
-    // the target: the drawn pixel's own steps in px turn the derivatives into
-    // px's, so a rotated monitor or the preview's flipped target lights the
-    // same rim.
+    // some drivers leave undefined unless every pixel of a 2x2 quad takes it,
+    // so sky and deck are worked out a quad's reach past the horizon and past
+    // the wash under the panes (inside 1, where neither shows). Down the
+    // screen, in px, so any monitor rotation lights the same rim.
     mat2 toScreen = inverse(mat2(dFdx(px), dFdy(px)));
     float quad = abs(dFdx(px).y) + abs(dFdy(px).y); // how far down the screen a quad reaches
+    bool open = nearest > -1.0 - 2.0 * quad;
     vec2 tops = vec2(0.0);
     float slope = 0.0;
-    if (px.y > horizon - quad) {
+    if (open && px.y > horizon - quad) {
         tops = deckTops(px + flow, horizon, lean);
         vec2 climb = vec2(dFdx(tops.x), dFdy(tops.x)) * toScreen, away = vec2(dFdx(tops.y), dFdy(tops.y)) * toScreen;
         slope = climb.y / max(abs(away.y), 1e-4);
     }
-    vec3 col = px.y < horizon ? sky(px, horizon, sun) : cloudDeck(px + flow, horizon, sun, tops.x, slope);
+    vec3 col = !open ? vec3(0.0) : px.y < horizon ? sky(px, horizon, sun) : cloudDeck(px + flow, horizon, sun, tops.x, slope);
     // The sun itself: a soft white disc in a wide warm bloom, hazy at dawn.
     float ds = length(px - sun);
     col = mix(col, SUN, 0.45 * exp(-ds / 380.0) + 0.5 * exp(-ds / 70.0));
