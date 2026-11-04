@@ -178,7 +178,7 @@ def render(theme, t, windows, focused, frame=None, **answers):
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     world = None
     if frame is not None:
-        world = ctx.texture((PIXELS[0] // 2, PIXELS[1] // 2), 4)
+        world = ctx.texture((PIXELS[0] // 2, PIXELS[1] // 2), 4, dtype="f2")  # finer than 8 bits, as the plugin's
         world.filter = (moderngl.LINEAR, moderngl.LINEAR)
         world.repeat_x = world.repeat_y = False
         ctx.framebuffer([world]).use()
