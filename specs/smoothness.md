@@ -233,3 +233,69 @@ passes and its frost conditions. Blur off altogether came to 1.34 ms for Tron.
 After any config reload (a theme switch is one) Hyprland's blur in the same
 session cost about three times as much (Tron 4.24 to 11.0 ms, blur settings
 unchanged); with this the blur is not Hyprland's, so that does not apply.
+
+## Frame budget 2 (2026-11-03, films/budget)
+
+**Sentence:** what a frosted window covers is never drawn, said through
+Hyprland's own occlusion, and a frame reads the world already drawn.
+
+Measured with every monitor asleep, so at Sean's 2880x1800 at 1.25, in the
+hidden desktop with three terminals, GPU at 754 to 760 MHz, the GPU shared
+with Sean's other clients (about 30% busy) and a load of 55 to 100. Medians
+of the moving part (windows swapping round), ms a frame; the parts repeat to
+0.01 ms run to run, the whole frame's clean floor (10th percentile) is within
+0.05 of these. f6111be against this branch:
+
+| film | world half / frost / full | windows | frames | top layers | whole frame |
+|---|---|---|---|---|---|
+| Jarvis | 1.43 0.74 2.04 / 1.43 0.74 1.28 | 0.99 / 0.98 | 0.65 / 0.15 | 1.45 / 0.66 | 7.42 / 5.28 |
+| Tron Legacy | 0.78 0.74 1.47 / 0.78 0.74 0.72 | 0.99 / 0.98 | 0.45 / 0.15 | 1.45 / 0.66 | 6.01 / 4.05 |
+| Oblivion | 1.31 0.71 2.15 / 1.31 0.70 1.44 | 1.04 / 1.03 | 0.79 / 0.15 | 1.46 / 0.67 | 7.60 / 5.33 |
+| The Matrix | 1.10 0.63 1.82 / 1.10 0.62 1.08 | 0.99 / 0.97 | 0.52 / 0.18 | 1.43 / 0.65 | 6.62 / 4.63 |
+| Evangelion | 1.60 0.74 2.13 / 1.60 0.76 1.37 | 0.99 / 1.01 | 0.75 / 0.23 | 1.45 / 0.66 | 7.79 / 5.66 |
+| Roadster | not run / 1.30 0.72 1.04 | / 0.94 | / 0.14 | / 0.66 | / 4.81 |
+
+So every film fits the 6 ms a frame of 120 Hz at this clock, with 0.3 to
+2 ms to spare. At rest the same, but the top layers stepped between 0.66,
+0.91 and 1.07 ms as the shell's layers changed (a notification shown at
+start, most likely), which puts Evangelion at 6.11 while a notification is up.
+
+What it took:
+- **The glass is opaque, and says so.** In a film session a frosted window's
+  pixels all come out opaque (frosted()), so each adds, in its own pass under
+  its surface, an element whose opaque region is its glass. Hyprland then
+  leaves out of the damage of everything drawn before it what the glass
+  covers, the backdrop, the window's shadow and the windows beneath, as it
+  does for any opaque surface, and still draws there wherever a live blur
+  will read it. Deleted: the plugin's own inside region, its blit of the
+  half-size world under the glass (0.8 ms) and the `veiled` flag. This also
+  settles the open point of f6111be: under a live blur the world is the
+  full-size one.
+- **A frame reads the world drawn this frame** (contract 5, `worldAt()`), the
+  half-size world, instead of drawing `backdrop()` again at its bent point:
+  0.45 to 0.79 ms down to 0.15 to 0.23. In Jarvis, Oblivion, Evangelion and
+  Roadster the rims cannot be told apart at 2x (preview: 3 to 61 thousand
+  rim pixels at 2 levels or more of 5.2 million, the worst 56 to 87); in
+  Tron and the Matrix, whose
+  lines and glyphs are finer than a half-size pixel, a line crossing a rim
+  turns from a sharp bent glint to a soft dot (taste sheet 5).
+- **The notifications read the backdrop's frost.** Omarchy's glassy mode
+  blurs the `omarchy-notifications` layer, which stays mapped, empty, down
+  the right edge (426x1440). Without xray Hyprland blurred under it live
+  every frame and drew the full-size world under it again: 0.8 ms. film.lua
+  gives it xray, as the bar has; a notification over a window shows the
+  world's frost through its card, not the window's (taste sheet 6).
+
+Measured and not kept: a glass-step discard of the bar's empty pixels (the
+bar's 0.66 ms is its full-screen surface; without blur at all it was the
+same), shrinking Hyprland's blur texture to the frost's size (UVs come from
+the texture's size; it would misplace the frost of motion-blurred windows).
+
+Window answers are now the largest part left: without them Jarvis's
+half-size world was 0.92 ms against 1.44 and its full-size 0.74 against
+1.28. Drawn once into a texture while the windows hold still, they would
+take about 1 ms off at rest, nothing while windows move (polish.md, item 8).
+
+After a config reload (a theme switch is one) a film session costs the same
+(Tron 4.07 ms before `hyprctl reload`, 4.02 after): Hyprland's own blur, which
+grew about three times dearer after a reload, no longer runs in one.
