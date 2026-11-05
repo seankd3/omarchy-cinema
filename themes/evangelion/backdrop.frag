@@ -143,8 +143,10 @@ vec4 backdrop(vec2 px) {
         float beyond = max(w.d, 0.0);
         float grip = exp(-beyond / 70.0);
         held += vec3(edgeNormal(px, w.rect, w.rounding) * 0.7 * beyond, 1.0) * grip;
-        float soft = 18.0 + 40.0 * w.lift;
-        float s = rectDistance(px + LIGHT * (24.0 + 44.0 * w.lift), w.rect, w.rounding);
+        // Exactly 0 past offset plus softness from the window's edge.
+        float soft = 18.0 + 40.0 * w.lift, offset = 24.0 + 44.0 * w.lift;
+        if (edgeDistance(w) - offset >= soft) continue;
+        float s = rectDistance(px + LIGHT * offset, w.rect, w.rounding);
         shadow = max(shadow, (1.0 - smoothstep(-soft, soft, s)) * w.alpha);
     }
     float nearest = seen.nearest;

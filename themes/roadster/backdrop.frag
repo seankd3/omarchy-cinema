@@ -33,9 +33,8 @@ const float CAMERA = 15.0; // the eye's height over the floor, in grid cells
 // Distance to four corner brackets around a rect pushed out by `gap`, each
 // arm `arm` pixels long. Folding into one quadrant draws all four at once.
 float brackets(vec2 px, vec4 rect, float gap, float arm) {
-    vec2 h = rect.zw * 0.5 + gap;
-    vec2 p = abs(px - rect.xy - rect.zw * 0.5);
-    return min(segment(p, vec2(h.x - arm, h.y), h), segment(p, vec2(h.x, h.y - arm), h));
+    vec2 p = abs(px - rect.xy - rect.zw * 0.5) - rect.zw * 0.5 - gap;
+    return min(length(vec2(p.x - clamp(p.x, -arm, 0.0), p.y)), length(vec2(p.x, p.y - clamp(p.y, -arm, 0.0))));
 }
 
 // One side of the wedge, nose to tail: the other side mirrors it.
@@ -174,8 +173,11 @@ vec3 speedLines(vec2 px, Window w, vec3 red) {
             light += red * exp(-back / (speed * 0.12)) * 0.22 * k;
         }
         // The flight path marker: a ring with wings and a fin, ahead of
-        // the leading edge, as present as the speed.
+        // the leading edge, as present as the speed. Past 80 px from its
+        // middle its glow, 0.42 exp(-d / 7) past its 25 px wings, moves no
+        // point a twentieth of a level.
         vec2 m = px - (r.xy + r.zw * 0.5 + n * (ext + 50.0 + speed * 0.02));
+        if (length(m) > 80.0) continue;
         float ring = abs(length(m) - 9.0);
         float wings = abs(m.y) + max(abs(abs(m.x) - 17.0) - 8.0, 0.0);
         float fin = abs(m.x) + max(abs(m.y + 13.0) - 4.0, 0.0);
@@ -301,15 +303,14 @@ vec4 backdrop(vec2 px) {
                    clamp(horizon + size * 0.5, focused.y + 0.7 * size, focused.y + focused.w - 0.7 * size));
     vec2 reach = abs(px - at) - vec2(1.4, 0.7) * size;
     if (size > 8.0 && max(reach.x, reach.y) < 24.0) {
-        float on = inside;
-        if (focusedIndex >= 0) {
-            Window f = window(px, focusedIndex);
-            on = 1.0 - smoothstep(-1.0, 1.0, rectDistance(px, f.rect, f.rounding));
-        }
+        float on = focusedIndex < 0 ? inside : 1.0 - smoothstep(-1.0, 1.0, edgeDistance(window(px, focusedIndex)));
         float shown = mix(1.0, 0.35 * focusAlpha * on, present);
-        vec2 d = wedge(px, at, size);
-        light += mix(red, WHITE, 0.65) * glowLine(d.x, 1.3) * shown;
-        light += red * glowLine(d.y, 1.0) * 0.4 * shown;
+        // Off the window it lies on it shows nothing, so it is not worked out.
+        if (shown > 0.0) {
+            vec2 d = wedge(px, at, size);
+            light += mix(red, WHITE, 0.65) * glowLine(d.x, 1.3) * shown;
+            light += red * glowLine(d.y, 1.0) * 0.4 * shown;
+        }
     }
 
     // The lock frame: fine light brackets close round the focused window,

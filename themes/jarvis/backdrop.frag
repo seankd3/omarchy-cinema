@@ -236,7 +236,7 @@ vec4 backdrop(vec2 px) {
     // What the reactor reaches: the surfaces and the dust, not the holograms.
     // Its light falls off away from it, so the seams nearest it glow most.
     float shade = 1.0 - 0.85 * shadow;
-    float lamp = 0.55 + 0.9 * exp(-length(px - reactor()) / (resolution.y * 0.8));
+    float lamp = 0.55 + 0.9 * exp(-length(px - arc) / (resolution.y * 0.8));
     float inside = 1.0 - smoothstep(-1.0, 1.0, edge);
     float nearFocus = exp(-max(seen.focus, 0.0) / 140.0);
     float gap = near * (1.0 - inside);
@@ -256,7 +256,6 @@ vec4 backdrop(vec2 px) {
     float reach = length(focused.zw) * 0.5;
     vec2 p = holoAt - c;
     float r = length(p);
-    float a = atan(p.y, p.x);
     float Rg = reach * 0.45;
     // The rings swing with the focused window as it moves, like a carousel
     // pushed round, and settle back when it stops.
@@ -289,12 +288,17 @@ vec4 backdrop(vec2 px) {
         light += cyan * glowLine(d, 4.0, HALO) * dashes(angle, R, 12.0, 0.18, cycle(20.0)) * shade_ * 0.35;
     }
 
-    // Flat rings in the screen's plane, out past the window's edges.
-    float turned = a - swing;
-    light += cyan * glowLine(abs(r - reach * 1.04), 1.0, HALO) * dashes(turned, r, 120.0, 0.45, -cycle(120.0)) * 0.5;
-    light += cyan * glowLine(abs(r - reach * 1.12), 6.0, HALO) * dashes(a + swing * 2.0, r, 6.0, 0.06, cycle(24.0)) * 0.5;
-    light += AMBER * glowLine(abs(r - reach * 1.12), 2.0, HALO) * dashes(turned, r, 1.0, 0.05, -cycle(24.0)) * 0.9;
-    light += cyan * glowLine(abs(r - reach * 1.24), 0.8, HALO) * 0.3;
+    // Flat rings in the screen's plane, out past the window's edges, paid for
+    // within 250 px of them: past that their glows, 0.14 exp(-d / 30), move
+    // no point a twentieth of a level.
+    if (abs(r - reach * 1.12) < reach * 0.12 + 250.0) {
+        float a = atan(p.y, p.x);
+        float turned = a - swing;
+        light += cyan * glowLine(abs(r - reach * 1.04), 1.0, HALO) * dashes(turned, r, 120.0, 0.45, -cycle(120.0)) * 0.5;
+        light += cyan * glowLine(abs(r - reach * 1.12), 6.0, HALO) * dashes(a + swing * 2.0, r, 6.0, 0.06, cycle(24.0)) * 0.5;
+        light += AMBER * glowLine(abs(r - reach * 1.12), 2.0, HALO) * dashes(turned, r, 1.0, 0.05, -cycle(24.0)) * 0.9;
+        light += cyan * glowLine(abs(r - reach * 1.24), 0.8, HALO) * 0.3;
+    }
 
     // Light pools in the seams between windows and runs along them.
     if (gap > 0.004) {
