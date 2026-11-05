@@ -64,10 +64,10 @@ Hyprland only composites.
   loop reads its tile once and skips the rest. Moving frame, world passes
   at full size: the same at 3 windows, 5 to 14% less at 6, 15 to 24% less
   at 10 (Tron's runs disagreed: 3.17 ms to 3.50, and to 2.88).
-  Evangelion meets every window: a far one still moves its honeycomb's
-  cell edges through pixels. In the scenes tried, culled at 1500 px it is
-  exact at 3 windows and 17 to 27 levels off at 6 and 10; at 2000 px
-  exact in all, and 10 to 11% dearer than meeting every window.
+  Evangelion's hold on its honeycomb lets go 450 px out and a rim fades
+  out at its cell's edge, so float noise moves no cell (a one-ulp nudge
+  moved 75,000 pixels up to 86 levels before); culled, it is exact and 6
+  to 23% cheaper at 3 to 10 windows.
 - **A wake or a shadow pays only where it reaches.** A moving window's ghosts
   are drawn only outside it and within a reach of where it was; past that
   their light moves no point a twentieth of a display level (a hundredth in
