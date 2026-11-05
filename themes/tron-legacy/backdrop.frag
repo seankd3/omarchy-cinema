@@ -1,4 +1,4 @@
-// omarchy-cinema contract 10
+// omarchy-cinema contract 11
 // Tron Legacy: the Grid. A floor of light lines runs out to the horizon under
 // a black sky, and light cycles race along it, trailing light. Around every
 // window a circuit line is drawn, and pulses run along it; around the focused
@@ -75,6 +75,11 @@ float gridLit(vec2 px) {
     return lit;
 }
 
+// Past 800 px a window moves no point a level: the light pooled round the
+// windows, exp(-d / 90), reaches furthest, and at 3, 6 and 10 windows no pixel
+// moves 2 levels.
+const float REACH = 800.0;
+
 vec4 backdrop(vec2 px) {
     vec3 cyan = accent;
     float horizon = resolution.y * 0.40;
@@ -103,7 +108,9 @@ vec4 backdrop(vec2 px) {
     float near = 0.0, shadow = 0.0;
     vec2 pull = vec2(0.0);
     vec3 trail = vec3(0.0);
+    uint reached = windowsAt(px);
     for (int i = 0; i < windowCount; i++) {
+        if (!reaches(reached, i)) continue;
         Window w = window(px, i);
         see(seen, w);
         near += exp(-max(w.d, 0.0) / 90.0);

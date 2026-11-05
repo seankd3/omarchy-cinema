@@ -1,4 +1,4 @@
-// omarchy-cinema contract 10
+// omarchy-cinema contract 11
 // The Matrix: the code, and the code is this very shader, or what the agents
 // on this machine are writing once the user turns that on
 // (specs/agent-rain.md). It rains down the black screen in mirrored glyphs,
@@ -158,6 +158,11 @@ vec4 answers(vec2 px, vec2 cell) {
     return a;
 }
 
+// Past 600 px a window moves no point a level: the focused window's nearness,
+// exp(-d / 160), reaches furthest, and at 3, 6 and 10 windows no pixel moves 2
+// levels.
+const float REACH = 600.0;
+
 vec4 backdrop(vec2 px) {
     vec3 green = accent;
 
@@ -168,7 +173,9 @@ vec4 backdrop(vec2 px) {
     // bright wake where it has just been.
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0, pull = 0.0, wake = 0.0;
+    uint reached = windowsAt(px);
     for (int i = 0; i < windowCount; i++) {
+        if (!reaches(reached, i)) continue;
         Window w = window(px, i);
         see(seen, w);
         float d = w.d;

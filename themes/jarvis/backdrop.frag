@@ -1,4 +1,4 @@
-// omarchy-cinema contract 10
+// omarchy-cinema contract 11
 // Jarvis: a holographic globe in a gyroscope of rings, turning behind the
 // focused window and sized to it. It glows through the glass and past the
 // window's edges; light pools in the seams between windows and wakes the hex
@@ -212,6 +212,11 @@ vec3 answers(vec2 px, vec3 cyan, out float lattice) {
     return light;
 }
 
+// Past 800 px a window moves no point a level: the light pooled round the
+// windows, exp(-d / 110), reaches furthest, and at 3, 6 and 10 windows no
+// pixel moves 2 levels.
+const float REACH = 800.0;
+
 vec4 backdrop(vec2 px) {
     vec3 cyan = accent;
     // One pass over the windows: the nearest, the focused and the one whose
@@ -222,7 +227,9 @@ vec4 backdrop(vec2 px) {
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0, swept = 0.0;
     vec3 after = vec3(0.0);
+    uint reached = windowsAt(px);
     for (int i = 0; i < windowCount; i++) {
+        if (!reaches(reached, i)) continue;
         Window w = window(px, i);
         see(seen, w);
         near += exp(-max(w.d, 0.0) / 110.0);

@@ -1,4 +1,4 @@
-// omarchy-cinema contract 10
+// omarchy-cinema contract 11
 // Oblivion: Tower 49 at dawn. A high pale sky over a sea of cloud that slides
 // slowly toward the tower, the sun low on the horizon and the broken moon faint
 // in the daylight. Every window is a pane of the tower's glass, traced by a fine
@@ -249,6 +249,10 @@ void wake(vec2 px, Window w, inout float glow, inout float blue, inout float par
     }
 }
 
+// Past 600 px a window moves no point a level: the lift's light, exp(-d /
+// 120), reaches furthest, and at 3, 6 and 10 windows no pixel moves 2 levels.
+const float REACH = 600.0;
+
 vec4 backdrop(vec2 px) {
     float horizon = horizonY();
     vec2 sun = sunAt();
@@ -259,7 +263,9 @@ vec4 backdrop(vec2 px) {
     Seen seen = UNSEEN;
     float near = 0.0, lifted = 0.0;
     vec2 flow = vec2(0.0);
+    uint reached = windowsAt(px);
     for (int i = 0; i < windowCount; i++) {
+        if (!reaches(reached, i)) continue;
         Window w = window(px, i);
         see(seen, w);
         float d = w.d;

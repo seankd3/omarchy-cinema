@@ -58,6 +58,13 @@ Hyprland only composites.
   glint to a soft dot.
 - **The windows are a uniform block** (contract 9), constants to a pixel,
   not a texture it fetches: 1 to 8% of a draw.
+- **A pixel meets only the windows that reach it.** A film says how far
+  its windows reach (`REACH`, contract 11), the plugin marks in the
+  windows' block which of them reach each of 32 by 32 tiles, and a film's
+  loop reads its tile once and skips the rest. Moving frame, world passes
+  at full size: the same at 3 windows, 5 to 14% less at 6, 15 to 24% less
+  at 10. Evangelion's held honeycomb reaches the whole screen: it meets
+  every window.
 - **A wake or a shadow pays only where it reaches.** A moving window's ghosts
   are drawn only outside it and within a reach of where it was; past that
   their light, bounded from the film's falloff and tone map, moves no point a

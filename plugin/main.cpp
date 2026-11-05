@@ -298,6 +298,7 @@ void main() {
         uint64_t                                generation = 1;
         uint64_t                                compiled   = 0;
         bool                                    framed     = false; // the film's shader defines frame()
+        float                                   reach      = INFINITY; // its REACH (contract.glsl)
         SGpu                                    gpu;
         // How far the windows' depth goes (specs/depth.md, "Tiers"): 0 is the
         // backdrop alone, with no answers, no frames and no facts moving.
@@ -475,6 +476,9 @@ void main() {
         g->source         = shader.empty() ? "" : std::string(CONTRACT) + "\n#line 1\n" + shader;
         static const std::regex FRAME(R"(\bvec4\s+frame\s*\()");
         g->framed         = std::regex_search(shader, FRAME);
+        static const std::regex REACH(R"(\bconst\s+float\s+REACH\s*=\s*([0-9.]+))");
+        std::smatch             reach;
+        g->reach          = std::regex_search(shader, reach, REACH) ? std::stof(reach[1]) : INFINITY;
 
         static const std::regex PALETTE(R"re(^\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})")re");
         static const std::regex GLASS(R"re(^\s*glass\s*=\s*"\s*([^"\s]*)\s*")re");
@@ -1044,21 +1048,35 @@ void main() {
     }
 
     // Fills the windows' uniform buffer, bound, with the shapes, three vec4s
-    // each: (x, y, w, h), (alpha, rounding, lift, depth) and (velocity x, y);
-    // the whole block, as a draw reads all of it.
-    void uploadShapes(const std::vector<SShape>& shapes) {
-        std::vector<float> data(WINDOWS_MAX * 12, 0.F);
+    // each: (x, y, w, h), (alpha, rounding, lift, depth) and (velocity x, y),
+    // then the 32 by 32 tiles of a screen `size` across each of the first 32
+    // reaches: within the film's REACH of it and of where it was in the last
+    // 0.3 s. The whole block, as a draw reads all of it.
+    void uploadShapes(const std::vector<SShape>& shapes, const Vector2D& size) {
+        std::vector<float>    data(WINDOWS_MAX * 12, 0.F);
+        std::vector<uint32_t> tiles(32 * 32, 0);
         for (size_t i = 0; i < shapes.size(); i++) {
-            const auto at = data.begin() + i * 12;
-            std::copy(shapes[i].rect.begin(), shapes[i].rect.end(), at);
-            at[4] = shapes[i].alpha;
-            at[5] = shapes[i].rounding;
-            at[6] = shapes[i].lift;
-            at[7] = shapes[i].depth;
-            at[8] = shapes[i].velocity[0];
-            at[9]  = shapes[i].velocity[1];
+            const auto& s  = shapes[i];
+            const auto  at = data.begin() + i * 12;
+            std::copy(s.rect.begin(), s.rect.end(), at);
+            at[4] = s.alpha;
+            at[5] = s.rounding;
+            at[6] = s.lift;
+            at[7] = s.depth;
+            at[8] = s.velocity[0];
+            at[9] = s.velocity[1];
+            if (i >= 32)
+                continue;
+            const float r    = g->reach + 0.3F * std::hypot(s.velocity[0], s.velocity[1]);
+            const auto  tile = [](double v, double across) { return int(std::clamp(std::floor(v / across * 32), 0.0, 31.0)); };
+            for (int y = tile(s.rect[1] - r, size.y); y <= tile(s.rect[1] + s.rect[3] + r, size.y); y++)
+                for (int x = tile(s.rect[0] - r, size.x); x <= tile(s.rect[0] + s.rect[2] + r, size.x); x++)
+                    tiles[y * 32 + x] |= 1U << i;
         }
-        glBufferData(GL_UNIFORM_BUFFER, data.size() * sizeof(float), data.data(), GL_STREAM_DRAW);
+        const auto bytes = data.size() * sizeof(float);
+        glBufferData(GL_UNIFORM_BUFFER, bytes + tiles.size() * sizeof(uint32_t), nullptr, GL_STREAM_DRAW);
+        glBufferSubData(GL_UNIFORM_BUFFER, 0, bytes, data.data());
+        glBufferSubData(GL_UNIFORM_BUFFER, bytes, tiles.size() * sizeof(uint32_t), tiles.data());
     }
 
     // Takes the newest valid snapshot waiting on the feed socket, at most
@@ -1458,7 +1476,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             const SGuest guest;
             auto&        gpu = g->gpu;
             glBindBuffer(GL_UNIFORM_BUFFER, gpu.windows);
-            uploadShapes(m_scene.shapes);
+            uploadShapes(m_scene.shapes, monitor->m_size);
             // The half-size world and the frost are kept, and drawn again
             // only when the world changed, or for a new size or frost target.
             auto&      state     = g->monitors[monitor->m_id];

@@ -1,4 +1,4 @@
-// omarchy-cinema contract 10
+// omarchy-cinema contract 11
 // Roadster: the 2026 Roadster's cockpit, drawn like a fighter jet's display.
 // A floor of red dots runs out to a thin white horizon and rushes toward the
 // viewer, with streaks of speed along it. A wireframe wedge turns slowly on
@@ -187,6 +187,11 @@ vec3 speedLines(vec2 px, Window w, vec3 red) {
     return light;
 }
 
+// Past 600 px a window moves no point a level: the light pooled round the
+// windows, exp(-d / 120), but for the floor lines, met apart, reaches
+// furthest, and at 3, 6 and 10 windows no pixel moves 2 levels.
+const float REACH = 600.0;
+
 vec4 backdrop(vec2 px) {
     vec3 red = accent;
     float horizon = resolution.y * 0.42;
@@ -201,32 +206,38 @@ vec4 backdrop(vec2 px) {
     // across), and its lines run from the foot's corners toward the viewer.
     // And a moving window's speed lines.
     Seen seen = UNSEEN;
-    float near = 0.0, present = 0.0, shadow = 0.0, bend = 0.0;
+    float near = 0.0, shadow = 0.0, bend = 0.0;
     vec3 speeding = vec3(0.0);
     vec2 vanish = vec2(resolution.x * 0.5, horizon);
+    uint reached = windowsAt(px);
     for (int i = 0; i < windowCount; i++) {
+        if (!reaches(reached, i)) continue;
         Window w = window(px, i);
         see(seen, w);
         float a = w.alpha, d = w.d;
         near += exp(-max(d, 0.0) / 120.0);
-        present += a;
         vec4 r = w.rect;
         float lift = w.lift;
         shadow = max(shadow, windowShadow(px, w, vec2(0.0, 26.0 + 44.0 * lift), 18.0 + 34.0 * lift));
         if (i != focusedIndex) light += red * glowLine(brackets(px, r, 22.0, 34.0), 1.0) * 0.4 * a;
-        float foot = r.y + r.w;
         float side = px.x < r.x + r.z * 0.5 ? -1.0 : 1.0;
-        bend += side * 34.0 * exp(-max(d, 0.0) / 60.0) * smoothstep(r.y, foot, px.y) * (1.0 - 0.6 * lift) * a;
-        // Only a window standing on the floor (its foot below the horizon)
-        // has floor lines, and they run on from the corner, never back.
+        bend += side * 34.0 * exp(-max(d, 0.0) / 60.0) * smoothstep(r.y, r.y + r.w, px.y) * (1.0 - 0.6 * lift) * a;
+        speeding += speedLines(px, w, red);
+    }
+    // Only a window standing on the floor (its foot below the horizon) has
+    // floor lines, and they run on from the corner, never back, across the
+    // whole floor, past REACH: every window is met for them.
+    for (int i = 0; i < windowCount; i++) {
+        Window w = window(px, i);
+        vec4 r = w.rect;
+        float foot = r.y + r.w;
         for (int k = 0; k < (px.y > foot && foot > horizon ? 2 : 0); k++) {
             vec2 corner = vec2(r.x + r.z * float(k), foot);
             vec2 dir = normalize(corner - vanish + vec2(0.0, 1e-3));
             float off = abs(dot(px - corner, vec2(-dir.y, dir.x)));
             float run = dot(px - corner, dir);
-            light += red * (glowLine(off, 1.0) * 0.5 + 0.04 * exp(-off / 20.0)) * exp(-max(run, 0.0) / 260.0) * step(0.0, run) * a;
+            light += red * (glowLine(off, 1.0) * 0.5 + 0.04 * exp(-off / 20.0)) * exp(-max(run, 0.0) / 260.0) * step(0.0, run) * w.alpha;
         }
-        speeding += speedLines(px, w, red);
     }
     float nearest = seen.nearest;
     float shade = 1.0 - 0.85 * shadow;
@@ -236,7 +247,6 @@ vec4 backdrop(vec2 px) {
     // Behind a window's glass, and the bar's, only a trace of the light shows.
     float veil = mix(1.0, 0.16, max(inside, step(px.y, reserved.x)));
     near = min(near, 1.0);
-    present = min(present, 1.0);
 
     // The floor: a red dot at every crossing of a grid, in perspective,
     // coming toward the viewer a cell a second (16 cells every 16 seconds,
@@ -304,7 +314,10 @@ vec4 backdrop(vec2 px) {
     vec2 reach = abs(px - at) - vec2(1.4, 0.7) * size;
     if (size > 8.0 && max(reach.x, reach.y) < 24.0) {
         float on = focusedIndex < 0 ? inside : 1.0 - smoothstep(-1.0, 1.0, edgeDistance(window(px, focusedIndex)));
-        float shown = mix(1.0, 0.35 * focusAlpha * on, present);
+        // The windows' summed opacity, a fact of the desktop, not of px.
+        float present = 0.0;
+        for (int i = 0; i < windowCount; i++) present += window(px, i).alpha;
+        float shown = mix(1.0, 0.35 * focusAlpha * on, min(present, 1.0));
         // Off the window it lies on it shows nothing, so it is not worked out.
         if (shown > 0.0) {
             vec2 d = wedge(px, at, size);

@@ -173,12 +173,22 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
         owners = [int(i[5]) for i in impulses] + [-1] * (32 - len(impulses))
         program["impulseWindows"].write(np.array(owners, dtype="i4").tobytes())
 
+    # The Windows block: each window's three vec4s, then the tiles the first
+    # 32 reach (main.cpp, uploadShapes()).
     data = np.zeros((3 * 256, 4), dtype="f4")
+    tiles = np.zeros((32, 32), dtype="u4")
+    m = re.search(r"\bconst\s+float\s+REACH\s*=\s*([0-9.]+)", (theme / "backdrop.frag").read_text())
     for i, rect in enumerate(windows):
+        v = velocity[i] if velocity else (0.0, 0.0)
         data[3 * i] = rect
         data[3 * i + 1] = (1.0, 0.0, 1.0 if i == focused else 0.0, float(len(windows) - 1 - i))
-        data[3 * i + 2] = (*(velocity[i] if velocity else (0.0, 0.0)), 0.0, 0.0)
-    window_data = ctx.buffer(data.tobytes())
+        data[3 * i + 2] = (*v, 0.0, 0.0)
+        r = (float(m[1]) if m else np.inf) + 0.3 * float(np.hypot(*v))
+        x, y, w, h = rect
+        tile = lambda a, across: int(np.clip(np.floor(a / across * 32), 0, 31))
+        if i < 32:
+            tiles[tile(y - r, LOGICAL[1]):tile(y + h + r, LOGICAL[1]) + 1, tile(x - r, LOGICAL[0]):tile(x + w + r, LOGICAL[0]) + 1] |= np.uint32(1 << i)
+    window_data = ctx.buffer(data.tobytes() + tiles.tobytes())
     if "Windows" in program:
         program["Windows"].binding = 0
     textures = []

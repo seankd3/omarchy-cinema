@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 10
+// omarchy-cinema contract 11
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -50,9 +50,12 @@ uniform vec4 reserved;
 // Three vec4s a window, at most 256 windows: (x, y, w, h), (alpha,
 // rounding, lift, depth) and (velocity x, y). A uniform block, which every
 // pixel reads as one constant, not a texture each pixel fetches. Read them
-// through the window functions.
+// through the window functions. Then which of windows 0 to 31 reach each of
+// 32 by 32 tiles of the screen, bit i of tile k, four tiles a uvec4, row by
+// row (windowsAt()).
 layout(std140) uniform Windows {
     vec4 windowTexels[3 * 256];
+    uvec4 windowTiles[256];
 };
 uniform int windowCount;
 uniform int focusedIndex;
@@ -159,6 +162,14 @@ float rectDistance(vec2 px, vec4 rect, float radius) {
 // one loop, `for (int i = 0; i < windowCount; i++) { Window w = window(px, i);
 // ... }`, and asks all it needs of each there: at 2880x1800 every further
 // loop over three windows cost a draw 0.2 to 0.6 ms.
+//
+// A film whose windows change nothing past some distance says so as
+// `const float REACH = <px>;` in its backdrop.frag: past REACH from a
+// window, and from where it was in the last 0.3 s, it moves no point a
+// level. The plugin then leaves it out of the tiles it cannot reach, and a
+// loop that reads `uint reached = windowsAt(px);` before it and begins
+// `if (!reaches(reached, i)) continue;` meets at each point only the windows
+// that reach it. Without REACH every window reaches every point.
 struct Window {
     int i;
     vec4 rect;
@@ -166,6 +177,16 @@ struct Window {
     vec2 velocity;
     float d;
 };
+
+uint windowsAt(vec2 px) {
+    ivec2 t = clamp(ivec2(px / resolution * 32.0), ivec2(0), ivec2(31));
+    int k = t.y * 32 + t.x;
+    return windowTiles[k / 4][k % 4];
+}
+
+bool reaches(uint windows, int i) {
+    return i >= 32 || (windows >> uint(i) & 1u) != 0u;
+}
 
 Window window(vec2 px, int i) {
     vec4 rect = windowTexels[3 * i], a = windowTexels[3 * i + 1];
