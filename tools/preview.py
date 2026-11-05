@@ -250,7 +250,7 @@ def coarse(theme):
     """The coarse world's size and levels, and its frost's level at the
     screen's size, as main.cpp's coarse() works them out."""
     frost = min(max(int(np.floor(np.log2(max(2 * setting(theme, "frost", 3) * PIXELS[0] / LOGICAL[0], 1)) + 0.5)), 1), 6)
-    k = frost - 1
+    k = int(min(max(np.floor(np.log2(setting(theme, "frost_samples", 4)) / 2 + 0.5), 0), frost - 1))
     return tuple(-(-p >> (frost - k)) for p in PIXELS), k + 1, frost
 
 

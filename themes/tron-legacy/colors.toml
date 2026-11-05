@@ -42,3 +42,7 @@ glass = "0.4"
 
 # Reaches furthest (contract.glsl, REACH): its pooled light, exp(-d / 90).
 reach = "800"
+
+# Its fine grid keeps 16 points of the world in each texel of the frost
+# (4, the default, floods it).
+frost_samples = "16"

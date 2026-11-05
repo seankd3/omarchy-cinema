@@ -320,6 +320,7 @@ void main() {
         uint64_t                                compiled   = 0;
         bool                                    framed     = false; // the film's shader defines frame()
         float                                   reach      = INFINITY; // colors.toml's, in px (contract.glsl, REACH)
+        float                                   samples    = 4; // colors.toml's frost_samples (coarse())
         SGpu                                    gpu;
         // Each monitor's frames shown, and its sleep and wake, which can pass
         // without a frame.
@@ -466,9 +467,9 @@ void main() {
         return error == std::errc{} && end == value.data() + value.size() && std::isfinite(glass) ? std::clamp(glass, 0.F, 1.F) : 0.85F;
     }
 
-    // A film's reach in px: up to five ASCII digits, and three after a point
-    // (as tools/preview.py reads it, and always a float); anything else
-    // reaches everywhere.
+    // A film's reach in px or its frost's samples: up to five ASCII digits,
+    // and three after a point (as tools/preview.py reads it, and always a
+    // float); anything else is unbounded.
     float reachOf(const std::string& value) {
         static const std::regex PX(R"([0-9]{1,5}(\.[0-9]{0,3})?)");
         float                   reach = INFINITY;
@@ -508,18 +509,19 @@ void main() {
         g->framed         = std::regex_search(shader, FRAME);
 
         static const std::regex PALETTE(R"re(^\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})")re");
-        static const std::regex SETTING(R"re(^\s*(glass|reach)\s*=\s*"\s*([^"\s]*)\s*")re");
+        static const std::regex SETTING(R"re(^\s*(glass|reach|frost_samples)\s*=\s*"\s*([^"\s]*)\s*")re");
         std::istringstream      colors(readFile(dir + "/colors.toml"));
         g->backgrounds.clear();
         g->glass = 0.85F;
-        g->reach = INFINITY;
+        g->reach   = INFINITY;
+        g->samples = 4;
         for (std::string line; std::getline(colors, line);) {
             std::smatch match;
             if (std::regex_search(line, match, SETTING)) {
                 if (match[1] == "glass")
                     g->glass = glassOf(match[2]);
                 else
-                    g->reach = reachOf(match[2]);
+                    (match[1] == "reach" ? g->reach : g->samples) = reachOf(match[2]);
             }
             if (!std::regex_search(line, match, PALETTE))
                 continue;
@@ -996,14 +998,15 @@ void main() {
             g->monitors[monitor->m_id].stale = true;
     }
 
-    // How a monitor's coarse world is drawn: at half its size, with its
-    // mipmap down to a frost as soft as the glass's (Hyprland's blur size,
-    // from the film's frost: two passes spread a point over about twice its
-    // size).
+    // How a monitor's coarse world is drawn: its frost as soft as the
+    // glass's (Hyprland's blur size, from the film's frost: two passes spread
+    // a point over about twice its size), each texel from 4^k points of the
+    // world: as many as frost_samples asks (4 without it), at most the
+    // half-size world's.
     SCoarse coarse(const PHLMONITOR& monitor) {
         static auto SIZE  = CConfigValue<Config::INTEGER>("decoration:blur:size");
         const int   frost = std::clamp(int(std::round(std::log2(std::max(2.0 * *SIZE * monitor->m_scale, 1.0)))), 1, 6);
-        const int   k     = frost - 1;
+        const int   k     = std::clamp(std::round(std::log2(double(g->samples)) / 2), 0.0, frost - 1.0);
         const auto  side  = [&](double px) { return (int(px) + (1 << (frost - k)) - 1) >> (frost - k); };
         return {.width = side(monitor->m_transformedSize.x), .height = side(monitor->m_transformedSize.y), .levels = k + 1, .frost = frost};
     }

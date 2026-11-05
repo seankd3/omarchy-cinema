@@ -355,9 +355,9 @@ float glassSide(float d, float width) {
     return (1.0 - smoothstep(0.0, width, d)) * smoothstep(-2.0, 0.0, d);
 }
 
-// The world as the backdrop drew it in this frame, at half the screen's size
-// and filtered, at px: what a frame shows bent through the glass's edge, for
-// a texture read instead of drawing the world again. Only frame() reads it.
+// The world as the backdrop drew it in this frame for the glass's frost
+// (colors.toml's frost_samples), filtered, at px: what a frame shows bent
+// through the glass's edge, read instead of drawn again. Only frame() reads it.
 uniform sampler2D drawnWorld;
 uniform mat3 worldProj;
 vec4 worldAt(vec2 px) {
