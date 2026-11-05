@@ -50,13 +50,9 @@ within() {
   return 1
 }
 
-present() {
-  local session
-  # A query that does not answer within a second counts as someone there.
-  session=$(timeout 1 loginctl show-user "$(id -un)" -p Display --value 2>/dev/null)
-  [[ -n $session && $(timeout 1 loginctl show-session "$session" -p LockedHint --value 2>/dev/null) == yes ]] && return 1
-  [[ $(timeout 1 hyprctl -j monitors 2>/dev/null | jq '[.[] | select(.dpmsStatus)] | length' 2>/dev/null) != 0 ]]
-}
+# Nobody is there only on an answer that says so (--away); a check that
+# does not end within a second counts as someone there.
+present() { ! timeout 1 "$door" --away 2>/dev/null; }
 
 # The queue's runner, unless it runs.
 arm() {
@@ -151,6 +147,11 @@ case ${1:-} in
     echo "yield: $2 is more than $max while someone is at the screen" >&2
     exit 75 ;;
   --queue) shift; (($#)) && enqueue "$@"; exit ;;
+  --away)
+    [[ $(hyprctl -j monitors | jq '[.[] | select(.dpmsStatus)] | length') == 0 ]] && exit 0
+    session=$(loginctl show-user "$(id -un)" -p Display --value) && [[ -n $session ]] &&
+      [[ $(loginctl show-session "$session" -p LockedHint --value) == yes ]]
+    exit ;;
   --supervise) shift; supervise "$@" ;;
   --runner)
     while :; do
