@@ -31,6 +31,10 @@ if [[ ${1:-} == --inside ]]; then
 
   # A home with Files' own folders, and only them.
   mkdir -p ~/{Documents,Downloads,Music,Pictures,Videos}
+  # In the sandbox btop reads its battery's time left as 106751991167300d,
+  # so the previews show no battery.
+  conf=~/.config/btop/btop.conf
+  mkdir -p "${conf%/*}" && touch "$conf" && sed -i '/^show_battery *=/d' "$conf" && echo 'show_battery = false' >>"$conf"
 
   # The stock previews tile, whatever layout the hidden screen's workspace has
   # saved (Omarchy gives each screen its own block of ten). Each new window
