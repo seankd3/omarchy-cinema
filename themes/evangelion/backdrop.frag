@@ -258,18 +258,17 @@ vec4 backdrop(vec2 px) {
 // window lands and brightens softly for a moment when it opens or takes
 // focus. Its light stays within a dozen pixels of the wall, so it never lies
 // over the text of a window beneath.
-vec4 frame(vec2 px, int i) {
-    Window w = window(px, i);
+vec4 frame(vec2 px, Window w) {
     vec4 r = w.rect;
     float d = edgeDistance(w);
     if (d < -2.0 || d > 48.0) return vec4(0.0);
     vec2 n = edgeNormal(px, r, w.rounding);
     float f = fieldDistance(px, r);
-    bool focus = i == focusedIndex;
+    bool focus = w.i == focusedIndex;
     float breath = focus ? voice : 0.0;
 
     // What just happened to this window, all over within a second.
-    float flare = windowFlare(i, 1.8);
+    float flare = windowFlare(w.i, 1.8);
 
     vec3 tint = focus ? accent : PURPLE * 1.3;
     vec2 q = abs(px - r.xy - r.zw * 0.5) - r.zw * 0.5;

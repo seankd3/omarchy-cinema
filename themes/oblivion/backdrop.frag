@@ -391,12 +391,11 @@ vec4 backdrop(vec2 px) {
 // outside bends through the pane's thickness in its outer pixels; the sun
 // glints on the edge that faces it; and the light passing by outside, the
 // gold of a focus or a landing, catches the edge and warms it.
-vec4 frame(vec2 px, int i) {
-    Window w = window(px, i);
+vec4 frame(vec2 px, Window w) {
     vec4 r = w.rect;
     float d = edgeDistance(w);
     if (d < -2.0 || d > 14.0) return vec4(0.0);
-    bool focus = i == focusedIndex;
+    bool focus = w.i == focusedIndex;
     vec2 n = edgeNormal(px, r, w.rounding);
     float down = clamp((px.y - r.y) / max(r.w, 1.0), 0.0, 1.0);
     vec3 tint = focus ? mix(vec3(0.24, 0.60, 0.82), vec3(0.65, 0.85, 0.95), down) : vec3(0.62, 0.70, 0.77);

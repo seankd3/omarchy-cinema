@@ -366,7 +366,7 @@ vec4 worldAt(vec2 px) {
 }
 
 // What a film defines. backdrop(px): the colour of the world at px. And,
-// optionally, frame(px, i): window i's edge in that world (specs/depth.md,
+// optionally, frame(px, w): window w's edge in that world (specs/depth.md,
 // part 2), a premultiplied colour over a band reaching 48 px outside the
 // window and at most 2 px inside it, drawn above the window in its own pass,
 // so it moves and fades with it. A frame shows the world through the
@@ -375,4 +375,4 @@ vec4 worldAt(vec2 px) {
 // border ring with the film's edge. A derivative (dFdx, fwidth) is undefined
 // in a branch that can differ within a 2x2 quad: take it before the branch.
 vec4 backdrop(vec2 px);
-vec4 frame(vec2 px, int i);
+vec4 frame(vec2 px, Window w);

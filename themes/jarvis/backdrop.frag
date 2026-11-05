@@ -329,12 +329,11 @@ vec4 backdrop(vec2 px) {
 // passing behind the window, a ring, a wave or the rays, runs into the rim,
 // and the window glows a little in the reactor's light, as Hyprland's shadow
 // made it.
-vec4 frame(vec2 px, int i) {
-    Window w = window(px, i);
+vec4 frame(vec2 px, Window w) {
     vec4 r = w.rect;
     float d = edgeDistance(w);
     if (d < -2.0 || d > 24.0) return vec4(0.0);
-    bool focus = i == focusedIndex;
+    bool focus = w.i == focusedIndex;
     float diag = clamp(dot(px - r.xy, vec2(0.7071)) / max((r.z + r.w) * 0.7071, 1.0), 0.0, 1.0);
     vec3 tint = focus ? mix(vec3(0.37, 0.85, 1.0), AMBER, diag) : vec3(0.15, 0.36, 0.52);
     vec3 col = tint * exp(-max(d, 0.0) / 9.0) * step(0.0, d) * (focus ? 0.22 : 0.05);

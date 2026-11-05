@@ -295,16 +295,15 @@ vec4 backdrop(vec2 px) {
 // from behind it, and that light catches on the line, so a drop passing
 // behind the glass lights the edge. Its light stays within a few pixels, so
 // it never lies over the text of a window beneath.
-vec4 frame(vec2 px, int i) {
-    Window w = window(px, i);
+vec4 frame(vec2 px, Window w) {
     float d = edgeDistance(w);
     if (d < -2.0 || d > 48.0) return vec4(0.0);
     vec2 n = edgeNormal(px, w.rect, w.rounding);
-    bool focus = i == focusedIndex;
+    bool focus = w.i == focusedIndex;
     float lift = w.lift;
 
     // What just happened to this window, all over within a second.
-    float flare = windowFlare(i, 2.0);
+    float flare = windowFlare(w.i, 2.0);
 
     float toward = 0.55 + 0.45 * clamp(dot(n, -LIGHT), 0.0, 1.0);
     float strength = (focus ? 0.9 + 0.6 * lift : 0.45) * toward * (1.0 + flare);

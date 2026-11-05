@@ -343,12 +343,11 @@ vec4 backdrop(vec2 px) {
 // through its outer pixels; light passing behind the window, a ring or a
 // warming focus, runs into the line; and the window glows a little red, as
 // Hyprland's shadow made it.
-vec4 frame(vec2 px, int i) {
-    Window w = window(px, i);
+vec4 frame(vec2 px, Window w) {
     vec4 r = w.rect;
     float d = edgeDistance(w);
     if (d < -2.0 || d > 20.0) return vec4(0.0);
-    bool focus = i == focusedIndex;
+    bool focus = w.i == focusedIndex;
     vec3 tint = focus ? vec3(1.0, 0.18, 0.18) : vec3(0.42, 0.12, 0.12);
     vec3 col = accent * exp(-max(d, 0.0) / 8.0) * step(0.0, d) * (focus ? 0.2 : 0.05);
     float a = 0.0;

@@ -18,7 +18,7 @@ The problem has two halves, and each gets one home.
 contract (`plugin/contract.glsl`), so a film never measures anything itself.
 
 **How a film answers** is GLSL in the film's `backdrop.frag`: `backdrop(px)`
-for the world and an optional `frame(px, i)` for each window's edge. A film
+for the world and an optional `frame(px, w)` for each window's edge. A film
 is one file of shader plus data.
 
 ### 1. Facts
@@ -65,7 +65,7 @@ A helper enters the contract once two films answer a fact the same way:
 
 A plugin window decoration (`HyprlandAPI::addWindowDecoration`, on the OVER
 layer, which Hyprland draws inside the window's own pass) draws the film's
-`frame(px, i)` in a band outside the window's edge and at most 2 px inside
+`frame(px, w)` in a band outside the window's edge and at most 2 px inside
 it: a rim lit from the film's light, a bevel, the film's own edge. Drawn in
 the window's pass, it fades with the window; fullscreen windows have no
 decorations and so no frame.

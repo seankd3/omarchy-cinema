@@ -221,13 +221,12 @@ vec4 backdrop(vec2 px) {
 // side of a thick pane bends it, and its rim is a crisp line of the window's own
 // light, brighter toward the horizon it is lit from and as focus lifts it;
 // orange on the focused window, as the circuit is.
-vec4 frame(vec2 px, int i) {
-    Window w = window(px, i);
+vec4 frame(vec2 px, Window w) {
     float d = edgeDistance(w);
     if (d < -2.0 || d > 30.0) return vec4(0.0);
     vec2 n = edgeNormal(px, w.rect, w.rounding);
     float lift = w.lift;
-    vec3 tint = i == focusedIndex ? ORANGE : accent;
+    vec3 tint = w.i == focusedIndex ? ORANGE : accent;
     float edge = glassSide(d, 6.0);
     float toward = 0.6 + 0.4 * clamp(-n.y, 0.0, 1.0);
     // One look at the world 10 px in behind the glass: what the edge bends
