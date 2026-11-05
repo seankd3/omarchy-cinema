@@ -64,7 +64,7 @@ if [[ ${1:-} == --inside ]]; then
   exit
 fi
 
-"$here/tools/yield" --within || exec "$here/tools/yield" "$0" "$@"
+"$here/tools/yield" --within >/dev/null || exec "$here/tools/yield" "$0" "$@"
 if (($#)); then
   slugs=("$@")
 else

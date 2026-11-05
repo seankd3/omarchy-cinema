@@ -72,7 +72,7 @@ if [[ ${1:-} == --inside ]]; then
   exit
 fi
 
-"$here/tools/yield" --within || exec "$here/tools/yield" "$0" "$@"
+"$here/tools/yield" --within >/dev/null || exec "$here/tools/yield" "$0" "$@"
 film=${1:-jarvis}
 [[ -f $here/themes/$film/backdrop.frag ]] || { echo "fresh-user: $film is not a film theme" >&2; exit 2; }
 out=$(mktemp -d)

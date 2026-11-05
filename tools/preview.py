@@ -53,19 +53,26 @@ FRAME_MAIN = (ROOT / "plugin/main-frame.glsl").read_text()
 SHADERS = Path("/usr/include/hyprland/src/render/shaders")
 
 
-def bench(size=None):
+DOOR = str(ROOT / "tools/yield")
+
+
+def enter():
     """GPU runs go through tools/yield, which yields them to the person at
-    the screen: outside a run this process starts again inside one, and in
-    one, a `size` (w, h) larger than the run allows queues it (exit 75)."""
-    door = str(ROOT / "tools/yield")
-    status = subprocess.run([door, "--within", *([f"{size[0]}x{size[1]}"] if size else [])]).returncode
-    if status == 1:
-        os.execv(door, [door, sys.executable, *sys.orig_argv[1:]])
-    if status:
-        sys.exit(status)
+    the screen: outside a run this process starts again inside one. The
+    run's largest drawing size (w, h), or None."""
+    within = subprocess.run([DOOR, "--within"], stdout=subprocess.PIPE, text=True)
+    if within.returncode:
+        os.execv(DOOR, [DOOR, sys.executable, *sys.orig_argv[1:]])
+    return tuple(map(int, within.stdout.split("x"))) if within.stdout.strip() else None
 
 
-bench()
+CAP = enter()
+
+
+def fits(size):
+    """Drawing at `size` (w, h) larger than the run allows queues the run (exit 75)."""
+    if CAP and (size[0] > CAP[0] or size[1] > CAP[1]):
+        sys.exit(subprocess.run([DOOR, "--within", "%dx%d" % tuple(size)]).returncode)
 
 
 def palette(theme):
@@ -193,6 +200,7 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
     vao = ctx.vertex_array(program, [(quad, "2f", "pos")])
 
     def draw():
+        fits(ctx.viewport[2:])
         window_data.bind_to_uniform_block(0)
         for unit, texture in enumerate(textures):
             texture.use(unit)
@@ -215,7 +223,6 @@ def half_world(ctx, theme, t, windows, focused, levels=1, **answers):
 def render(theme, t, windows, focused, frame=None, **answers):
     """One scene() drawn off screen: the backdrop as RGB, or a frame as
     premultiplied RGBA."""
-    bench(PIXELS)
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     world = half_world(ctx, theme, t, windows, focused, **answers) if frame is not None else None
     draw = scene(ctx, theme, t, windows, focused, frame=frame, world=world, **answers)
@@ -308,7 +315,7 @@ def glass(theme, image, t, windows, focused, border=True, **answers):
     colors = palette(theme)
     scale = PIXELS[0] / LOGICAL[0]
     levels = min(max(int(np.floor(np.log2(max(2 * setting(theme, "frost", 3) * scale, 1)) + 0.5)), 1), 6)
-    bench(PIXELS)
+    fits(PIXELS)
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
     world = half_world(ctx, theme, t, windows, focused, levels, **answers)

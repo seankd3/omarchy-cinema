@@ -21,9 +21,10 @@
 #                                when WxH fits it, else 75 (and it is queued)
 #
 # In ${XDG_STATE_HOME:-~/.local/state}/omarchy-cinema/bench: log, a line a
-# run; queue/, a file a waiting run, with its directory and arguments but not
-# its environment (env NAME=value <command> carries a setting); out/, what
-# each queued run printed.
+# run; queue/, a file a waiting run (its directory, environment and
+# arguments, as at(1) keeps them); out/, what each queued run printed. The
+# queue's runner is a user unit, omarchy-cinema-bench, started by the first
+# run queued and by any run while one waits; it waits out an empty queue.
 set -uo pipefail
 
 door=$(realpath "$0")
@@ -53,10 +54,19 @@ present() {
   [[ $(hyprctl -j monitors 2>/dev/null | jq '[.[] | select(.dpmsStatus)] | length' 2>/dev/null) != 0 ]]
 }
 
-enqueue() {
-  printf '%s\0' "$PWD" "$@" >"$state/queue/$(date +%s%N)"
+# The queue's runner, unless it runs.
+arm() {
   systemctl --user -q is-active omarchy-cinema-bench ||
     systemd-run --user -q --collect --unit=omarchy-cinema-bench "$door" --runner 2>/dev/null
+}
+
+# Published whole: the runner never sees half a file.
+enqueue() {
+  local envs name
+  mapfile -d '' -t envs < <(env -0)
+  name=$(date +%s%N)
+  printf '%s\0' "$PWD" "${#envs[@]}" "${envs[@]}" "$@" >"$state/new.$name" && mv "$state/new.$name" "$state/queue/$name"
+  arm
   echo "yield: queued, to run once nobody is at the screen: $*" >&2
 }
 
@@ -77,19 +87,20 @@ run() {
   # Should the door itself be ended, the gap is as long as a whole run.
   [[ $who == present ]] && echo $((EPOCHSECONDS + 30)) >"$runs/gap"
   start=${EPOCHREALTIME/./} t0=$EPOCHSECONDS
-  systemd-run --user --scope -q --unit="omarchy-cinema-bench-$id" -p TimeoutStopSec=2 -- nice -n 19 ionice -c 3 "$@" 9>&- &
+  # Its cgroup ends it at its limit (TERM, then KILL 2 s on), whatever becomes
+  # of this door; it dies with the door; and it holds the lock (fd 9) until
+  # its last process ends.
+  systemd-run --user --scope -q --collect --unit="omarchy-cinema-bench-$id" -p RuntimeMaxSec=$limit -p TimeoutStopSec=2 -- \
+    setpriv --pdeathsig KILL nice -n 19 ionice -c 3 "$@" &
   local job=$!
   while sleep 0.5; kill -0 "$job" 2>/dev/null; do
-    if ((${EPOCHREALTIME/./} - start > limit * 1000000)); then
-      [[ $who == present ]] && why=capped || why=deadline
-      break
-    fi
     [[ $who == away ]] && present && { why=back; break; }
   done
   systemctl --user stop "omarchy-cinema-bench-$id.scope" 2>/dev/null
   wait "$job" 2>/dev/null
   status=$?
   took=$(((${EPOCHREALTIME/./} - start) / 100000))
+  [[ -z $why ]] && ((took >= limit * 10)) && { [[ $who == present ]] && why=capped || why=deadline; }
   [[ $who == present ]] && echo $((EPOCHSECONDS + took / 10 + 1)) >"$runs/gap"
   [[ -e $runs/$id.waits ]] && why=waits
   rm -f "$runs/$id" "$runs/$id.waits"
@@ -106,7 +117,8 @@ run() {
 case ${1:-} in
   --within)
     within || exit 1
-    [[ -z $max || -z ${2:-} ]] && exit 0
+    [[ -z ${2:-} ]] && { echo "$max"; exit 0; }
+    [[ -z $max ]] && exit 0
     w=${2%x*} h=${2#*x}
     ((w <= ${max%x*} && h <= ${max#*x})) && exit 0
     : >"$runs/$run.waits"
@@ -114,16 +126,21 @@ case ${1:-} in
     exit 75 ;;
   --queue) shift; (($#)) && enqueue "$@"; exit ;;
   --runner)
-    while next=$(ls "$state/queue" | head -1); [[ -n $next ]]; do
-      present && { sleep 60; continue; }
+    while :; do
+      next=$(ls "$state/queue" | head -1)
+      if [[ -z $next ]] || present; then sleep 60; continue; fi
       mapfile -d '' -t job <"$state/queue/$next"
-      (cd "${job[0]}" && run queued "${job[@]:1}") >>"$state/out/$next" 2>&1 </dev/null
-      (($? == 75)) && { sleep 60; continue; }
-      rm "$state/queue/$next"
-    done
-    exit ;;
+      (
+        cd "${job[0]}" || exit 1
+        for name in $(compgen -e); do unset "$name" 2>/dev/null; done
+        export "${job[@]:2:job[1]}" 2>/dev/null
+        run queued "${job[@]:2+job[1]}"
+      ) >>"$state/out/$next" 2>&1 </dev/null
+      (($? == 75)) || rm "$state/queue/$next"
+    done ;;
   "" | --*) echo "usage: tools/yield [--queue] <command> [args...]" >&2; exit 2 ;;
 esac
 # Already in a run, a command is that run's.
 within && exec "$@"
+[[ -n $(ls "$state/queue") ]] && arm
 run "" "$@"
