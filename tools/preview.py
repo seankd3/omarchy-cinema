@@ -246,10 +246,18 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
     return draw
 
 
-def half_world(ctx, theme, t, windows, focused, levels=1, **answers):
-    """The world at half size, as the plugin keeps it (RGB10_A2), with its
-    mipmap down to `levels`."""
-    world = ctx.texture((PIXELS[0] // 2, PIXELS[1] // 2), 4, internal_format=0x8059)
+def coarse(theme):
+    """The coarse world's size and levels, and its frost's level at the
+    screen's size, as main.cpp's coarse() works them out."""
+    frost = min(max(int(np.floor(np.log2(max(2 * setting(theme, "frost", 3) * PIXELS[0] / LOGICAL[0], 1)) + 0.5)), 1), 6)
+    k = frost - 1
+    return tuple(-(-p >> (frost - k)) for p in PIXELS), k + 1, frost
+
+
+def coarse_world(ctx, theme, t, windows, focused, **answers):
+    """The coarse world as the plugin keeps it (RGB10_A2), with its mipmap."""
+    size, levels, _ = coarse(theme)
+    world = ctx.texture(size, 4, internal_format=0x8059)
     world.repeat_x = world.repeat_y = False
     ctx.framebuffer([world]).use()
     scene(ctx, theme, t, windows, focused, **answers)()
@@ -262,7 +270,7 @@ def render(theme, t, windows, focused, frame=None, **answers):
     """One scene() drawn off screen: the backdrop as RGB, or a frame as
     premultiplied RGBA."""
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
-    world = half_world(ctx, theme, t, windows, focused, **answers) if frame is not None else None
+    world = coarse_world(ctx, theme, t, windows, focused, **answers) if frame is not None else None
     draw = scene(ctx, theme, t, windows, focused, frame=frame, world=world, **answers)
     target = ctx.simple_framebuffer(PIXELS, components=4)
     target.use()
@@ -342,8 +350,8 @@ void main() {
 
 def glass(theme, image, t, windows, focused, border=True, **answers):
     """`image` with the windows over it as the film's glass shows them: the
-    plugin's frost (the world at half size, softened through its mipmap as
-    far as the film's frost, that level read in 8 bits, frost() in main.cpp),
+    plugin's frost (the coarse world softened through its mipmap as far as
+    the film's frost, that level read in 8 bits, frost() in main.cpp),
     then each window, 0.999 opaque, drawn by Hyprland's window shader with
     the glass in it: its background the theme's, a block of text lines in
     the foreground and muted colours, and a lit border on the focused one
@@ -352,11 +360,11 @@ def glass(theme, image, t, windows, focused, border=True, **answers):
 
     colors = palette(theme)
     scale = PIXELS[0] / LOGICAL[0]
-    levels = min(max(int(np.floor(np.log2(max(2 * setting(theme, "frost", 3) * scale, 1)) + 0.5)), 1), 6)
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
-    world = half_world(ctx, theme, t, windows, focused, levels, **answers)
-    frost = ctx.texture((PIXELS[0] >> levels, PIXELS[1] >> levels), 4, world.read(level=levels - 1))
+    _, levels, level = coarse(theme)
+    world = coarse_world(ctx, theme, t, windows, focused, **answers)
+    frost = ctx.texture((PIXELS[0] >> level, PIXELS[1] >> level), 4, world.read(level=levels - 1))
 
     shown = ctx.texture(PIXELS, 4, image.convert("RGBA").transpose(Image.FLIP_TOP_BOTTOM).tobytes())
     ctx.framebuffer([shown]).use()
