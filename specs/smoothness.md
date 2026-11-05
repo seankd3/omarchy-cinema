@@ -71,11 +71,11 @@ Hyprland only composites.
   Tron) per moving window, contract.glsl's glowReach() of its glow. windowShadow is exactly 0 from 2 px inside the
   window and past its softness: 6 to 22% off a drag.
 
-At 2880x1800, 10 windows moving, GPU at about 1000 MHz (2026-11-05), ms
-a frame: half-size world 1.21 (Tron) to 2.04 (Evangelion), full-size
-1.52 to 2.64, frost 0.45, windows 1.15, frames 0.13 to 0.21, top layers
-0.36; whole frame 4.89 to 6.69, at 754 MHz an estimated 5.95 to 8.14
-(by the clocks, 6.53 to 8.93).
+At 2880x1800, 10 windows moving, GPU at about 1000 MHz, ms:
+half-size world 1.21 (Tron) to 2.04 (Evangelion), full-size 1.52 to
+2.64, frost 0.38 to 0.45, windows 1.15, frames 0.13 to 0.21, top layers
+0.36; a frame 4.89 to 6.69, at 754 MHz an estimated 5.95 to 8.14 (by the
+clocks, 6.53 to 8.93).
 
 Measured and not kept: the world at half size under Tron's and the Matrix's
 glass (their lines and glyphs are finer than a half-size pixel: up to 15
