@@ -63,7 +63,7 @@ Hyprland only composites.
   windows' block which of them reach each of 32 by 32 tiles, and a film's
   loop reads its tile once and skips the rest. Moving frame, world passes
   at full size: the same at 3 windows, 5 to 14% less at 6, 15 to 24% less
-  at 10 (Tron's runs disagreed: 3.17 ms to 3.50, and to 2.88).
+  at 10.
   Evangelion's honeycomb hold lets go 450 px out and a rim fades out
   at its cell's edge, so float noise moves no cell (one ulp had moved
   75,000 pixels up to 86 levels); culled, it is within a level and its
@@ -74,11 +74,10 @@ Hyprland only composites.
   Tron) per moving window, contract.glsl's glowReach() of its glow. windowShadow is exactly 0 from 2 px inside the
   window and past its softness: 6 to 22% off a drag.
 
-At 2880x1800, GPU at 754 MHz, windows moving (2026-11-03), ms
-a frame: half-size world 0.78 (Tron) to 1.60 (Evangelion), frost 0.62 to
-0.76, full-size world 0.72 to 1.44, windows 0.94 to 1.03, frames 0.14 to
-0.23, top layers 0.65; whole frame 4.05 (Tron) to 5.66 (Evangelion).
-Hyprland's passes and the frost are about 2.4 ms of it.
+At 2880x1800, 10 windows moving, GPU at about 1000 MHz (2026-11-05), ms
+a frame: half-size world 1.29 (Tron) to 2.25 (Evangelion), full-size
+1.68 to 2.71, frost 0.45, windows 1.15, frames 0.14 to 0.23, top layers
+0.36; whole frame 5.16 to 7.21, at 754 MHz 6.33 to 8.73.
 
 Measured and not kept: the world at half size under Tron's and the Matrix's
 glass (their lines and glyphs are finer than a half-size pixel: up to 15
@@ -126,9 +125,10 @@ plugin idle 1.0 and 0.6, with no plugin 2.0 frames.
   and 1440x900 at most while someone is there, and a gap as long after it.
   What does not fit waits in its queue for the session locked or every
   monitor asleep, and ends the moment someone is back.
-- The GPU clock is not fixed (754 MHz most runs, 2340 seen once while
-  another client kept it busy): record it per run and compare only runs at
-  one clock.
+- The GPU clock is not fixed (754 MHz to 2026-11-04, about 1000 since,
+  2340 once under load): record it per run and compare
+  only runs at one clock. At 754 MHz a frame takes 1.22 times as long as
+  at 1000 (one build's runs at both, every pass: 1.21 to 1.23).
 - A GPU shared with a running session inflates Hyprland's window pass from 0.38
   to 2.5 ms in every film; check the other films' runs before chasing one
   film's outlier. Offscreen ablations (tools/preview.py's storyboard, least
