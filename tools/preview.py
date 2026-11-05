@@ -69,10 +69,18 @@ def enter():
 CAP = enter()
 
 
-def fits(size):
-    """Drawing at `size` (w, h) larger than the run allows queues the run (exit 75)."""
-    if CAP and (size[0] > CAP[0] or size[1] > CAP[1]):
-        sys.exit(subprocess.run([DOOR, "--within", "%dx%d" % tuple(size)]).returncode)
+def fits(made):
+    """Every framebuffer made in this process, by whatever code, fits the
+    run: one larger queues the run (exit 75)."""
+    def framebuffer(self, *args, **kwargs):
+        fb = made(self, *args, **kwargs)
+        if CAP and (fb.size[0] > CAP[0] or fb.size[1] > CAP[1]):
+            sys.exit(subprocess.run([DOOR, "--within", "%dx%d" % fb.size]).returncode)
+        return fb
+    return framebuffer
+
+
+moderngl.Context.framebuffer = fits(moderngl.Context.framebuffer)
 
 
 def palette(theme):
@@ -200,7 +208,6 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
     vao = ctx.vertex_array(program, [(quad, "2f", "pos")])
 
     def draw():
-        fits(ctx.viewport[2:])
         window_data.bind_to_uniform_block(0)
         for unit, texture in enumerate(textures):
             texture.use(unit)
@@ -315,7 +322,6 @@ def glass(theme, image, t, windows, focused, border=True, **answers):
     colors = palette(theme)
     scale = PIXELS[0] / LOGICAL[0]
     levels = min(max(int(np.floor(np.log2(max(2 * setting(theme, "frost", 3) * scale, 1)) + 0.5)), 1), 6)
-    fits(PIXELS)
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
     world = half_world(ctx, theme, t, windows, focused, levels, **answers)

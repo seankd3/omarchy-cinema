@@ -12,13 +12,16 @@
 # run has 15 s with its teardown and at most 1440x900, and the next run starts
 # no sooner than as long again after it ends. While nobody is, a run has 20
 # minutes and ends the moment someone is back. Every run is alone (one lock),
-# at the lowest CPU and disk priority, in a cgroup of its own, and every
-# process it started ends with it. A run that does not fit (more than
-# 1440x900, past its 15 s, or someone came back to it) waits in the queue and
-# exits 75; the queue runs, in order, whenever nobody is at the screen.
+# at the lowest CPU and disk priority, and is a user service whose main
+# process is its supervisor (--supervise): every process the run started ends
+# with the supervisor, however that ends, and the supervisor ends the run when
+# whoever asked for it is gone. A run that does not fit (more than 1440x900,
+# past its 15 s, or someone came back to it) waits in the queue and exits 75;
+# the queue runs, in order, whenever nobody is at the screen.
 #
 #   tools/yield --within [WxH]   for the tools: 1 outside any run; in one, 0
-#                                when WxH fits it, else 75 (and it is queued)
+#                                when WxH fits it (with no WxH it prints the
+#                                run's largest size), else 75 (it is queued)
 #
 # In ${XDG_STATE_HOME:-~/.local/state}/omarchy-cinema/bench: log, a line a
 # run; queue/, a file a waiting run (its directory, environment and
@@ -51,7 +54,7 @@ present() {
   local session
   session=$(loginctl show-user "$(id -un)" -p Display --value 2>/dev/null)
   [[ -n $session && $(loginctl show-session "$session" -p LockedHint --value 2>/dev/null) == yes ]] && return 1
-  [[ $(hyprctl -j monitors 2>/dev/null | jq '[.[] | select(.dpmsStatus)] | length' 2>/dev/null) != 0 ]]
+  [[ $(timeout 5 hyprctl -j monitors 2>/dev/null | jq '[.[] | select(.dpmsStatus)] | length' 2>/dev/null) != 0 ]]
 }
 
 # The queue's runner, unless it runs.
@@ -70,48 +73,70 @@ enqueue() {
   echo "yield: queued, to run once nobody is at the screen: $*" >&2
 }
 
-# One run under the lock: its status, or 75 when it waits in the queue
-# (QUEUED: it is the queue's own, so it stays where it is).
+# One run, as a user service with this environment, directory and output,
+# supervised; its status, or 75 when it waits in the queue (QUEUED: it is
+# the queue's own, so it stays where it is).
 run() {
-  local queued=$1 id=$BASHPID who=away max="" limit=1200 why="" status gap start took t0
-  shift
+  local name names=()
+  for name in $(compgen -e); do [[ $name =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && names+=(-E "$name"); done
+  systemd-run --user -q --wait --pipe --collect --same-dir -p TimeoutStopSec=2 "${names[@]}" -- \
+    "$door" --supervise "$1" "$BASHPID" "${@:2}"
+}
+
+# Every other process of this run's service: asked to end, then, past 2 s,
+# made to.
+end() {
+  local cg pid pids others sig t
+  cg=/sys/fs/cgroup$(cut -d: -f3- /proc/self/cgroup)
+  for sig in TERM KILL; do
+    for ((t = 0; t < 20; t++)); do
+      mapfile -t pids <"$cg/cgroup.procs"
+      others=()
+      for pid in "${pids[@]}"; do ((pid == $$)) || others+=("$pid"); done
+      ((${#others[@]})) || return
+      ((t)) || kill -s "$sig" "${others[@]}" 2>/dev/null
+      sleep 0.1
+    done
+  done
+}
+
+supervise() {
+  local queued=$1 client=$2 who=away max="" limit=1200 why="" status gap start took t0
+  shift 2
   exec 9>/tmp/omarchy-cinema-hidden.lock
   flock 9
+  kill -0 "$client" 2>/dev/null || exit 1
   read -r gap 2>/dev/null <"$runs/gap" && ((gap > EPOCHSECONDS)) && sleep $((gap - EPOCHSECONDS))
-  present && who=present max=1440x900 limit=12
-  [[ $who == present && -n $queued ]] && return 75
-  read -r start _ < <(proc "$id")
-  echo "$start $max" >"$runs/$id"
-  trap 'systemctl --user stop "omarchy-cinema-bench-'"$id"'.scope" 2>/dev/null; rm -f "'"$runs/$id"'" "'"$runs/$id"'.waits"' EXIT
-  trap exit INT TERM HUP
-  # Should the door itself be ended, the gap is as long as a whole run.
+  present && who=present max=1440x900 limit=11
+  [[ $who == present && -n $queued ]] && exit 75
+  read -r start _ < <(proc $$)
+  echo "$start $max" >"$runs/$$"
+  trap 'rm -f "$runs/$$" "$runs/$$.waits"' EXIT
+  # Should the supervisor itself be ended, the gap is as long as a whole run.
   [[ $who == present ]] && echo $((EPOCHSECONDS + 30)) >"$runs/gap"
   start=${EPOCHREALTIME/./} t0=$EPOCHSECONDS
-  # Its cgroup ends it at its limit (TERM, then KILL 2 s on), whatever becomes
-  # of this door; it dies with the door; and it holds the lock (fd 9) until
-  # its last process ends.
-  systemd-run --user --scope -q --collect --unit="omarchy-cinema-bench-$id" -p RuntimeMaxSec=$limit -p TimeoutStopSec=2 -- \
-    setpriv --pdeathsig KILL nice -n 19 ionice -c 3 "$@" &
+  # The run holds the lock (fd 9) until its last process ends.
+  nice -n 19 ionice -c 3 "$@" &
   local job=$!
   while sleep 0.5; kill -0 "$job" 2>/dev/null; do
+    if ((${EPOCHREALTIME/./} - start > limit * 1000000)); then
+      [[ $who == present ]] && why=capped || why=deadline
+      break
+    fi
+    kill -0 "$client" 2>/dev/null || { why=gone; break; }
     [[ $who == away ]] && present && { why=back; break; }
   done
-  systemctl --user stop "omarchy-cinema-bench-$id.scope" 2>/dev/null
-  wait "$job" 2>/dev/null
+  { end; wait "$job"; } 2>/dev/null
   status=$?
   took=$(((${EPOCHREALTIME/./} - start) / 100000))
-  [[ -z $why ]] && ((took >= limit * 10)) && { [[ $who == present ]] && why=capped || why=deadline; }
   [[ $who == present ]] && echo $((EPOCHSECONDS + took / 10 + 1)) >"$runs/gap"
-  [[ -e $runs/$id.waits ]] && why=waits
-  rm -f "$runs/$id" "$runs/$id.waits"
-  trap - EXIT INT TERM HUP
-  exec 9>&-
+  [[ -e $runs/$$.waits ]] && why=waits
   printf '%(%F %T)T %-7s %3d.%ds exit %-3d %-8s %s: %s\n' "$t0" "$who" $((took / 10)) $((took % 10)) "$status" "$why" "$PWD" "$*" >>"$state/log"
   case $why in
-    capped | back | waits) [[ -n $queued ]] || enqueue "$@"; return 75 ;;
-    deadline) return 124 ;;
+    capped | back | waits) [[ -n $queued ]] || enqueue "$@"; exit 75 ;;
+    deadline) exit 124 ;;
   esac
-  return "$status"
+  exit "$status"
 }
 
 case ${1:-} in
@@ -125,6 +150,7 @@ case ${1:-} in
     echo "yield: $2 is more than $max while someone is at the screen" >&2
     exit 75 ;;
   --queue) shift; (($#)) && enqueue "$@"; exit ;;
+  --supervise) shift; supervise "$@" ;;
   --runner)
     while :; do
       next=$(ls "$state/queue" | head -1)
