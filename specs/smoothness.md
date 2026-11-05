@@ -24,9 +24,6 @@ read or config change, a lock, a window going fullscreen, a monitor coming,
 going, sleeping or waking) settles it from one idle callback once Hyprland
 has finished the change; that callback also applies the glass.
 
-Deleted: the free-running timer and its rate arithmetic, the 0.1 s clamp,
-the tick's own copy of "time stands still", the glass's own idle callback.
-
 Measured with `tools/smoothness` (hidden desktop, frameclock's fixed 60 Hz
 vblank, frametrace logging each draw's `time`; judder is the RMS of each step
 minus one frame, jumps the steps over 1.5 frames), fit against the hidden
@@ -63,7 +60,7 @@ Hyprland only composites.
   windows' block which of them reach each of 32 by 32 tiles, and a film's
   loop reads its tile once and skips the rest. Moving frame, world passes
   at full size: the same at 3 windows, 5 to 14% less at 6, 15 to 24% less
-  at 10.
+  at 10 (Tron's runs disagreed: 3.17 ms to 3.50, and to 2.88).
   Evangelion's honeycomb hold lets go 450 px out and a rim fades out
   at its cell's edge, so float noise moves no cell (one ulp had moved
   75,000 pixels up to 86 levels); culled, it is within a level and its
@@ -77,7 +74,8 @@ Hyprland only composites.
 At 2880x1800, 10 windows moving, GPU at about 1000 MHz (2026-11-05), ms
 a frame: half-size world 1.29 (Tron) to 2.25 (Evangelion), full-size
 1.68 to 2.71, frost 0.45, windows 1.15, frames 0.14 to 0.23, top layers
-0.36; whole frame 5.16 to 7.21, at 754 MHz 6.33 to 8.73.
+0.36; whole frame 5.16 to 7.21, at 754 MHz an estimated 6.33 to 8.73
+(Measuring).
 
 Measured and not kept: the world at half size under Tron's and the Matrix's
 glass (their lines and glyphs are finer than a half-size pixel: up to 15
@@ -127,8 +125,9 @@ plugin idle 1.0 and 0.6, with no plugin 2.0 frames.
   monitor asleep, and ends the moment someone is back.
 - The GPU clock is not fixed (754 MHz to 2026-11-04, about 1000 since,
   2340 once under load): record it per run and compare
-  only runs at one clock. At 754 MHz a frame takes 1.22 times as long as
-  at 1000 (one build's runs at both, every pass: 1.21 to 1.23).
+  only runs at one clock. One build's runs at both, 3 windows: at 754 a
+  frame took 1.21 to 1.23 times as long, a pass 1.18 to 1.24, not 1.33.
+  The 10-window figures at 754 scale each pass by its mean, untested.
 - A GPU shared with a running session inflates Hyprland's window pass from 0.38
   to 2.5 ms in every film; check the other films' runs before chasing one
   film's outlier. Offscreen ablations (tools/preview.py's storyboard, least
