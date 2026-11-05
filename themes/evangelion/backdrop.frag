@@ -1,24 +1,11 @@
-// omarchy-cinema contract 11
+// omarchy-cinema contract 12
 // Evangelion: NERV's displays. A honeycomb of hexagonal cells lies across
 // the dark and wakes like an AT field around the windows: cells light orange
 // along every window's edge and in the seams between windows, brightest at
 // the focused window, and octagonal rings ripple out from the focused window,
 // lighting the cells they pass. Far behind, a larger lattice in Unit-01's
-// purple shifts against it as focus moves, for depth.
-//
-// The windows stand in the field (specs/depth.md). It holds them: its cells
-// pack tighter and glow brighter toward each window's edge. Lit from above,
-// each window casts a shadow on the honeycomb, further and softer as focus
-// lifts it, and the light lies on its glass. Each is edged by its own AT
-// field, which catches the light passing behind the glass. The honeycomb is
-// nearer than the far lattice, so it shifts a few pixels more as a window is
-// dragged. The field is calm while you work and shines
-// when windows move (SPEC.md, "Calm"): a moving window sets the honeycomb rippling and lighting
-// cell by cell round it and in its wake, and landing flares one full AT
-// field ring out from its edge. The rest is soft: opening or taking focus
-// lights the cells along a window's edge for a moment, closing lets the
-// field where it was dim out, and the field breathes gently with your voice.
-// Typing has no answer.
+// purple shifts against it as focus moves, for depth. The windows stand in
+// the field, lit from above (specs/depth.md), and it holds them.
 
 const vec3 RED = vec3(1.0, 0.16, 0.08);
 const vec3 PURPLE = vec3(0.40, 0.20, 0.85);
@@ -83,8 +70,6 @@ vec3 sheen(vec2 px, int i) {
 vec4 answers(vec2 px, vec2 cell) {
     vec3 ring = vec3(0.0);
     float lit = 0.0;
-    // Newest first: the ring is in the order things happened, so once one is
-    // older than the longest answer (1.2 s) every one before it is too.
     for (int k = impulseCount - 1; k >= 0; k--) {
         vec4 e = impulses[k];
         int kind = impulseKinds[k];
@@ -198,9 +183,7 @@ vec4 backdrop(vec2 px) {
         // Its ghosts, 2.6 exp(-d / 26) of a burn, only within their reach of
         // where it was in the last 0.12 s (its last ghost's lag).
         for (int k = 1; k <= (fc < glowReach(2.6, 26.0) + speed * 0.12 ? 4 : 0); k++) {
-            vec4 ghost = r;
-            ghost.xy -= v * 0.03 * float(k);
-            stir += (1.4 - 0.3 * float(k)) * pace * exp(-abs(fieldDistance(cell.xy, ghost)) / 26.0);
+            stir += (1.4 - 0.3 * float(k)) * pace * exp(-abs(fieldDistance(cell.xy, ago(w, 0.03 * float(k)))) / 26.0);
         }
     }
     float toFocus = abs(atCell.focus);
@@ -283,10 +266,9 @@ vec4 backdrop(vec2 px) {
 vec4 frame(vec2 px, int i) {
     Window w = window(px, i);
     vec4 r = w.rect;
-    float rounding = w.rounding;
-    float d = rectDistance(px, r, rounding);
+    float d = edgeDistance(w);
     if (d < -2.0 || d > 48.0) return vec4(0.0);
-    vec2 n = edgeNormal(px, r, rounding);
+    vec2 n = edgeNormal(px, r, w.rounding);
     float f = fieldDistance(px, r);
     bool focus = i == focusedIndex;
     float lift = w.lift;
@@ -308,7 +290,7 @@ vec4 frame(vec2 px, int i) {
 
     // The field just behind the glass's edge, seen bent through its outer
     // pixels and caught by the wall.
-    float edge = (1.0 - smoothstep(0.0, 6.0, d)) * smoothstep(-2.0, 0.0, d);
+    float edge = glassSide(d, 6.0);
     vec3 behind = d < 10.0 ? worldAt(px - n * (max(d, 0.0) + 12.0)).rgb - background : vec3(0.0);
     vec3 glow = tint * (wall + hairline + wash) + behind * 3.0 * (wall + hairline) / max(strength, 0.3);
     float a = clamp(max(edge * 0.9, max(wall, hairline)), 0.0, 1.0);

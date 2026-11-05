@@ -1,16 +1,9 @@
-// omarchy-cinema contract 11
+// omarchy-cinema contract 12
 // Tron Legacy: the Grid. A floor of light lines runs out to the horizon under
 // a black sky, and light cycles race along it, trailing light. Around every
 // window a circuit line is drawn, and pulses run along it; around the focused
-// window they run orange, as Clu's do.
-//
-// The windows stand on the Grid (specs/depth.md), calmly, and shine when they
-// move (SPEC.md, "Calm"): lit from the horizon behind them, each casts its shadow toward the
-// viewer, further and softer as focus lifts it, and the floor gives under its
-// weight; a moving window leaves a bright light-cycle trail of its circuit and
-// landing rings out through the grid; closing sends one soft ring, opening
-// draws one in; focus warms the circuit; the horizon glows a little with your
-// voice.
+// window they run orange, as Clu's do. The windows stand on the Grid, lit
+// from the horizon behind them (specs/depth.md).
 
 const vec3 ORANGE = vec3(1.0, 0.52, 0.10);
 const float CELL = 40.0; // grid spacing on the floor, in floor units
@@ -127,9 +120,7 @@ vec4 backdrop(vec2 px) {
             float outside = smoothstep(0.0, 3.0, w.d);
             vec3 tint = i == focusedIndex ? ORANGE : cyan;
             for (int k = 1; k <= 5; k++) {
-                vec4 ghost = r;
-                ghost.xy -= w.velocity * 0.025 * float(k);
-                float d = rectDistance(px, ghost, w.rounding);
+                float d = rectDistance(px, ago(w, 0.025 * float(k)), w.rounding);
                 trail += tint * glowLine(abs(d - 7.0), 1.1, HALO) * (0.75 - 0.13 * float(k)) * min(speed / 1500.0, 1.0) * w.alpha * outside;
             }
         }
@@ -231,14 +222,12 @@ vec4 backdrop(vec2 px) {
 // orange on the focused window, as the circuit is.
 vec4 frame(vec2 px, int i) {
     Window w = window(px, i);
-    vec4 r = w.rect;
-    float rounding = w.rounding;
-    float d = rectDistance(px, r, rounding);
+    float d = edgeDistance(w);
     if (d < -2.0 || d > 30.0) return vec4(0.0);
-    vec2 n = edgeNormal(px, r, rounding);
+    vec2 n = edgeNormal(px, w.rect, w.rounding);
     float lift = w.lift;
     vec3 tint = i == focusedIndex ? ORANGE : accent;
-    float edge = (1.0 - smoothstep(0.0, 6.0, d)) * smoothstep(-2.0, 0.0, d);
+    float edge = glassSide(d, 6.0);
     float toward = 0.6 + 0.4 * clamp(-n.y, 0.0, 1.0);
     // One look at the world 10 px in behind the glass: what the edge bends
     // into view, and light passing behind the window, a cycle or a wave,

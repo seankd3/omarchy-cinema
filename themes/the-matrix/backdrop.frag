@@ -1,4 +1,4 @@
-// omarchy-cinema contract 11
+// omarchy-cinema contract 12
 // The Matrix: the code, and the code is this very shader, or what the agents
 // on this machine are writing once the user turns that on
 // (specs/agent-rain.md). It rains down the black screen in mirrored glyphs,
@@ -10,18 +10,8 @@
 // the near rain at the windows' own depth, falling round them, so it never
 // shows through their glass and no window shades it. The rain parts round
 // the windows: drops flare where they strike a window's top edge, and streams run down its sides, brightest beside the
-// focused window. The gaps between windows glow faintly green.
-//
-// The windows stand in the rain (specs/depth.md): each shelters the rain
-// below it, deeper and softer as focus lifts it, and the rain's light lies
-// on its glass. The near columns shift a few pixels more than the far ones
-// as a window is dragged. The code is calm while you work and shines
-// when windows move (SPEC.md, "Calm"): a moving window drags the rain beside it along and leaves
-// a bright wake, and landing bursts glyphs out from the window's edge, brief,
-// then calm. The rest is soft: opening or taking focus brightens the rain
-// round a window for a moment, closing leaves a glow that fades, and the rain
-// brightens a little as you speak. Typing has no answer. Each window's frame
-// is a phosphor edge that catches the rain passing behind its glass.
+// focused window. The gaps between windows glow faintly green. The windows
+// stand in the rain, lit from above with it (specs/depth.md).
 
 const vec3 HEAD = vec3(0.78, 1.0, 0.84);
 // Where the light comes from: above, with the rain, a little to the right.
@@ -46,6 +36,15 @@ vec3 drops(float y, float cellH, float span, float period, float phase, float ta
     return vec3(fade * fade * (0.35 + 0.65 * fade), 1.0 - step(cellH, behind), floor(behind / cellH));
 }
 
+// How much of character `code` covers the glyph cell, `cell` pixels big, at
+// `at` (in cells).
+float inCell(vec2 at, vec2 cell, int code) {
+    vec2 box = cell * vec2(0.62, 0.7);
+    vec2 q = (fract(at) - 0.5) * cell + box * 0.5;
+    float inBox = step(0.0, min(q.x, q.y)) * step(max(q.x - box.x, q.y - box.y), 0.0);
+    return glyph(code, q / box) * inBox;
+}
+
 // One column of glyph cells `cell` pixels big, at `at` in cells (x across
 // the column, y down it), with its drops. Returns the light in the tail, the
 // light in the head and the column's soft glow, which falls to nothing at the
@@ -59,10 +58,7 @@ vec3 column(vec2 at, vec2 cell, float id, float span, float period, float phase,
     // it at the head and older characters up its tail, so the text falls
     // with the drop.
     int start = int(hash(vec2(id, 3.3)) * float(feedCount));
-    vec2 box = cell * vec2(0.62, 0.7);
-    vec2 q = (fract(at) - 0.5) * cell + box * 0.5;
-    float inBox = step(0.0, min(q.x, q.y)) * step(max(q.x - box.x, q.y - box.y), 0.0);
-    float ink = glyph(feedChar(start + int(lit.z)), q / box) * inBox;
+    float ink = inCell(at, cell, feedChar(start + int(lit.z)));
     return vec3(ink * lit.x, ink * lit.y, glow);
 }
 
@@ -112,10 +108,7 @@ vec2 nearCell(vec2 px, float shift) {
 // How much of a character of the agents' text covers px in that cell.
 float nearInk(vec2 px, float shift) {
     vec2 at = vec2(px.x + shift, px.y) / NEAR_RAIN.xy;
-    vec2 box = NEAR_RAIN.xy * vec2(0.62, 0.7);
-    vec2 q = (fract(at) - 0.5) * NEAR_RAIN.xy + box * 0.5;
-    float inBox = step(0.0, min(q.x, q.y)) * step(max(q.x - box.x, q.y - box.y), 0.0);
-    return glyph(feedChar(int(hash(floor(at) + 7.7) * float(feedCount))), q / box) * inBox;
+    return inCell(at, NEAR_RAIN.xy, feedChar(int(hash(floor(at) + 7.7) * float(feedCount))));
 }
 
 // The rain answering what happened, at px, whose near glyph cell is centred
@@ -123,8 +116,6 @@ float nearInk(vec2 px, float shift) {
 // and the glyphs a landing bursts, their light (z) and how white-hot (w).
 vec4 answers(vec2 px, vec2 cell) {
     vec4 a = vec4(0.0);
-    // Newest first: the ring is in the order things happened, so once one is
-    // older than the longest answer (1.2 s) every one before it is too.
     for (int k = impulseCount - 1; k >= 0; k--) {
         vec4 e = impulses[k];
         int kind = impulseKinds[k];
@@ -188,9 +179,7 @@ vec4 backdrop(vec2 px) {
         // reach of where the window was in the last 0.14 s (its last ghost's lag).
         if (d < 0.0 || edgeDistance(w) > glowReach(0.8, 30.0) + speed * 0.14) continue;
         for (int k = 1; k <= 4; k++) {
-            vec4 ghost = w.rect;
-            ghost.xy -= v * 0.035 * float(k);
-            wake = max(wake, exp(-max(rectDistance(px, ghost, w.rounding), 0.0) / 30.0) * (1.0 - 0.2 * float(k)) * pace);
+            wake = max(wake, exp(-max(rectDistance(px, ago(w, 0.035 * float(k)), w.rounding), 0.0) / 30.0) * (1.0 - 0.2 * float(k)) * pace);
         }
     }
     float nearest = seen.nearest;
@@ -202,7 +191,7 @@ vec4 backdrop(vec2 px) {
 
     // A dragged window moves the viewpoint, so the near columns shift a few
     // pixels more than the far ones.
-    float shift = (focusedIndex >= 0 ? window(px, focusedIndex).velocity.x * 0.003 : 0.0) + pull;
+    float shift = focusVelocity().x * 0.003 + pull;
 
     // Three distances: far columns small, slow and out of focus; near ones
     // large and fast, at the windows' depth, so never behind their glass.
@@ -308,11 +297,9 @@ vec4 backdrop(vec2 px) {
 // it never lies over the text of a window beneath.
 vec4 frame(vec2 px, int i) {
     Window w = window(px, i);
-    vec4 r = w.rect;
-    float rounding = w.rounding;
-    float d = rectDistance(px, r, rounding);
+    float d = edgeDistance(w);
     if (d < -2.0 || d > 48.0) return vec4(0.0);
-    vec2 n = edgeNormal(px, r, rounding);
+    vec2 n = edgeNormal(px, w.rect, w.rounding);
     bool focus = i == focusedIndex;
     float lift = w.lift;
 
@@ -327,7 +314,7 @@ vec4 frame(vec2 px, int i) {
 
     // The rain just behind the glass's edge, seen bent through its outer
     // pixels and caught by the line.
-    float edge = (1.0 - smoothstep(0.0, 6.0, d)) * smoothstep(-2.0, 0.0, d);
+    float edge = glassSide(d, 6.0);
     vec3 behind = d < 10.0 ? worldAt(px - n * (max(d, 0.0) + 8.0)).rgb - background : vec3(0.0);
     vec3 glow = (tint * strength + behind * 4.0) * line;
     float a = clamp(max(edge * 0.85, (1.0 - smoothstep(0.0, 1.0, x)) * min(strength, 1.0)), 0.0, 1.0);

@@ -1,38 +1,31 @@
 #version 300 es
-// omarchy-cinema contract 11
+// omarchy-cinema contract 12
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
 //
-// The line above is the contract's version. A film's backdrop.frag says the
-// version it was written for with the same line as its first, and the plugin
-// draws only a film written for its own. A change to what a film is given or can call is
-// a new version, and the films that ship move to it in the same change.
+// The line above is the contract's version; a film's first line says the
+// version it is written for, and the plugin draws only a film written for
+// its own. A change to what a film is given or can call is a new version.
 //
 // Lengths are logical pixels from the screen's top left. The windows are the
-// ones Hyprland is drawing on this screen in this frame, where it is drawing
-// them: mid-animation, mid-drag, sliding between workspaces, fading out after
-// closing; window(px, i) says all of each (below). `focused` is the focused window's rect
-// (x, y, w, h), easing to a new window when focus moves and then following it
-// exactly; with no focused window it is a rect in the middle of the screen
-// (focusAlpha says how present it is).
-// `reserved` is the room the bar and other panels keep along each edge (top,
-// right, bottom, left): the bar's lower edge is at y = reserved.x, and a
-// backdrop can light it.
+// ones Hyprland draws on this screen in this frame, where it draws them
+// (mid-animation, mid-drag, sliding between workspaces, fading out after
+// closing); window(px, i) says all of each. `focused` is the focused window's
+// rect (x, y, w, h), easing to a new window when focus moves and then
+// following it exactly; with none it is a rect in the middle of the screen
+// (focusAlpha says how present it is). `reserved` is the room the bar and
+// other panels keep along each edge (top, right, bottom, left): the bar's
+// lower edge is at y = reserved.x.
 //
-// `time` is the world's own clock, in seconds, and it runs on the desktop's:
-// while windows move, open, close, take focus or slide between workspaces it
-// runs at the speed of the clock on the wall, and once they hold still it
-// eases to a stop in about two seconds, and starts again over a fraction of
-// one. So the
-// world's own motion, built on it, moves while the desktop does and holds
-// still while it does, when the plugin draws nothing at all. What happened
+// `time` is the world's own clock, in seconds: it runs at the wall clock's
+// speed while windows move, open, close, take focus or slide between
+// workspaces, and eases to a stop about two seconds after they hold still,
+// when the plugin draws nothing. It wraps every hour (a float counting weeks
+// of seconds loses the precision to animate), so build motion from
+// cycle(seconds) with a period that divides 3600 (1, 2, 3, 4, 5, 6, 8, 9,
+// 10, 12, 15, 16, 18, 20, 24, 30, 36, 40, 45, 48, 60, ...). What happened
 // lately (below) has its own ages, on the wall's clock.
-// `time` wraps every hour, because Hyprland runs for weeks and a float
-// counting seconds that long loses the precision to animate smoothly. So
-// build motion from cycle(seconds) with a period that divides 3600 (1, 2, 3,
-// 4, 5, 6, 8, 9, 10, 12, 15, 16, 18, 20, 24, 30, 36, 40, 45, 48, 60, ...), and
-// the wrap never shows.
 
 precision highp float;
 precision highp sampler2D;
@@ -66,10 +59,11 @@ uniform int focusedIndex;
 // falls with it; with no window focused on this screen it eases to 0.
 uniform float focusAlpha;
 
-// What happened lately (specs/depth.md): the last 32 things, newest last, each
-// a point, its age in seconds (it is gone after 3), a strength from 0 to 1 and
-// a kind. Every film answers each kind its own way; while one is alive the
-// plugin draws the whole world every frame.
+// What happened lately (specs/depth.md): the last 32 things, newest last (so
+// a loop from the newest can stop at the first older than its longest
+// answer), each a point, its age in seconds (it is gone after 3), a strength
+// from 0 to 1 and a kind. Every film answers each kind its own way; while one
+// is alive the plugin draws the whole world every frame.
 const int OPEN = 1;   // a window opened, at its middle
 const int CLOSE = 2;  // a window closed, at its middle
 const int LAND = 3;   // a window stopped moving, at its middle; stronger the faster it came
@@ -194,6 +188,16 @@ Window window(vec2 px, int i) {
 // its fade gives d.
 float edgeDistance(Window w) {
     return w.d - (1.0 - w.alpha) * 200.0;
+}
+
+// Window w's rect `seconds` ago, at the velocity it moves at now.
+vec4 ago(Window w, float seconds) {
+    return w.rect - vec4(w.velocity * seconds, 0.0, 0.0);
+}
+
+// How fast the focused window moves, px a second (0 with none).
+vec2 focusVelocity() {
+    return focusedIndex < 0 ? vec2(0.0) : windowTexels[3 * focusedIndex + 2].xy;
 }
 
 // What every film asks of the windows at a point, gathered by see() as its
@@ -344,6 +348,12 @@ float openingFront(float d, float age) {
 
 float focusWarmth(float d, vec4 e) {
     return exp(-d / 30.0) * swell(e.z, 0.2, 0.9) * e.w;
+}
+
+// For frame(): how much of the glass's side a point `d` px from the window's
+// edge is, its outer `width` px, where a frame shows the world bent through.
+float glassSide(float d, float width) {
+    return (1.0 - smoothstep(0.0, width, d)) * smoothstep(-2.0, 0.0, d);
 }
 
 // The world as the backdrop drew it in this frame, at half the screen's size

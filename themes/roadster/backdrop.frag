@@ -1,31 +1,12 @@
-// omarchy-cinema contract 11
+// omarchy-cinema contract 12
 // Roadster: the 2026 Roadster's cockpit, drawn like a fighter jet's display.
 // A floor of red dots runs out to a thin white horizon and rushes toward the
 // viewer, with streaks of speed along it. A wireframe wedge turns slowly on
 // the floor behind the focused window and glides after it. Every window sits
 // in faint red corner brackets; a tighter, brighter lock frame holds the
 // focused one, slides to the next window when focus moves, and fades as the
-// focus does.
-//
-// The windows stand on the floor in the horizon's light (specs/depth.md),
-// calmly (SPEC.md, "Calm"). Each shadows the dots
-// and streaks toward the viewer, further and softer as focus lifts it. The
-// floor's lanes bow out round each window's foot, so the dots and the speed
-// streaks route round it, and the floor's own lines run from each foot's
-// corners toward the viewer. Moving a window is where the cockpit shines: the window pulls the floor after it, throws speed
-// lines back from its trailing edge and a flight path marker rides ahead of
-// it; at touchdown its seams flash and a shock runs out over the floor, gone
-// within 1.2 s. Behind
-// each window the world draws the sheen on its glass, a streak that slides
-// as the window moves and the horizon's glow along its upper glass. Each
-// window's edge is the cockpit's (frame()): a fine, quiet red line as the
-// border was, lit from the horizon, the floor bending through its outer
-// pixels, and light passing behind it running into it.
-//
-// Everything else is answered briefly and softly: opening closes faint
-// target brackets onto the window, closing lets one red ring spread where it
-// was, focus warms the window's edge. Typing gets no answer, so nothing moves
-// while you work.
+// focus does. The windows stand on the floor in the horizon's light
+// (specs/depth.md).
 
 const vec3 WHITE = vec3(1.0, 0.94, 0.94);
 const float CAMERA = 15.0; // the eye's height over the floor, in grid cells
@@ -96,8 +77,6 @@ vec2 wedge(vec2 px, vec2 at, float size) {
 vec3 answers(vec2 px, vec3 red, float horizon, out float lit) {
     vec3 light = vec3(0.0);
     lit = 0.0;
-    // Newest first: the ring is newest last, so past the first one older
-    // than the longest answer (a landing's, 1.2 s) every one is.
     for (int k = impulseCount - 1; k >= 0; k--) {
         vec4 e = impulses[k];
         int kind = impulseKinds[k];
@@ -253,7 +232,7 @@ vec4 backdrop(vec2 px) {
         float depth = CAMERA * resolution.y / below;
         // A dragged window pulls the floor after it (in cells, so near rows
         // shift more); the lanes bow round the windows' feet.
-        float lean = focusedIndex < 0 ? 0.0 : window(px, focusedIndex).velocity.x * 0.0006;
+        float lean = focusVelocity().x * 0.0006;
         vec2 fp = vec2(px.x - bend, px.y);
         vec2 cell = vec2((fp.x - resolution.x * 0.5) * CAMERA / below + lean, depth + drive);
         // The nearest dot projected back onto the screen, so every dot is
@@ -366,15 +345,14 @@ vec4 backdrop(vec2 px) {
 vec4 frame(vec2 px, int i) {
     Window w = window(px, i);
     vec4 r = w.rect;
-    float rounding = w.rounding;
-    float d = rectDistance(px, r, rounding);
+    float d = edgeDistance(w);
     if (d < -2.0 || d > 20.0) return vec4(0.0);
     bool focus = i == focusedIndex;
     vec3 tint = focus ? vec3(1.0, 0.18, 0.18) : vec3(0.42, 0.12, 0.12);
     vec3 col = accent * exp(-max(d, 0.0) / 8.0) * step(0.0, d) * (focus ? 0.2 : 0.05);
     float a = 0.0;
     if (d < 10.0) {
-        vec2 n = edgeNormal(px, r, rounding);
+        vec2 n = edgeNormal(px, r, w.rounding);
         float horizon = resolution.y * 0.42;
         float toward = 0.55 + 0.45 * max(dot(n, vec2(0.0, r.y + r.w * 0.5 > horizon ? -1.0 : 1.0)), 0.0);
         // One look at the world 12 px in behind the glass: what the edge
@@ -382,7 +360,7 @@ vec4 frame(vec2 px, int i) {
         vec3 behind = worldAt(px - n * 12.0).rgb;
         float passing = smoothstep(0.05, 0.25, dot(behind, vec3(0.3, 0.5, 0.2)));
         float line = glowLine(abs(d - 0.5), 0.9) * toward * (focus ? 0.55 : 0.5) * (1.0 + 0.6 * w.lift);
-        float edge = (1.0 - smoothstep(0.0, 4.0, d)) * smoothstep(-2.0, 0.0, d);
+        float edge = glassSide(d, 4.0);
         col += behind * 1.2 * edge * 0.85 + tint * line + mix(tint, WHITE, 0.5) * line * passing * 2.0;
         a = clamp(max(edge * 0.85, line * (1.0 + passing)), 0.0, 1.0);
     }

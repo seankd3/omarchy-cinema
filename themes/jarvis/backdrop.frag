@@ -1,30 +1,10 @@
-// omarchy-cinema contract 11
+// omarchy-cinema contract 12
 // Jarvis: a holographic globe in a gyroscope of rings, turning behind the
 // focused window and sized to it. It glows through the glass and past the
 // window's edges; light pools in the seams between windows and wakes the hex
-// lattice near them; dust drifts through the beam.
-//
-// The windows stand in the workshop's light (specs/depth.md), calmly
-// (SPEC.md, "Calm"). The arc reactor glows up from the
-// table below the screen, so each window shades the lattice, the dust and
-// the light pooled in the seams on its far side, further and softer as focus
-// lifts it; the holograms (globe, rings) are light and cast no shadow. Holo
-// lines hold each window, running along its edges in the seams and
-// converging on its corners. Moving a window is where the workshop
-// shines: the window pulls the hologram after it and the lattice less,
-// swings the rings like a carousel and leaves dashed afterimages over
-// scanned light; when it lands a white-hot shock runs out through the
-// lattice and its seams flash, gone within 1.2 s. Behind each window the world draws the sheen on its glass, a
-// streak that slides as the window moves and the reactor's glow along its
-// lower glass, seen only through the glass. Each window's edge is a
-// holographic pane's (frame()): the workshop bends through its outer pixels,
-// its rim is cyan running to amber on the focused window as the border was,
-// brightest toward the reactor, and light passing behind it runs into the rim.
-//
-// Everything else is answered briefly and softly: opening settles a dashed
-// ring onto the window's edge, closing lets one spread and fade where it
-// was, focus warms the window's edge. Typing gets no answer, so nothing moves
-// while you work.
+// lattice near them; dust drifts through the beam. The arc reactor below the
+// screen lights the workshop (specs/depth.md), so each window shades what lies
+// beyond it; the holograms are light and cast no shadow.
 
 const vec3 AMBER = vec3(1.0, 0.70, 0.28);
 const vec3 HOT = vec3(0.86, 0.97, 1.0); // the reactor's white-hot core
@@ -143,8 +123,7 @@ vec3 afterimage(vec2 px, Window w, vec3 cyan, inout float lattice) {
         float wash = 0.0;
         float k = min(speed / 1200.0, 1.0) * w.alpha * smoothstep(0.0, 3.0, w.d);
         for (int g = 1; g <= 4; g++) {
-            vec4 ghost = w.rect;
-            ghost.xy -= v * 0.04 * float(g);
+            vec4 ghost = ago(w, 0.04 * float(g));
             float d = rectDistance(px, ghost, w.rounding);
             float fade = 1.0 - 0.22 * float(g);
             // Dashes run along each edge of the outline.
@@ -166,8 +145,6 @@ vec3 afterimage(vec2 px, Window w, vec3 cyan, inout float lattice) {
 vec3 answers(vec2 px, vec3 cyan, out float lattice) {
     vec3 light = vec3(0.0);
     lattice = 0.0;
-    // Newest first: the ring is newest last, so past the first one older
-    // than the longest answer (a landing's, 1.2 s) every one is.
     for (int k = impulseCount - 1; k >= 0; k--) {
         vec4 e = impulses[k];
         int kind = impulseKinds[k];
@@ -249,7 +226,7 @@ vec4 backdrop(vec2 px) {
     lattice += swept;
     // The world as a dragged window pulls it: the hologram, nearest, moves
     // most; the lattice and the dust behind it less. Never the windows.
-    vec2 pulled = focusedIndex < 0 ? vec2(0.0) : window(px, focusedIndex).velocity;
+    vec2 pulled = focusVelocity();
     vec2 world = px + pulled * 0.003;
     vec2 holoAt = px + pulled * 0.01;
 
@@ -261,7 +238,7 @@ vec4 backdrop(vec2 px) {
     float Rg = reach * 0.45;
     // The rings swing with the focused window as it moves, like a carousel
     // pushed round, and settle back when it stops.
-    float swing = focusedIndex < 0 ? 0.0 : clamp(window(px, focusedIndex).velocity.x * 0.00016, -0.4, 0.4);
+    float swing = clamp(pulled.x * 0.00016, -0.4, 0.4);
 
     // Deep navy, lifted around the globe and darker toward the corners.
     vec3 base = background * (0.55 + 0.6 * exp(-r / (reach * 1.8)) * mix(1.0, shade, 0.6));
@@ -355,8 +332,7 @@ vec4 backdrop(vec2 px) {
 vec4 frame(vec2 px, int i) {
     Window w = window(px, i);
     vec4 r = w.rect;
-    float rounding = w.rounding;
-    float d = rectDistance(px, r, rounding);
+    float d = edgeDistance(w);
     if (d < -2.0 || d > 24.0) return vec4(0.0);
     bool focus = i == focusedIndex;
     float diag = clamp(dot(px - r.xy, vec2(0.7071)) / max((r.z + r.w) * 0.7071, 1.0), 0.0, 1.0);
@@ -364,14 +340,14 @@ vec4 frame(vec2 px, int i) {
     vec3 col = tint * exp(-max(d, 0.0) / 9.0) * step(0.0, d) * (focus ? 0.22 : 0.05);
     float a = 0.0;
     if (d < 12.0) {
-        vec2 n = edgeNormal(px, r, rounding);
+        vec2 n = edgeNormal(px, r, w.rounding);
         float toward = 0.55 + 0.45 * max(dot(n, normalize(reactor() - r.xy - r.zw * 0.5 + vec2(0.0, 1e-3))), 0.0);
         // One look at the world 12 px in behind the glass: what the edge
         // bends into view, and what light is passing there.
         vec3 behind = worldAt(px - n * 12.0).rgb;
         float passing = smoothstep(0.12, 0.5, dot(behind, vec3(0.3, 0.5, 0.2)));
         float rim = glowLine(abs(d - 0.5), 1.0, HALO) * toward * (focus ? 0.95 : 0.6) * (1.0 + 0.6 * w.lift);
-        float edge = (1.0 - smoothstep(0.0, 5.0, d)) * smoothstep(-2.0, 0.0, d);
+        float edge = glassSide(d, 5.0);
         col += behind * 1.1 * edge * 0.9 + tint * rim + mix(tint, behind, 0.5) * rim * passing * 1.8;
         a = clamp(max(edge * 0.9, rim), 0.0, 1.0);
     }

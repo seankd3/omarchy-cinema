@@ -1,37 +1,15 @@
-// omarchy-cinema contract 11
+// omarchy-cinema contract 12
 // Oblivion: Tower 49 at dawn. A high pale sky over a sea of cloud that slides
 // slowly toward the tower, the sun low on the horizon and the broken moon faint
 // in the daylight. Every window is a pane of the tower's glass, traced by a fine
 // blue line and lit along the edges that face the sun; round the focused one a
-// drone's sensor ring circles.
+// drone's sensor ring circles. The panes float in the sun's light
+// (specs/depth.md).
 //
 // The theme is light, so the backdrop paints, not glows: lines are ink mixed
 // over the sky, and light is a lift toward white. Under the windows only a
 // near white wash of the sky's light shows, so the frosted glass reads as
 // white paper with dark text on it.
-//
-// The panes float in the sun's light (specs/depth.md), calmly
-// (SPEC.md, "Calm"). Each casts a glass shadow toward
-// the viewer and away from the sun: a slate patch, on the cloud rimmed by a
-// gold caustic, further and softer as focus lifts the pane, and a lifted
-// pane glows brighter against the sky. The cloud deck flows round each pane,
-// bending and curling at its edges, and piles up white against them where it
-// catches the sun. Moving a pane is where the sky shines: the pane pulls the deck after it,
-// draws vapour trails from its corners and parts the cloud behind it; when it
-// lands a pressure wave runs out with a bright crest and the sun flashes gold
-// off its edges, gone within 1.2 s. Under each pane the glass catches a sheen that slides as the pane
-// moves and the sun's warm glow along the side facing it. Each pane's edge
-// is Tower 49's glass (frame()): a fine blue line, the sky bending through
-// the pane's thickness, the sun glinting on the edge that faces it, and the
-// warm light of a focus outside catching it.
-//
-// Everything else is answered briefly and softly: opening settles the
-// drone's scan ring onto the pane, closing leaves a faint ring of vapour,
-// focus warms the pane's edge. Typing gets no answer, so nothing moves while
-// you work. The blue ink of an answer fades
-// out in the last 16 px before a pane, so the frost cannot pull it under
-// text; its light may come right up to the glass, since white only raises
-// the text's contrast.
 
 const vec3 ZENITH = vec3(0.60, 0.70, 0.81);
 const vec3 SKY = vec3(0.80, 0.86, 0.91);
@@ -177,8 +155,6 @@ float ink(float d, float w) {
 // the drone's blue ink it lays there (z).
 vec3 answers(vec2 px) {
     vec3 a = vec3(0.0);
-    // Newest first: the ring is newest last, so past the first one older
-    // than the longest answer (a landing's, 1.2 s) every one is.
     for (int k = impulseCount - 1; k >= 0; k--) {
         vec4 e = impulses[k];
         int kind = impulseKinds[k];
@@ -241,9 +217,7 @@ void wake(vec2 px, Window w, inout float glow, inout float blue, inout float par
             blue += exp(-dist / (w * 2.6)) * (1.0 - t) * 0.7 * k;
         }
         for (int g = 1; g <= 3; g++) {
-            vec4 ghost = r;
-            ghost.xy -= v * 0.06 * float(g);
-            float d = rectDistance(px, ghost, w.rounding);
+            float d = rectDistance(px, ago(w, 0.06 * float(g)), w.rounding);
             part = max(part, (1.0 - smoothstep(-30.0, 30.0, d)) * (1.0 - 0.25 * float(g)) * k);
         }
     }
@@ -279,7 +253,7 @@ vec4 backdrop(vec2 px) {
 
     // A dragged pane pulls the deck after it, near rows more than far ones;
     // the sky and the sun stay put.
-    float lean = focusedIndex < 0 ? 0.0 : window(px, focusedIndex).velocity.x * 0.012;
+    float lean = focusVelocity().x * 0.012;
     // The sun is low beyond the deck, so each puff's far rim catches it: where
     // its tops climb going down the screen. Their slope is a derivative, which
     // some drivers leave undefined unless every pixel of a 2x2 quad takes it,
@@ -320,6 +294,7 @@ vec4 backdrop(vec2 px) {
         // outside them take: under a pane it would cost more than it saves.
         float shadow = 0.0, trail = 0.0, fringe = 0.0, part = 0.0;
         for (int i = 0; i < windowCount; i++) {
+            if (!reaches(reached, i)) continue;
             Window w = window(px, i);
             vec2 away = normalize(vec2((w.rect.x + w.rect.z * 0.5 - sun.x) / resolution.x, 0.6));
             shadow = max(shadow, windowShadow(px, w, away * (24.0 + 56.0 * w.lift), 22.0 + 46.0 * w.lift));
@@ -419,11 +394,10 @@ vec4 backdrop(vec2 px) {
 vec4 frame(vec2 px, int i) {
     Window w = window(px, i);
     vec4 r = w.rect;
-    float rounding = w.rounding;
-    float d = rectDistance(px, r, rounding);
+    float d = edgeDistance(w);
     if (d < -2.0 || d > 14.0) return vec4(0.0);
     bool focus = i == focusedIndex;
-    vec2 n = edgeNormal(px, r, rounding);
+    vec2 n = edgeNormal(px, r, w.rounding);
     float down = clamp((px.y - r.y) / max(r.w, 1.0), 0.0, 1.0);
     vec3 tint = focus ? mix(vec3(0.24, 0.60, 0.82), vec3(0.65, 0.85, 0.95), down) : vec3(0.62, 0.70, 0.77);
     // One look at the world 12 px out, beside the glass: what its edge bends
@@ -433,7 +407,7 @@ vec4 frame(vec2 px, int i) {
     tint = mix(tint, GOLD, warm * 0.85);
     float facing = max(dot(n, normalize(sunAt() - r.xy - r.zw * 0.5 + vec2(0.0, -1e-3))), 0.0);
     float line = (1.0 - smoothstep(0.4, 1.4, abs(d - 0.5))) * (focus ? 0.95 : 0.7) * (1.0 + 0.8 * warm);
-    float edge = (1.0 - smoothstep(0.0, 4.0, d)) * smoothstep(-2.0, 0.0, d);
+    float edge = glassSide(d, 4.0);
     vec3 bent = mix(outside, vec3(1.0), 0.3);
     float glint = line * facing * (0.5 + 0.5 * w.lift);
     float halo = exp(-max(d, 0.0) / 7.0) * step(0.0, d) * (focus ? 0.12 : 0.0) * (1.0 + 2.0 * warm);
