@@ -72,9 +72,9 @@ Hyprland only composites.
   window and past its softness: 6 to 22% off a drag.
 
 At 2880x1800, 10 windows moving, GPU at about 1000 MHz (2026-11-05), ms
-a frame: half-size world 1.29 (Tron) to 2.25 (Evangelion), full-size
-1.68 to 2.71, frost 0.45, windows 1.15, frames 0.14 to 0.23, top layers
-0.36; whole frame 5.16 to 7.21, at 754 MHz an estimated 6.33 to 8.73
+a frame: half-size world 1.29 (Tron) to 2.05 (Evangelion), full-size
+1.68 to 2.71, frost 0.45, windows 1.15, frames 0.14 to 0.22, top layers
+0.36; whole frame 5.16 to 6.70, at 754 MHz an estimated 6.33 to 8.16
 (Measuring).
 
 Measured and not kept: the world at half size under Tron's and the Matrix's
