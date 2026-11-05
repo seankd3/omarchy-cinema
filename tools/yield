@@ -52,9 +52,10 @@ within() {
 
 present() {
   local session
-  session=$(loginctl show-user "$(id -un)" -p Display --value 2>/dev/null)
-  [[ -n $session && $(loginctl show-session "$session" -p LockedHint --value 2>/dev/null) == yes ]] && return 1
-  [[ $(timeout 5 hyprctl -j monitors 2>/dev/null | jq '[.[] | select(.dpmsStatus)] | length' 2>/dev/null) != 0 ]]
+  # A query that does not answer within a second counts as someone there.
+  session=$(timeout 1 loginctl show-user "$(id -un)" -p Display --value 2>/dev/null)
+  [[ -n $session && $(timeout 1 loginctl show-session "$session" -p LockedHint --value 2>/dev/null) == yes ]] && return 1
+  [[ $(timeout 1 hyprctl -j monitors 2>/dev/null | jq '[.[] | select(.dpmsStatus)] | length' 2>/dev/null) != 0 ]]
 }
 
 # The queue's runner, unless it runs.
