@@ -144,7 +144,7 @@ uninstall refused in the session and run after logging out, and every path
 the install changed back as it was.
 
 Not yet tested:
-- x86_64 and GPUs other than NVIDIA's.
+- Running on x86_64, and GPUs other than NVIDIA's.
 - Transitions on a real desktop: glassy, opaque, glassy; film to film to
   stock; Files already running; no animations on and off; a broken shader;
   a Hyprland update.

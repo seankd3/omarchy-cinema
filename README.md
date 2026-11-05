@@ -14,9 +14,9 @@ film moves while your windows do.
 
 ## Install
 
-Needs Omarchy 4 with Hyprland 0.57. This is a beta: it has been built and
-used on one aarch64 laptop with an NVIDIA GPU, and x86_64 and other GPUs are
-not tested yet. The backdrop is a Hyprland plugin, and a plugin loads only at
+Needs Omarchy 4 with Hyprland 0.57. This is a beta, used on one aarch64
+laptop with an NVIDIA GPU; it builds on x86_64, untested there and on
+other GPUs. The backdrop is a Hyprland plugin, and a plugin loads only at
 login, so the install runs from a console:
 
 1. `git clone https://github.com/seankd3/omarchy-cinema ~/omarchy-cinema`
