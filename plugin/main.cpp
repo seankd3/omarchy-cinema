@@ -992,12 +992,16 @@ void main() {
         glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
     }
 
-    // Fills the windows' uniform buffer, bound, with the shapes, three vec4s
-    // each: (x, y, w, h), (alpha, rounding, lift, depth) and (velocity x, y),
-    // then which of the first 32 reach each of 32 by 32 tiles of a screen
-    // `size` across: those within the film's REACH of them and of where they
-    // were in the last 0.3 s. The whole block, as a draw reads all of it.
-    void uploadShapes(const std::vector<SShape>& shapes, const Vector2D& size) {
+    // What every draw of this frame reads alike: the windows' block (0,
+    // bound), three vec4s a shape, (x, y, w, h), (alpha, rounding, lift,
+    // depth), (velocity x, y, windowFlare()'s swell and landing), then which
+    // of the first 32 reach each of the monitor's 32 by 32 tiles (within the
+    // film's REACH of them and of where they were in the last 0.3 s); and the
+    // impulses, kept by the film's programs, aged by the monotonic clock (not
+    // `time`, which wraps), each naming its window by its place in `shapes`.
+    void uploadShapes(const PHLMONITOR& monitor, const std::vector<SShape>& shapes) {
+        const auto size = monitor->m_size;
+        const auto now  = std::chrono::steady_clock::now();
         struct {
             std::array<float, WINDOWS_MAX * 12> shapes{};
             std::array<uint32_t, 32 * 32>       tiles{};
@@ -1012,7 +1016,36 @@ void main() {
                 for (int x = tile(s.rect[0] - r, size.x); x <= tile(s.rect[0] + s.rect[2] + r, size.x); x++)
                     block.tiles[y * 32 + x] |= 1U << i;
         }
+        std::array<float, 4 * IMPULSES> impulses{};
+        std::array<int, IMPULSES>       kinds{}, windows{};
+        int                             count = 0;
+        for (const auto& e : g->impulses) {
+            const auto  found = e.window ? std::ranges::find(shapes, e.window, &SShape::id) : shapes.end();
+            const int   i     = found == shapes.end() ? -1 : int(found - shapes.begin());
+            const float age   = std::chrono::duration<float>(now - e.start).count();
+            const auto  at    = e.at - monitor->m_position;
+            std::ranges::copy(std::array{float(at.x), float(at.y), age, e.strength}, impulses.begin() + 4 * count);
+            kinds[count]     = e.kind;
+            windows[count++] = i;
+            if (i < 0 || age > 1.F)
+                continue;
+            float*      flare = &block.shapes[i * 12 + 10];
+            const float rise  = std::clamp(age / 0.12F, 0.F, 1.F);
+            if (e.kind == IMPULSE_LAND)
+                flare[1] += e.strength * std::exp(-age * 4.F);
+            else if (e.kind != IMPULSE_CLOSE)
+                flare[0] += 0.6F * rise * rise * (3.F - 2.F * rise) * std::exp(-age * 3.5F) * (e.kind == IMPULSE_OPEN ? 1.F : e.strength);
+        }
         glBufferData(GL_UNIFORM_BUFFER, sizeof(block), &block, GL_STREAM_DRAW);
+        for (const auto* p : {&g->gpu.backdrop, &g->gpu.frame}) {
+            if (!p->id)
+                continue;
+            glUseProgram(p->id);
+            glUniform4fv(p->impulses, IMPULSES, impulses.data());
+            glUniform1iv(p->impulseKinds, IMPULSES, kinds.data());
+            glUniform1iv(p->impulseWindows, IMPULSES, windows.data());
+            glUniform1i(p->impulseCount, count);
+        }
     }
 
     // A voice reading: the loudness now (whether speech is on, which the
@@ -1228,12 +1261,11 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             g->glassShader = wanted;
     }
 
-    // Everything the contract gives a film, for program `p`, drawing `area`
-    // (logical px) placed by `proj` on `monitor`, at `now`. The textures are
-    // on units 4 to 6: the world drawn at half size, the lettering and the
-    // feed; the windows are uniform block 0.
-    void setUniforms(const SProgram& p, const PHLMONITOR& monitor, const SScene& scene, const SAnswer& answer, const Mat3x3& proj, const CBox& area,
-                     std::chrono::steady_clock::time_point now) {
+    // Everything else the contract gives a film (uploadShapes()), for program
+    // `p`, drawing `area` (logical px) placed by `proj` on `monitor`. The
+    // textures are on units 4 to 6: the world drawn at half size, the
+    // lettering and the feed.
+    void setUniforms(const SProgram& p, const PHLMONITOR& monitor, const SScene& scene, const SAnswer& answer, const Mat3x3& proj, const CBox& area) {
         const auto& gpu  = g->gpu;
         const auto& kept = g->gpu.coarse[monitor->m_id];
         glUseProgram(p.id);
@@ -1256,26 +1288,6 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         glUniform1i(p.feedCount, gpu.glyphsUploaded && kept.feedUploaded ? int(kept.feedCount) : 0);
         glUniform1i(p.feedPos, int(kept.feedPos));
         glUniform1f(p.voice, answer.voice);
-        // The impulses with their ages now, on this monitor's coordinates:
-        // ages from the monotonic clock, so the hourly wrap of `time` never
-        // reaches them. Each names its window by its place in this scene.
-        std::array<float, 4 * IMPULSES> impulses{};
-        std::array<int, IMPULSES>       kinds{}, windows{};
-        int                             count = 0;
-        for (const auto& impulse : g->impulses) {
-            const auto found        = impulse.window ? std::ranges::find(scene.shapes, impulse.window, &SShape::id) : scene.shapes.end();
-            windows[count]          = found == scene.shapes.end() ? -1 : int(found - scene.shapes.begin());
-            const auto at           = impulse.at - monitor->m_position;
-            impulses[4 * count + 0] = float(at.x);
-            impulses[4 * count + 1] = float(at.y);
-            impulses[4 * count + 2] = std::chrono::duration<float>(now - impulse.start).count();
-            impulses[4 * count + 3] = impulse.strength;
-            kinds[count++]          = impulse.kind;
-        }
-        glUniform4fv(p.impulses, IMPULSES, impulses.data());
-        glUniform1iv(p.impulseKinds, IMPULSES, kinds.data());
-        glUniform1iv(p.impulseWindows, IMPULSES, windows.data());
-        glUniform1i(p.impulseCount, count);
     }
 
     // A pass is a guest in Hyprland's GL context. Hyprland skips binding a
@@ -1396,7 +1408,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             const SGuest guest;
             auto&        gpu = g->gpu;
             glBindBuffer(GL_UNIFORM_BUFFER, gpu.windows);
-            uploadShapes(m_scene.shapes, monitor->m_size);
+            uploadShapes(monitor, m_scene.shapes);
             // The half-size world and the frost are kept, and drawn again
             // only when the world changed, or for a new size or frost target.
             auto&      state     = g->monitors[monitor->m_id];
@@ -1426,9 +1438,8 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
                     coarse.feedPos      = g->feedPos;
                 }
             }
-            const auto now  = std::chrono::steady_clock::now();
             const auto proj = g_pHyprRenderer->projectBoxToTarget(ctx, CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y});
-            const auto set  = [&] { setUniforms(gpu.backdrop, monitor, m_scene, m_answer, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}, now); };
+            const auto set  = [&] { setUniforms(gpu.backdrop, monitor, m_scene, m_answer, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}); };
             if (resized) {
                 if (coarse.fbo) {
                     glDeleteTextures(1, &coarse.texture);
@@ -1561,11 +1572,10 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             const double left = std::ceil(inside.x), top = std::ceil(inside.y);
             const CRegion within(left, top, std::max(std::floor(inside.x + inside.w) - left, 0.0), std::max(std::floor(inside.y + inside.h) - top, 0.0));
             const auto   proj   = g_pHyprRenderer->projectBoxToTarget(ctx, onTarget(area));
-            const auto   now    = std::chrono::steady_clock::now();
             const SGuest guest;
             g_pHyprRenderer->blend(true);
             drawSquare(ctx, g->gpu.coarse[monitor->m_id], ctx.m_data.damage.copy().subtract(within), [&] {
-                setUniforms(g->gpu.frame, monitor, state.drawn, state.answered, proj, area, now);
+                setUniforms(g->gpu.frame, monitor, state.drawn, state.answered, proj, area);
                 glUniform1i(g->gpu.frame.frameWindow, index);
                 glUniform1f(g->gpu.frame.frameAlpha, m_alpha);
                 glUniform1f(g->gpu.frame.frameBorder, m_border);

@@ -41,9 +41,9 @@ uniform vec3 foreground;
 uniform vec4 focused;
 uniform vec4 reserved;
 // Three vec4s a window, at most 256 windows: (x, y, w, h), (alpha,
-// rounding, lift, depth) and (velocity x, y). A uniform block, which every
-// pixel reads as one constant, not a texture each pixel fetches. Read them
-// through the window functions. Then, for 32 by 32 tiles of the screen,
+// rounding, lift, depth) and (velocity x, y, windowFlare()'s sums). A
+// uniform block, which every pixel reads as one constant, not a texture each
+// pixel fetches. Read them through the window functions. Then, for 32 by 32 tiles of the screen,
 // which of windows 0 to 31 reach each (windowsAt()).
 layout(std140) uniform Windows {
     vec4 windowTexels[3 * 256];
@@ -315,16 +315,7 @@ float glassStreak(vec2 px, vec4 r) {
 // How much window i flares from what just happened to it, within a second:
 // focus and opening as a soft swell, landing as `landing` times its strength.
 float windowFlare(int i, float landing) {
-    float flare = 0.0;
-    for (int k = impulseCount - 1; k >= 0; k--) {
-        int kind = impulseKinds[k];
-        vec4 ev = impulses[k];
-        if (ev.z > 1.0) break;
-        if ((kind != FOCUS && kind != OPEN && kind != LAND) || impulseWindows[k] != i) continue;
-        flare += kind == LAND ? landing * ev.w * exp(-ev.z * 4.0)
-            : 0.6 * smoothstep(0.0, 0.12, ev.z) * exp(-ev.z * 3.5) * (kind == OPEN ? 1.0 : ev.w);
-    }
-    return flare;
+    return dot(windowTexels[3 * i + 2].zw, vec2(1.0, landing));
 }
 
 // A soft rise over `rise` seconds and fade until `life`, for brief answers.

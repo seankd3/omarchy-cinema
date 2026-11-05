@@ -125,6 +125,18 @@ def layout():
 OPEN, CLOSE, LAND, FOCUS = range(1, 5)
 
 
+def flare(impulses, i):
+    """Window i's swell and landing in the last second, as main.cpp's
+    uploadShapes() sums them for windowFlare()."""
+    swell = landing = 0.0
+    for _, _, age, strength, kind, owner in impulses:
+        rise = min(max(age / 0.12, 0.0), 1.0)
+        if owner != i or age > 1.0: continue
+        if kind == LAND: landing += strength * np.exp(-age * 4.0)
+        elif kind in (FOCUS, OPEN): swell += 0.6 * rise * rise * (3.0 - 2.0 * rise) * np.exp(-age * 3.5) * (1.0 if kind == OPEN else strength)
+    return swell, landing
+
+
 def framed(theme):
     return re.search(r"\bvec4\s+frame\s*\(", (theme / "backdrop.frag").read_text()) is not None
 
@@ -185,7 +197,7 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
         v = velocity[i] if velocity else (0.0, 0.0)
         data[3 * i] = rect
         data[3 * i + 1] = (1.0, 0.0, 1.0 if i == focused else 0.0, float(len(windows) - 1 - i))
-        data[3 * i + 2] = (*v, 0.0, 0.0)
+        data[3 * i + 2] = (*v, *flare(impulses, i))
         r = reach + 0.3 * float(np.hypot(*v))
         x, y, w, h = rect
         tile = lambda a, across: int(np.clip(np.floor(a / across * 32), 0, 31))
