@@ -37,9 +37,9 @@ small, as the glass's frost; what a frosted window covers is never drawn;
 Hyprland only composites.
 
 - **The plugin makes the frost.** The backdrop draws the world at twice
-  the size of the level as soft as the film's `frost`, a pixel the mean of
-  the screen it covers (contract.glsl's `spread`: Tron's grid had flooded
-  its frost), and makes that level, at its own size, the one level of Hyprland's blur texture that is read:
+  the size of the level as soft as the film's `frost` (Tron's grid takes
+  the mean over each pixel's width, contract.glsl's `spread`, or it floods
+  the frost), and makes that level, at its own size, the one level of Hyprland's blur texture that is read:
   every reader samples it where it reads the screen, so Hyprland queues no
   blur and nothing is copied screen-sized (0.35 to 0.45 ms). The bar and the
   notifications read the same frost (film.lua's xray rule): their layers

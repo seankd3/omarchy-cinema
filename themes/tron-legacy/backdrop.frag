@@ -20,6 +20,25 @@ vec2 floorAt(vec2 px, float horizon) {
     return vec2(x, depth + cycle(16.0) * 8.0 * CELL);
 }
 
+// The integral from 0 to x of a line's crisp core, 1 - smoothstep(0, w, |x|).
+float coreArea(float x, float w) {
+    float u = min(abs(x) / w, 1.0);
+    return sign(x) * (min(abs(x), w) - w * u * u * u * (1.0 - 0.5 * u));
+}
+
+// Lines at every whole number of x, each a crisp core w wide round it, as
+// glowLine's (where they overlap, the nearest one), the mean over x - h to
+// x + h (contract.glsl's spread); w and h in x's units.
+float linesArea(float x, float w) {
+    return floor(x + 0.5) * 2.0 * coreArea(0.5, w) + coreArea(fract(x + 0.5) - 0.5, w);
+}
+
+float lines(float x, float w, float h) {
+    float at = fract(x + 0.5) - 0.5;
+    if (h <= 0.0) return 1.0 - smoothstep(0.0, w, abs(at));
+    return (linesArea(at + h, w) - linesArea(at - h, w)) / (2.0 * h);
+}
+
 // A light cycle in lane `lane` (cells from the middle), riding away from the
 // viewer and coming round again every `period` seconds, its trail fading
 // behind it; `unit` is how many px a floor unit spans across.
@@ -29,7 +48,7 @@ float lightCycle(vec2 world, float unit, float lane, float period, float phase) 
     float behind = head - world.y;
     if (behind < 0.0) return 0.0;
     float trail = exp(-behind / 320.0);
-    return glowLine(abs(world.x - laneX) * unit, 2.0, vec2(0.0, 1.0)) * trail * (behind < 6.0 ? 3.0 : 1.0);
+    return (1.0 - smoothstep(0.0, 2.0, abs(world.x - laneX) * unit)) * trail * (behind < 6.0 ? 3.0 : 1.0);
 }
 
 // A wave through the grid from an impulse at `at`, `age` seconds old: a ring

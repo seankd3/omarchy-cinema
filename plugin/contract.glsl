@@ -230,37 +230,16 @@ void see(inout Seen s, Window w) {
 
 // How wide, in logical px, each pixel being drawn takes the mean of the
 // world over: 0 at the screen's own size, where a pixel shows its middle.
-// The world drawn for the glass's frost is coarser, and each of its pixels
-// holds the mean of the screen pixels it covers (its width); glowLine() and
-// lines() take that mean, so a thin line neither floods the frost nor beads.
+// The world drawn for the glass's frost is coarser, and a line sized to the
+// screen's pixels should cover each of its pixels as much as it covers the
+// screen pixels there, or it floods the frost.
 uniform float spread;
-
-// The integral from 0 to x of a line's crisp core, 1 - smoothstep(0, w, |x|).
-float coreArea(float x, float w) {
-    float u = min(abs(x) / w, 1.0);
-    return sign(x) * (min(abs(x), w) - w * u * u * u * (1.0 - 0.5 * u));
-}
 
 // A line `d` pixels away: a crisp core `w` pixels wide in a soft glow,
 // `halo.x` bright and fading over `halo.y` core widths; most films glow
-// vec2(0.25, 5.0). Its core is the mean over `spread` (the glow is soft
-// enough as it is).
+// vec2(0.25, 5.0).
 float glowLine(float d, float w, vec2 halo) {
-    float core = spread > 0.0 ? (coreArea(d + 0.5 * spread, w) - coreArea(d - 0.5 * spread, w)) / spread : 1.0 - smoothstep(0.0, w, d);
-    return core + halo.x * exp(-d / (w * halo.y));
-}
-
-// Lines at every whole number of x, each a crisp core w wide round it, as
-// glowLine's (where they overlap, the nearest one), the mean over x - h to
-// x + h; w and h in x's units.
-float linesArea(float x, float w) {
-    return floor(x + 0.5) * 2.0 * coreArea(0.5, w) + coreArea(fract(x + 0.5) - 0.5, w);
-}
-
-float lines(float x, float w, float h) {
-    float at = fract(x + 0.5) - 0.5;
-    if (h <= 0.0) return 1.0 - smoothstep(0.0, w, abs(at));
-    return (linesArea(at + h, w) - linesArea(at - h, w)) / (2.0 * h);
+    return (1.0 - smoothstep(0.0, w, d)) + halo.x * exp(-d / (w * halo.y));
 }
 
 float glowLine(float d, float w) {

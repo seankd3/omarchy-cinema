@@ -998,8 +998,8 @@ void main() {
     // How a monitor's coarse world is drawn: its frost as soft as the
     // glass's (Hyprland's blur size, from the film's frost: two passes spread
     // a point over about twice its size), each texel from 4 points of the
-    // world, or the half-size world's 1 when that is the frost; each point the
-    // mean of the screen it covers (contract.glsl's spread).
+    // world, or the half-size world's 1 when that is the frost; its pixels'
+    // width is contract.glsl's spread.
     SCoarse coarse(const PHLMONITOR& monitor) {
         static auto SIZE  = CConfigValue<Config::INTEGER>("decoration:blur:size");
         const int   frost = std::clamp(int(std::round(std::log2(std::max(2.0 * *SIZE * monitor->m_scale, 1.0)))), 1, 6);
