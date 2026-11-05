@@ -1539,7 +1539,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
     };
 
     // A window's edge in the film's world (specs/depth.md, part 2): the
-    // film's frame(px, i) over a band round the window, drawn in the window's
+    // film's frame(px, w) over a band round the window, drawn in the window's
     // own pass, so it moves, tilts and fades with it. It reads the scene and
     // textures the backdrop drew this frame.
     class CFramePass : public CPass {
