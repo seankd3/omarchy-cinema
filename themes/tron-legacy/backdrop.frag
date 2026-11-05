@@ -135,11 +135,11 @@ vec4 backdrop(vec2 px) {
         }
         float speed = length(w.velocity);
         if (speed >= 40.0 && w.d > 0.0 && edgeDistance(w) < 7.0 + glowReach(5.0 * 5.0 * 1.8 * 0.25, 6.6) + speed * 0.125) {
-            float outside = smoothstep(0.0, 3.0, w.d);
+            float strength = wakeStrength(w, 1500.0);
             vec3 tint = i == focusedIndex ? ORANGE : cyan;
             for (int k = 1; k <= 5; k++) {
                 float d = rectDistance(px, ago(w, 0.025 * float(k)), w.rounding);
-                trail += tint * glowLine(abs(d - 7.0), 1.1, HALO) * (0.75 - 0.13 * float(k)) * min(speed / 1500.0, 1.0) * w.alpha * outside;
+                trail += tint * glowLine(abs(d - 7.0), 1.1, HALO) * (0.75 - 0.13 * float(k)) * strength;
             }
         }
     }

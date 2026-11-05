@@ -36,7 +36,6 @@ uniform float time;
 uniform vec2 resolution;
 uniform vec3 accent;
 uniform vec3 background;
-uniform vec3 foreground;
 uniform vec4 focused;
 uniform vec4 reserved;
 // Three vec4s a window, at most 256 windows: (x, y, w, h), (alpha,
@@ -331,6 +330,20 @@ float glassStreak(vec2 px, vec4 r) {
 // focus and opening as a soft swell, landing as `landing` times its strength.
 float windowFlare(int i, float landing) {
     return dot(windowTexels[3 * i + 2].zw, vec2(1.0, landing));
+}
+
+// How strongly a moving window w leaves its wake: by its speed, in full at
+// `full` px a second, and its fade, from just outside it.
+float wakeStrength(Window w, float full) {
+    return min(length(w.velocity) / full, 1.0) * w.alpha * smoothstep(0.0, 3.0, w.d);
+}
+
+// The offset of p from the nearest point of a hexagonal lattice, its rows a
+// unit apart.
+vec2 hexOffset(vec2 p) {
+    vec2 r = vec2(1.0, 1.7320508), h = r * 0.5;
+    vec2 a = mod(p, r) - h, b = mod(p - h, r) - h;
+    return dot(a, a) < dot(b, b) ? a : b;
 }
 
 // A soft rise over `rise` seconds and fade until `life`, for brief answers.

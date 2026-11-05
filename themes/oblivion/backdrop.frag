@@ -205,7 +205,7 @@ void wake(vec2 px, Window w, inout float glow, inout float blue, inout float par
     float speed = length(v);
     // Only a moving pane pays for its wake.
     if (speed >= 40.0) {
-        float k = min(speed / 1200.0, 1.0) * w.alpha * smoothstep(0.0, 3.0, w.d);
+        float k = wakeStrength(w, 1200.0);
         vec4 r = w.rect;
         vec2 tail = -v * 0.3;
         for (int c = 0; c < 4; c++) {

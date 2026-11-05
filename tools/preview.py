@@ -166,7 +166,7 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
             program["frameBorder"].value = 2.0
 
     colors = palette(theme)
-    for name in ("accent", "background", "foreground"):
+    for name in ("accent", "background"):
         if name in program:
             program[name].value = colors.get(name, (1, 1, 1))
     values = {

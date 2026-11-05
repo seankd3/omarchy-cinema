@@ -58,6 +58,15 @@ using namespace Render::GL;
 
 namespace {
 
+    using Clock = std::chrono::steady_clock;
+
+    // A span of the clock in seconds.
+    double seconds(Clock::duration d) {
+        return std::chrono::duration<double>(d).count();
+    }
+
+    using enum Desktop::View::IGeometric::eGeometricValueType;
+
     constexpr double FOCUS_EASE  = 0.32; // seconds
     // A window's velocity eases over this long, so one late frame does not
     // spike it.
@@ -101,11 +110,9 @@ uniform mat3 proj;
 uniform vec4 area;
 in vec2 pos;
 out vec2 v_px;
-out vec2 v_uv;
 void main() {
     gl_Position = vec4(proj * vec3(pos, 1.0), 1.0);
     v_px = area.xy + pos * area.zw;
-    v_uv = gl_Position.xy * 0.5 + 0.5;
 }
 )";
 
@@ -175,7 +182,7 @@ void main() {
         std::array<float, 2>                  velocity{};
         float                                 lift   = 0;
         bool                                  moving = false;
-        std::chrono::steady_clock::time_point seen;
+        Clock::time_point seen;
     };
 
     // A closed window as its fadeout still needs it.
@@ -186,7 +193,7 @@ void main() {
 
     struct SImpulse {
         Vector2D                              at; // global logical px
-        std::chrono::steady_clock::time_point start;
+        Clock::time_point start;
         float                                 strength = 1;
         int                                   kind     = 0;
         uint64_t                              window   = 0; // the stable id of the window it happened to, 0 for none
@@ -206,13 +213,12 @@ void main() {
         uint64_t                              source         = 0;
         Rect                                  focusFrom{};
         float                                 alphaFrom = 0;
-        std::chrono::steady_clock::time_point focusMoved;
+        Clock::time_point focusMoved;
         bool                                  seen = false;
         // Whether the frame being drawn changes the world, which keeps
         // easing after it: the next frame is drawn too.
         bool                                  changed = false;
-        // Whether the world changed since the half-size world and the frost
-        // were last drawn here: they are kept until it does.
+        // Whether the world changed since its coarse world was drawn here.
         bool                                  stale = true;
     };
 
@@ -220,7 +226,7 @@ void main() {
     // its uniforms are, each named as its shader names it; one a program
     // lacks is -1, which GL ignores.
 #define UNIFORMS(X)                                                                                                                                               \
-    X(proj) X(area) X(resolution) X(time) X(accent) X(background) X(foreground) X(focused) X(reserved) X(windowCount) X(focusedIndex) X(focusAlpha) X(feed)     \
+    X(proj) X(area) X(resolution) X(time) X(accent) X(background) X(focused) X(reserved) X(windowCount) X(focusedIndex) X(focusAlpha) X(feed)     \
         X(feedCount) X(feedPos) X(glyphs) X(impulses) X(impulseKinds) X(impulseWindows) X(impulseCount) X(voice) X(frameWindow) X(frameAlpha) X(frameBorder) \
             X(drawnWorld) X(worldProj) X(spread)
     struct SProgram {
@@ -311,7 +317,7 @@ void main() {
         HANDLE                                  handle = nullptr;
         std::string                             source; // the theme's shader, empty when it has none
         std::optional<std::string>              refused; // the theme and contract last refused, said once
-        std::array<float, 3>                    accent{1, 1, 1}, background{0, 0, 0}, foreground{1, 1, 1}, muted{1, 1, 1};
+        std::array<float, 3>                    accent{1, 1, 1}, background{0, 0, 0}, muted{1, 1, 1};
         // The colours the theme paints backgrounds in: these turn to glass,
         // keeping `glass` of themselves (colors.toml's, 0.85 without one).
         std::vector<std::array<float, 3>>       backgrounds;
@@ -331,14 +337,14 @@ void main() {
         // world stood still everywhere); and when the scene last changed.
         float                                   time = 0;
         double                                  speed = 0;
-        std::chrono::steady_clock::time_point   clocked, stirred;
+        Clock::time_point   clocked, stirred;
         std::unordered_map<MONITORID, SMonitor> monitors;
         std::unordered_map<uint64_t, SMotion>   motion; // each window's, by stable id
         std::deque<SImpulse>                    impulses;
         uint64_t                                impulseGeneration = 0;
         // Voxtype's loudness, as the feed last sent it.
         float                                   voice = 0;
-        std::chrono::steady_clock::time_point   voiceReceived;
+        Clock::time_point   voiceReceived;
         // Hyprland keeps a closed window's rounding inside its fadeout, out of
         // reach, and forgets which window it was, so the plugin keeps both
         // beside: each window fadeout's rounding and stable id from the moment
@@ -360,7 +366,7 @@ void main() {
         // is read (heard()).
         wl_event_source*                        stale = nullptr;
         std::pair<float, bool>                  heard{0.F, false};
-        std::chrono::steady_clock::time_point   feedReceived;
+        Clock::time_point   feedReceived;
         // What the text reads (contract.glsl, `feed`), counted by changes: the
         // agents' newest text while the feed is alive and has some
         // (`agents`), else the theme's own words (`own`, ownWords()).
@@ -381,6 +387,11 @@ void main() {
     void settle();
     void redraw(PHLMONITOR monitor);
     void ownWords();
+
+    // Something the user must act on, said in red.
+    void warn(const std::string& text) {
+        HyprlandAPI::addNotification(g->handle, "[backdrop] " + text, CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+    }
 
     std::string themeDir() {
         const char* state = getenv("XDG_STATE_HOME");
@@ -495,8 +506,7 @@ void main() {
                 const bool newer = written.size() != ours.size() ? written.size() > ours.size() : written > ours;
                 const auto said  = written.empty() ? std::string("does not say which contract it is written for") : std::format("is written for contract {}", written);
                 const auto fix   = newer ? "log in again to run the engine installed now, or update omarchy-cinema" : "update the theme";
-                HyprlandAPI::addNotification(g->handle, std::format("[backdrop] this theme's backdrop.frag {}, and this engine draws contract {}: {}", said, ours, fix),
-                                             CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+                warn(std::format("this theme's backdrop.frag {}, and this engine draws contract {}: {}", said, ours, fix));
             }
             g->refused = refused;
             shader.clear();
@@ -526,8 +536,6 @@ void main() {
             const auto value = hexColor(match[2]);
             if (name == "accent")
                 g->accent = value;
-            else if (name == "foreground")
-                g->foreground = value;
             else if (name == "muted")
                 g->muted = value;
             if (name == "background")
@@ -605,7 +613,7 @@ void main() {
         if (!vert || !frag) {
             if (vert)
                 glDeleteShader(vert);
-            HyprlandAPI::addNotification(g->handle, std::format("[backdrop] {} does not compile: {}", what, log), CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+            warn(std::format("{} does not compile: {}", what, log));
             return false;
         }
         p.id = glCreateProgram();
@@ -618,7 +626,7 @@ void main() {
         GLint ok = 0;
         glGetProgramiv(p.id, GL_LINK_STATUS, &ok);
         if (!ok) {
-            HyprlandAPI::addNotification(g->handle, std::format("[backdrop] {} does not link", what), CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+            warn(std::format("{} does not link", what));
             glDeleteProgram(p.id);
             p = {};
             return false;
@@ -674,9 +682,9 @@ void main() {
     // whether it stopped this frame after moving. A first sighting, or one
     // after a long gap, starts still; a second reading in the same frame (a
     // window on two monitors) changes nothing.
-    bool step(SMotion& m, const Vector2D& at, bool lifted, std::chrono::steady_clock::time_point now) {
-        const double dt = std::chrono::duration<double>(now - m.seen).count();
-        if (m.seen == std::chrono::steady_clock::time_point{} || dt > 0.25) {
+    bool step(SMotion& m, const Vector2D& at, bool lifted, Clock::time_point now) {
+        const double dt = seconds(now - m.seen);
+        if (m.seen == Clock::time_point{} || dt > 0.25) {
             m = {.at = at, .lift = m.lift, .seen = now};
             return false;
         }
@@ -704,7 +712,6 @@ void main() {
     // monitor it happened on draws again now; its age rides the backdrop's
     // own frames after that.
     bool covered(PHLMONITOR monitor);
-    void forgetImpulses();
 
     // Whether the world moves on this monitor now: a theme with a backdrop,
     // animations on (Hyprland's animations:enabled is the one authority), the
@@ -726,22 +733,17 @@ void main() {
     void letGo() {
         if (!g)
             return;
-        forgetImpulses();
-        g->voice = 0;
-    }
-
-    void forgetImpulses() {
-        if (g->impulses.empty())
-            return;
+        if (!g->impulses.empty())
+            g->impulseGeneration++;
         g->impulses.clear();
-        g->impulseGeneration++;
+        g->voice = 0;
     }
 
     void addImpulse(const Vector2D& at, float strength, int kind, const PHLWINDOW& window) {
         if (!answering())
             return;
         g->impulses.push_back(
-            {.at = at, .start = std::chrono::steady_clock::now(), .strength = strength, .kind = kind, .window = window ? window->metadata().stableID() : 0});
+            {.at = at, .start = Clock::now(), .strength = strength, .kind = kind, .window = window ? window->metadata().stableID() : 0});
         if (g->impulses.size() > IMPULSES)
             g->impulses.pop_front();
         g->impulseGeneration++;
@@ -816,15 +818,15 @@ void main() {
     // with (workspace slides and the floating offset included): its top left
     // and size, logical px.
     std::pair<Vector2D, Vector2D> drawnBox(const PHLWINDOW& w, const Render::SWindowRenderPresentation& drawn, const PHLMONITOR& monitor) {
-        return {w->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) + drawn.workspaceOffset + drawn.floatingOffset - monitor->m_position,
-                w->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT)};
+        return {w->position(GEOMETRIC_CURRENT) + drawn.workspaceOffset + drawn.floatingOffset - monitor->m_position,
+                w->size(GEOMETRIC_CURRENT)};
     }
 
     // The windows Hyprland draws on this monitor in this frame, and those
     // fading out after closing, where they are drawn, the first WINDOWS_MAX
     // of them; and where attention is.
     SScene readScene(PHLMONITOR monitor, SMonitor& state) {
-        const auto now = std::chrono::steady_clock::now();
+        const auto now = Clock::now();
         SScene     scene;
         const auto focused = Desktop::focusState()->window();
         PHLWINDOW  focusedHere;
@@ -906,8 +908,8 @@ void main() {
             if (fadeout->monitor() != monitor || !isWindowFadeout(fadeout) ||
                 (workspace && workspace != monitor->m_activeWorkspace && !(workspace->type() == Workspace::eWorkspaceType::SPECIAL && workspace->m_alpha->value() > 0.F)))
                 continue;
-            const auto position = fadeout->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) - monitor->m_position;
-            const auto size     = fadeout->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+            const auto position = fadeout->position(GEOMETRIC_CURRENT) - monitor->m_position;
+            const auto size     = fadeout->size(GEOMETRIC_CURRENT);
             if (!focusedHere && fadeout == state.focusFadeout.lock())
                 scene.focusedIndex = scene.shapes.size();
             const auto window = g->closed[fadeout.get()];
@@ -949,7 +951,7 @@ void main() {
         }
         state.source = source;
 
-        const float k = easeOut(std::min(1.F, float(std::chrono::duration<double>(now - state.focusMoved).count() / FOCUS_EASE)));
+        const float k = easeOut(std::min(1.F, float(seconds(now - state.focusMoved) / FOCUS_EASE)));
         for (size_t i = 0; i < 4; i++)
             scene.focus[i] = state.focusFrom[i] + (target[i] - state.focusFrom[i]) * k;
         scene.focusAlpha = scene.focusedIndex >= 0 ? scene.shapes[scene.focusedIndex].alpha : state.alphaFrom * (1.F - k);
@@ -961,18 +963,16 @@ void main() {
     // The impulse ring as it stands, after letting go of impulses that have
     // run out, voice, the agents' text and the world's clock.
     SAnswer readAnswer() {
-        const auto now = std::chrono::steady_clock::now();
-        while (!g->impulses.empty() && std::chrono::duration<double>(now - g->impulses.front().start).count() > IMPULSE_LIFE) {
+        const auto now = Clock::now();
+        while (!g->impulses.empty() && seconds(now - g->impulses.front().start) > IMPULSE_LIFE) {
             g->impulses.pop_front();
             g->impulseGeneration++;
         }
         // A window not drawn for ten seconds is closed or out of sight; it
         // starts still if it comes back.
         std::erase_if(g->motion, [&](const auto& entry) { return now - entry.second.seen > std::chrono::seconds(10); });
-        if (!answering()) {
+        if (!answering())
             letGo();
-            return {g->impulseGeneration, 0.F, g->agents, g->time};
-        }
         const float voice = now - g->voiceReceived <= VOICE_STALE ? g->voice : 0.F;
         return {g->impulseGeneration, voice, g->agents, g->time};
     }
@@ -1043,7 +1043,7 @@ void main() {
     // which wraps), each naming its window by its place in `shapes`.
     void uploadShapes(const PHLMONITOR& monitor, const std::vector<SShape>& shapes) {
         const auto size = monitor->m_size;
-        const auto now  = std::chrono::steady_clock::now();
+        const auto now  = Clock::now();
         struct {
             std::array<float, WINDOWS_MAX * 12> shapes{};
             std::array<uint32_t, 32 * 32>       tiles{};
@@ -1098,7 +1098,7 @@ void main() {
         if (!std::isfinite(level))
             return;
         g->voice         = answering() ? std::clamp(level, 0.F, 1.F) : 0.F;
-        g->voiceReceived = std::chrono::steady_clock::now();
+        g->voiceReceived = Clock::now();
     }
 
     // Puts `count` characters in the text read (the next going at `pos`),
@@ -1125,7 +1125,7 @@ void main() {
     // answer changed), so voice answers and the agents' text leaves the
     // screen at once, animations or not; the timer waits for the next end.
     void heard() {
-        const auto now   = std::chrono::steady_clock::now();
+        const auto now   = Clock::now();
         const bool voice = g->voice > 0 && now - g->voiceReceived <= VOICE_STALE;
         if (g->agents && now - g->feedReceived > FEED_STALE)
             ownWords();
@@ -1134,14 +1134,14 @@ void main() {
             for (const auto& monitor : State::monitorState()->monitors())
                 g_pHyprRenderer->damageMonitor(monitor);
         g->heard  = heard;
-        auto ends = std::chrono::steady_clock::time_point::max();
+        auto ends = Clock::time_point::max();
         if (voice)
             ends = g->voiceReceived + VOICE_STALE;
         if (g->agents)
             ends = std::min(ends, g->feedReceived + FEED_STALE);
         // Each end is still to come (`voice`, and the staleness just
         // checked), so the wait is at least a millisecond; 0 disarms.
-        const auto ms = ends == std::chrono::steady_clock::time_point::max() ? 0 : std::chrono::ceil<std::chrono::milliseconds>(ends - now).count() + 1;
+        const auto ms = ends == Clock::time_point::max() ? 0 : std::chrono::ceil<std::chrono::milliseconds>(ends - now).count() + 1;
         wl_event_source_timer_update(g->stale, int(ms));
     }
 
@@ -1178,7 +1178,7 @@ void main() {
             // repeats generations, so only the content says whether it
             // changed. An empty one (no agent running) gives the text back to
             // the theme.
-            g->feedReceived = std::chrono::steady_clock::now();
+            g->feedReceived = Clock::now();
             if (count == 0) {
                 ownWords();
                 continue;
@@ -1304,8 +1304,8 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
     }
 
     // Everything else the contract gives a film (uploadShapes()), for program
-    // `p`, drawing `area` (logical px) placed by `proj` on `monitor`. The
-    // textures are on units 4 to 6: the world drawn at half size, the
+    // `p`, drawing `area` (logical px) placed by `proj` on `monitor`, at the
+    // screen's size. The textures are on units 4 to 6: the coarse world, the
     // lettering and the feed.
     void setUniforms(const SProgram& p, const PHLMONITOR& monitor, const SScene& scene, const SAnswer& answer, const Mat3x3& proj, const CBox& area) {
         const auto& gpu  = g->gpu;
@@ -1317,7 +1317,6 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         glUniform1f(p.time, answer.time);
         glUniform3fv(p.accent, 1, g->accent.data());
         glUniform3fv(p.background, 1, g->background.data());
-        glUniform3fv(p.foreground, 1, g->foreground.data());
         glUniform4fv(p.focused, 1, scene.focus.data());
         glUniform4fv(p.reserved, 1, scene.reserved.data());
         glUniform1i(p.drawnWorld, 4);
@@ -1333,9 +1332,9 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         glUniform1f(p.spread, 0);
     }
 
-    // Binds the film's textures, with the kept world's text, and its world
-    // drawn at half size unless that is being drawn (`drawing`), and the
-    // windows, sets the program's state with `set` and binds the square.
+    // Binds the film's textures, with the kept world's text, and the coarse
+    // world unless that is being drawn (`drawing`), and the windows, sets the
+    // program's state with `set` and binds the square.
     void prepare(const SCoarse& kept, bool drawing, const std::function<void()>& set) {
         auto& gpu = g->gpu;
         for (int unit = 0; unit < 3; unit++) {
@@ -1415,7 +1414,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
 
     class CBackdropPass : public CPass {
       public:
-        CBackdropPass(PHLMONITOR monitor, SScene scene, SAnswer answer) : m_monitor(monitor), m_scene(std::move(scene)), m_answer(answer) {}
+        CBackdropPass(PHLMONITOR monitor) : m_monitor(monitor) {}
 
         std::vector<UP<IPassElement>> draw(Render::CRenderContext& ctx) override {
             const auto monitor = m_monitor.lock();
@@ -1426,11 +1425,11 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             const SGuest guest;
             auto&        gpu = g->gpu;
             glBindBuffer(GL_UNIFORM_BUFFER, gpu.windows);
-            uploadShapes(monitor, m_scene.shapes);
+            auto&        state = g->monitors[monitor->m_id];
+            uploadShapes(monitor, state.drawn.shapes);
             // The coarse world and the frost are kept, and drawn again only
             // when the world changed, or for a new size or frost target.
             const auto shape     = coarse(monitor);
-            auto&      state     = g->monitors[monitor->m_id];
             auto&      coarse    = gpu.coarse[monitor->m_id];
             const int  width = shape.width, height = shape.height, levels = shape.levels;
             const auto resources = monitor->resources();
@@ -1457,7 +1456,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
                 }
             }
             const auto proj = g_pHyprRenderer->projectBoxToTarget(ctx, CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y});
-            const auto set  = [&] { setUniforms(gpu.backdrop, monitor, m_scene, m_answer, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}); };
+            const auto set  = [&] { setUniforms(gpu.backdrop, monitor, state.drawn, state.answered, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}); };
             if (resized) {
                 if (coarse.texture) {
                     glDeleteTextures(1, &coarse.texture);
@@ -1501,10 +1500,8 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
                 glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             }
             // At full size over the damage Hyprland leaves it: all of it but
-            // what frosted windows cover (CGlassPass). Not kept between
-            // frames: Hyprland draws its last two frames' damage again too,
-            // merged into few boxes, and a copy over that cost about as much
-            // as drawing it (specs/smoothness.md, "Frame budget").
+            // what frosted windows cover (CGlassPass); never kept (a copy cost
+            // as much, specs/smoothness.md).
             drawSquare(ctx, coarse, ctx.m_data.damage, set);
             return {};
         }
@@ -1529,8 +1526,6 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
 
       private:
         PHLMONITORREF m_monitor;
-        SScene        m_scene;
-        SAnswer       m_answer;
     };
 
     // A frosted window's glass, as Hyprland's own occlusion sees it: drawn
@@ -1689,7 +1684,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
     // when it last ran, and the next frame the world moves in starts it
     // again from where it stood.
     void standStill() {
-        if (std::ranges::none_of(State::monitorState()->monitors(), moves)) {
+        if (!answering()) {
             g->clocked = {};
             g->speed   = 0;
         }
@@ -1701,7 +1696,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
     // from those moments alone, whatever frames came between. A change seen
     // in this frame (`stirred`) starts the next rise; a speed fallen below
     // STIR_STILL stops.
-    void advance(bool stirred, std::chrono::steady_clock::time_point now) {
+    void advance(bool stirred, Clock::time_point now) {
         const auto run = [](double target, double ease, double dt) {
             if (dt <= 0)
                 return;
@@ -1709,9 +1704,8 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             g->time        = float(std::fmod(g->time + target * dt + (g->speed - target) * ease * (1.0 - k), 3600.0));
             g->speed       = target + (g->speed - target) * k;
         };
-        const auto seconds = [](auto d) { return std::chrono::duration<double>(d).count(); };
-        if (g->clocked != std::chrono::steady_clock::time_point{}) {
-            const auto rose = g->stirred + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(STIR_HOLD));
+        if (g->clocked != Clock::time_point{}) {
+            const auto rose = g->stirred + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(STIR_HOLD));
             const auto turn = std::clamp(rose, g->clocked, now);
             run(1.0, STIR_RISE, seconds(turn - g->clocked));
             run(0.0, STIR_FALL, seconds(now - turn));
@@ -1725,10 +1719,9 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
 
     // The world drawn again, whole, on every monitor it moves on.
     void wake() {
-        if (g && !g->source.empty())
-            for (const auto& monitor : State::monitorState()->monitors())
-                if (moves(monitor))
-                    redraw(monitor);
+        for (const auto& monitor : State::monitorState()->monitors())
+            if (moves(monitor))
+                redraw(monitor);
     }
 
     // Once Hyprland has finished a change that may move the glass or start
@@ -1775,13 +1768,13 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         // render.pre, just after the vblank before the one it is shown at.
         const float before = g->time;
         if (moves(monitor))
-            advance(state.pending != state.drawn, std::chrono::steady_clock::now());
+            advance(state.pending != state.drawn, Clock::now());
         // The clock is every monitor's: when it runs, each is drawn again.
         if (g->time != before)
             wake();
         state.answer = readAnswer();
-        // A change of the world changes it everywhere: all of it, the
-        // half-size world and the frost too, is drawn again in this frame.
+        // A change of the world changes it everywhere: all of it, the frost
+        // too, is drawn again in this frame.
         state.changed = state.pending != state.drawn || state.answer != state.answered || !g->impulses.empty();
         if (state.changed)
             redraw(monitor);
@@ -1804,7 +1797,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         auto& state    = g->monitors[event.monitor->m_id];
         state.drawn    = state.pending;
         state.answered = state.answer;
-        Render::IHyprRenderer::addPassElement(ctx, makeUnique<CBackdropPass>(event.monitor, state.pending, state.answer));
+        Render::IHyprRenderer::addPassElement(ctx, makeUnique<CBackdropPass>(event.monitor));
     }
 
 } // namespace
@@ -1830,18 +1823,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     static auto CLOSE    = Event::bus()->m_events.window.close.listen([](PHLWINDOW window) {
         if (!g)
             return;
-        windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_CURRENT, 1.F, IMPULSE_CLOSE);
+        windowImpulse(window, GEOMETRIC_CURRENT, 1.F, IMPULSE_CLOSE);
         claimFadeouts();
         g->closing = window;
     });
     static auto OPEN = Event::bus()->m_events.window.open.listen([](PHLWINDOW window) {
         decorate(window);
-        windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_GOAL, 1.F, IMPULSE_OPEN);
+        windowImpulse(window, GEOMETRIC_GOAL, 1.F, IMPULSE_OPEN);
     });
     for (const auto& window : Desktop::windowState()->windows())
         decorate(window);
     static auto ACTIVE = Event::bus()->m_events.window.active.listen(
-        [](PHLWINDOW window, Desktop::eFocusReason) { windowImpulse(window, Desktop::View::IGeometric::GEOMETRIC_CURRENT, 0.6F, IMPULSE_FOCUS); });
+        [](PHLWINDOW window, Desktop::eFocusReason) { windowImpulse(window, GEOMETRIC_CURRENT, 0.6F, IMPULSE_FOCUS); });
     static auto RELOADED = Event::bus()->m_events.config.reloaded.listen([] {
         if (!g)
             return;
