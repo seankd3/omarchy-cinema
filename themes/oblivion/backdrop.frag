@@ -249,8 +249,8 @@ void wake(vec2 px, Window w, inout float glow, inout float blue, inout float par
     }
 }
 
-// Past 600 px a window moves no point a level: the lift's light, exp(-d /
-// 120), reaches furthest, and at 3, 6 and 10 windows no pixel moves 2 levels.
+// Past REACH a window moves no point a level: its lift's light, exp(-d / 120),
+// reaches furthest.
 const float REACH = 600.0;
 
 vec4 backdrop(vec2 px) {

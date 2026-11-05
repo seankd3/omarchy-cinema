@@ -50,9 +50,8 @@ uniform vec4 reserved;
 // Three vec4s a window, at most 256 windows: (x, y, w, h), (alpha,
 // rounding, lift, depth) and (velocity x, y). A uniform block, which every
 // pixel reads as one constant, not a texture each pixel fetches. Read them
-// through the window functions. Then which of windows 0 to 31 reach each of
-// 32 by 32 tiles of the screen, bit i of tile k, four tiles a uvec4, row by
-// row (windowsAt()).
+// through the window functions. Then, for 32 by 32 tiles of the screen,
+// which of windows 0 to 31 reach each (windowsAt()).
 layout(std140) uniform Windows {
     vec4 windowTexels[3 * 256];
     uvec4 windowTiles[256];
@@ -163,13 +162,11 @@ float rectDistance(vec2 px, vec4 rect, float radius) {
 // ... }`, and asks all it needs of each there: at 2880x1800 every further
 // loop over three windows cost a draw 0.2 to 0.6 ms.
 //
-// A film whose windows change nothing past some distance says so as
-// `const float REACH = <px>;` in its backdrop.frag: past REACH from a
-// window, and from where it was in the last 0.3 s, it moves no point a
-// level. The plugin then leaves it out of the tiles it cannot reach, and a
-// loop that reads `uint reached = windowsAt(px);` before it and begins
-// `if (!reaches(reached, i)) continue;` meets at each point only the windows
-// that reach it. Without REACH every window reaches every point.
+// A film says how far its windows reach, `const float REACH = <px>;`: past
+// it from a window and from where it was in the last 0.3 s, the window moves
+// no point a level. Its loop then meets at px only the windows that reach
+// it: `uint reached = windowsAt(px);` before, `if (!reaches(reached, i))
+// continue;` first. Without REACH every window reaches every point.
 struct Window {
     int i;
     vec4 rect;

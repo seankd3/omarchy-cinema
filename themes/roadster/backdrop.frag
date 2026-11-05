@@ -187,9 +187,8 @@ vec3 speedLines(vec2 px, Window w, vec3 red) {
     return light;
 }
 
-// Past 600 px a window moves no point a level: the light pooled round the
-// windows, exp(-d / 120), but for the floor lines, met apart, reaches
-// furthest, and at 3, 6 and 10 windows no pixel moves 2 levels.
+// Past REACH a window moves no point a level: its pooled light, exp(-d / 120),
+// reaches furthest but for the floor lines, met apart.
 const float REACH = 600.0;
 
 vec4 backdrop(vec2 px) {

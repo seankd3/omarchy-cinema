@@ -1049,15 +1049,18 @@ void main() {
 
     // Fills the windows' uniform buffer, bound, with the shapes, three vec4s
     // each: (x, y, w, h), (alpha, rounding, lift, depth) and (velocity x, y),
-    // then the 32 by 32 tiles of a screen `size` across each of the first 32
-    // reaches: within the film's REACH of it and of where it was in the last
-    // 0.3 s. The whole block, as a draw reads all of it.
+    // then which of the first 32 reach each of 32 by 32 tiles of a screen
+    // `size` across: those within the film's REACH of them and of where they
+    // were in the last 0.3 s. The whole block, as a draw reads all of it.
     void uploadShapes(const std::vector<SShape>& shapes, const Vector2D& size) {
-        std::vector<float>    data(WINDOWS_MAX * 12, 0.F);
-        std::vector<uint32_t> tiles(32 * 32, 0);
+        struct {
+            std::array<float, WINDOWS_MAX * 12> shapes{};
+            std::array<uint32_t, 32 * 32>       tiles{};
+        } block;
+        const auto tile = [](double v, double across) { return int(std::clamp(std::floor(v / across * 32), 0.0, 31.0)); };
         for (size_t i = 0; i < shapes.size(); i++) {
             const auto& s  = shapes[i];
-            const auto  at = data.begin() + i * 12;
+            const auto  at = block.shapes.begin() + i * 12;
             std::copy(s.rect.begin(), s.rect.end(), at);
             at[4] = s.alpha;
             at[5] = s.rounding;
@@ -1065,18 +1068,12 @@ void main() {
             at[7] = s.depth;
             at[8] = s.velocity[0];
             at[9] = s.velocity[1];
-            if (i >= 32)
-                continue;
-            const float r    = g->reach + 0.3F * std::hypot(s.velocity[0], s.velocity[1]);
-            const auto  tile = [](double v, double across) { return int(std::clamp(std::floor(v / across * 32), 0.0, 31.0)); };
-            for (int y = tile(s.rect[1] - r, size.y); y <= tile(s.rect[1] + s.rect[3] + r, size.y); y++)
+            const float r = g->reach + 0.3F * std::hypot(s.velocity[0], s.velocity[1]);
+            for (int y = tile(s.rect[1] - r, size.y); i < 32 && y <= tile(s.rect[1] + s.rect[3] + r, size.y); y++)
                 for (int x = tile(s.rect[0] - r, size.x); x <= tile(s.rect[0] + s.rect[2] + r, size.x); x++)
-                    tiles[y * 32 + x] |= 1U << i;
+                    block.tiles[y * 32 + x] |= 1U << i;
         }
-        const auto bytes = data.size() * sizeof(float);
-        glBufferData(GL_UNIFORM_BUFFER, bytes + tiles.size() * sizeof(uint32_t), nullptr, GL_STREAM_DRAW);
-        glBufferSubData(GL_UNIFORM_BUFFER, 0, bytes, data.data());
-        glBufferSubData(GL_UNIFORM_BUFFER, bytes, tiles.size() * sizeof(uint32_t), tiles.data());
+        glBufferData(GL_UNIFORM_BUFFER, sizeof(block), &block, GL_STREAM_DRAW);
     }
 
     // Takes the newest valid snapshot waiting on the feed socket, at most

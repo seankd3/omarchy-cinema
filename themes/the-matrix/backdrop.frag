@@ -158,9 +158,8 @@ vec4 answers(vec2 px, vec2 cell) {
     return a;
 }
 
-// Past 600 px a window moves no point a level: the focused window's nearness,
-// exp(-d / 160), reaches furthest, and at 3, 6 and 10 windows no pixel moves 2
-// levels.
+// Past REACH a window moves no point a level: the focus's nearness, exp(-d /
+// 160), reaches furthest.
 const float REACH = 600.0;
 
 vec4 backdrop(vec2 px) {
