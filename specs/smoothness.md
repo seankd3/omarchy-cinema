@@ -36,9 +36,10 @@ this 2.9 ms and 1.0%. The rest is CPU starvation of the nice 19 sandbox.
 small, as the glass's frost; what a frosted window covers is never drawn;
 Hyprland only composites.
 
-- **The plugin makes the frost.** The backdrop draws the world at half size
-  and makes its mipmap's level as soft as the film's `frost`, at that
-  level's own size, the one level of Hyprland's blur texture that is read:
+- **The plugin makes the frost.** The backdrop draws the world at twice
+  the size of the level as soft as the film's `frost`, a pixel the mean of
+  the screen it covers (contract.glsl's `spread`: Tron's grid had flooded
+  its frost), and makes that level, at its own size, the one level of Hyprland's blur texture that is read:
   every reader samples it where it reads the screen, so Hyprland queues no
   blur and nothing is copied screen-sized (0.35 to 0.45 ms). The bar and the
   notifications read the same frost (film.lua's xray rule): their layers

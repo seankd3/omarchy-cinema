@@ -222,7 +222,7 @@ void main() {
 #define UNIFORMS(X)                                                                                                                                               \
     X(proj) X(area) X(resolution) X(time) X(accent) X(background) X(foreground) X(focused) X(reserved) X(windowCount) X(focusedIndex) X(focusAlpha) X(feed)     \
         X(feedCount) X(feedPos) X(glyphs) X(impulses) X(impulseKinds) X(impulseWindows) X(impulseCount) X(voice) X(frameWindow) X(frameAlpha) X(frameBorder) \
-            X(drawnWorld) X(worldProj)
+            X(drawnWorld) X(worldProj) X(spread)
     struct SProgram {
         GLuint id = 0;
 #define DECLARE(name) GLint name = -1;
@@ -320,7 +320,6 @@ void main() {
         uint64_t                                compiled   = 0;
         bool                                    framed     = false; // the film's shader defines frame()
         float                                   reach      = INFINITY; // colors.toml's, in px (contract.glsl, REACH)
-        float                                   samples    = 4; // colors.toml's frost_samples (coarse())
         SGpu                                    gpu;
         // Each monitor's frames shown, and its sleep and wake, which can pass
         // without a frame.
@@ -467,7 +466,7 @@ void main() {
         return error == std::errc{} && end == value.data() + value.size() && std::isfinite(glass) ? std::clamp(glass, 0.F, 1.F) : 0.85F;
     }
 
-    // A film's reach in px or its frost's samples: up to five ASCII digits,
+    // A film's reach in px: up to five ASCII digits,
     // and three after a point (as tools/preview.py reads it, and always a
     // float); anything else is `otherwise`.
     float amountOf(const std::string& value, float otherwise) {
@@ -508,19 +507,18 @@ void main() {
         g->framed         = std::regex_search(shader, FRAME);
 
         static const std::regex PALETTE(R"re(^\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})")re");
-        static const std::regex SETTING(R"re(^\s*(glass|reach|frost_samples)\s*=\s*"\s*([^"\s]*)\s*")re");
+        static const std::regex SETTING(R"re(^\s*(glass|reach)\s*=\s*"\s*([^"\s]*)\s*")re");
         std::istringstream      colors(readFile(dir + "/colors.toml"));
         g->backgrounds.clear();
         g->glass = 0.85F;
-        g->reach   = INFINITY;
-        g->samples = 4;
+        g->reach = INFINITY;
         for (std::string line; std::getline(colors, line);) {
             std::smatch match;
             if (std::regex_search(line, match, SETTING)) {
                 if (match[1] == "glass")
                     g->glass = glassOf(match[2]);
                 else
-                    (match[1] == "reach" ? g->reach : g->samples) = amountOf(match[2], match[1] == "reach" ? INFINITY : 4);
+                    g->reach = amountOf(match[2], INFINITY);
             }
             if (!std::regex_search(line, match, PALETTE))
                 continue;
@@ -999,13 +997,13 @@ void main() {
 
     // How a monitor's coarse world is drawn: its frost as soft as the
     // glass's (Hyprland's blur size, from the film's frost: two passes spread
-    // a point over about twice its size), each texel from 4^k points of the
-    // world: as many as frost_samples asks (4 without it), at most the
-    // half-size world's.
+    // a point over about twice its size), each texel from 4 points of the
+    // world, or the half-size world's 1 when that is the frost; each point the
+    // mean of the screen it covers (contract.glsl's spread).
     SCoarse coarse(const PHLMONITOR& monitor) {
         static auto SIZE  = CConfigValue<Config::INTEGER>("decoration:blur:size");
         const int   frost = std::clamp(int(std::round(std::log2(std::max(2.0 * *SIZE * monitor->m_scale, 1.0)))), 1, 6);
-        const int   k     = std::clamp(std::round(std::log2(double(g->samples)) / 2), 0.0, frost - 1.0);
+        const int   k     = std::min(frost - 1, 1);
         const auto  side  = [&](double px) { return (int(px) + (1 << (frost - k)) - 1) >> (frost - k); };
         return {.width = side(monitor->m_transformedSize.x), .height = side(monitor->m_transformedSize.y), .levels = k + 1, .frost = frost};
     }
@@ -1332,6 +1330,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         glUniform1i(p.feedCount, gpu.glyphsUploaded && kept.feedUploaded ? int(kept.feedCount) : 0);
         glUniform1i(p.feedPos, int(kept.feedPos));
         glUniform1f(p.voice, answer.voice);
+        glUniform1f(p.spread, 0);
     }
 
     // Binds the film's textures, with the kept world's text, and its world
@@ -1492,6 +1491,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
                 glViewport(0, 0, width, height);
                 coarse.proj = proj;
                 prepare(coarse, true, set);
+                glUniform1f(gpu.backdrop.spread, (1 << (shape.frost - levels + 1)) / monitor->m_scale);
                 g_pHyprOpenGL->disableScissor();
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
                 if (blur)

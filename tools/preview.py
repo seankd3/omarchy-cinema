@@ -98,7 +98,7 @@ def palette(theme):
 
 
 def amount(theme, name, default):
-    """A reach or frost_samples as main.cpp's amountOf() reads it: the last
+    """A reach as main.cpp's amountOf() reads it: the last
     line's, up to five ASCII digits and three after a point, else `default`."""
     found = re.findall(rf'^\s*{name}\s*=\s*"\s*([^"\s]*)\s*"', (theme / "colors.toml").read_text(), re.M)
     return float(found[-1]) if found and re.fullmatch(r"[0-9]{1,5}(\.[0-9]{0,3})?", found[-1]) else default
@@ -243,6 +243,10 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
 
     def draw():
         fits(ctx.viewport[2:])
+        # Drawn coarser than the screen, a pixel takes the mean over its
+        # width (contract.glsl's spread).
+        if "spread" in program:
+            program["spread"].value = 0.0 if ctx.viewport[2] >= PIXELS[0] else LOGICAL[0] / ctx.viewport[2]
         window_data.bind_to_uniform_block(0)
         for unit, texture in enumerate(textures):
             texture.use(unit)
@@ -254,7 +258,7 @@ def coarse(theme):
     """The coarse world's size and levels, and its frost's level at the
     screen's size, as main.cpp's coarse() works them out."""
     frost = min(max(int(np.floor(np.log2(max(2 * setting(theme, "frost", 3) * PIXELS[0] / LOGICAL[0], 1)) + 0.5)), 1), 6)
-    k = int(min(max(np.floor(np.log2(amount(theme, "frost_samples", 4)) / 2 + 0.5), 0), frost - 1))
+    k = min(frost - 1, 1)
     return tuple(-(-p >> (frost - k)) for p in PIXELS), k + 1, frost
 
 

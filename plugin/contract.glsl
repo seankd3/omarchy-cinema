@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 13
+// omarchy-cinema contract 14
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -228,11 +228,44 @@ void see(inout Seen s, Window w) {
 // Helpers several films share (a helper enters the contract once two films
 // answer a fact the same way).
 
+// How wide, in logical px, each pixel being drawn takes the mean of the
+// world over: 0 at the screen's own size, where a pixel shows its middle.
+// The world drawn for the glass's frost is coarser, and each of its pixels
+// holds the mean of the screen pixels it covers (its width); glowLine() and
+// lines() take that mean, so a thin line neither floods the frost nor beads.
+uniform float spread;
+
+// The integral from 0 to x of a line's crisp core, 1 - smoothstep(0, w, |x|),
+// and of a glow exp(-|x| / s).
+float coreArea(float x, float w) {
+    float u = min(abs(x) / w, 1.0);
+    return sign(x) * (min(abs(x), w) - w * u * u * u * (1.0 - 0.5 * u));
+}
+
+float glowArea(float x, float s) {
+    return sign(x) * s * (1.0 - exp(-abs(x) / s));
+}
+
 // A line `d` pixels away: a crisp core `w` pixels wide in a soft glow,
 // `halo.x` bright and fading over `halo.y` core widths; most films glow
 // vec2(0.25, 5.0).
 float glowLine(float d, float w, vec2 halo) {
-    return (1.0 - smoothstep(0.0, w, d)) + halo.x * exp(-d / (w * halo.y));
+    float s = w * halo.y, a = d - 0.5 * spread, b = d + 0.5 * spread;
+    if (spread <= 0.0) return (1.0 - smoothstep(0.0, w, d)) + halo.x * exp(-d / s);
+    return (coreArea(b, w) - coreArea(a, w) + halo.x * (glowArea(b, s) - glowArea(a, s))) / spread;
+}
+
+// Lines at every whole number of x, each a crisp core w wide round it, as
+// glowLine's (where they overlap, the nearest one), the mean over x - h to
+// x + h; w and h in x's units.
+float linesArea(float x, float w) {
+    return floor(x + 0.5) * 2.0 * coreArea(0.5, w) + coreArea(fract(x + 0.5) - 0.5, w);
+}
+
+float lines(float x, float w, float h) {
+    float at = fract(x + 0.5) - 0.5;
+    if (h <= 0.0) return 1.0 - smoothstep(0.0, w, abs(at));
+    return (linesArea(at + h, w) - linesArea(at - h, w)) / (2.0 * h);
 }
 
 float glowLine(float d, float w) {
@@ -355,8 +388,8 @@ float glassSide(float d, float width) {
     return (1.0 - smoothstep(0.0, width, d)) * smoothstep(-2.0, 0.0, d);
 }
 
-// The world as the backdrop drew it in this frame for the glass's frost
-// (colors.toml's frost_samples), filtered, at px: what a frame shows bent
+// The world as the backdrop drew it in this frame for the glass's frost,
+// filtered, at px: what a frame shows bent
 // through the glass's edge, read instead of drawn again. Only frame() reads it.
 uniform sampler2D drawnWorld;
 uniform mat3 worldProj;

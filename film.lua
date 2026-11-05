@@ -12,9 +12,6 @@
 --          backdrop plugin reads it with the theme.
 --   frost  how far the glass blurs what is behind it, as Hyprland's blur
 --          size (3 if not given): fine lettering behind it needs less
---   frost_samples  how many points of the world each texel of that frost is
---          drawn from (4 if not given, at most the half-size world's): fine
---          lines behind the glass need more, at a cost. The plugin reads it.
 --
 -- It is installed with the plugin (plugin/Makefile's install: the package in
 -- /usr/lib/omarchy-cinema, ./install in ~/.local/lib/omarchy-cinema).

@@ -1,4 +1,4 @@
-// omarchy-cinema contract 13
+// omarchy-cinema contract 14
 // Tron Legacy: the Grid. A floor of light lines runs out to the horizon under
 // a black sky, and light cycles race along it, trailing light. Around every
 // window a circuit line is drawn, and pulses run along it; around the focused
@@ -22,15 +22,14 @@ vec2 floorAt(vec2 px, float horizon) {
 
 // A light cycle in lane `lane` (cells from the middle), riding away from the
 // viewer and coming round again every `period` seconds, its trail fading
-// behind it; `stride` is how far the floor moves across a drawn pixel.
-float lightCycle(vec2 world, vec2 stride, float lane, float period, float phase) {
+// behind it; `unit` is how many px a floor unit spans across.
+float lightCycle(vec2 world, float unit, float lane, float period, float phase) {
     float laneX = lane * CELL;
-    float across = abs(world.x - laneX) / max(stride.x, 1e-3);
     float head = fract(cycle(period) + phase) * 1600.0 + 200.0 + cycle(16.0) * 8.0 * CELL;
     float behind = head - world.y;
     if (behind < 0.0) return 0.0;
     float trail = exp(-behind / 320.0);
-    return (1.0 - smoothstep(0.0, 2.5, across)) * trail * (behind < 6.0 ? 3.0 : 1.0);
+    return glowLine(abs(world.x - laneX) * unit, 2.0, vec2(0.0, 1.0)) * trail * (behind < 6.0 ? 3.0 : 1.0);
 }
 
 // A wave through the grid from an impulse at `at`, `age` seconds old: a ring
@@ -133,14 +132,17 @@ vec4 backdrop(vec2 px) {
     // takes it: a derivative in a branch that differs within a quad is
     // undefined on some drivers.
     vec2 world = floorAt(px + pull, horizon);
-    vec2 stride = fwidth(world);
+    vec2 unit = fwidth(px.x) / max(fwidth(world), vec2(1e-4));
     near = clamp(near, 0.0, 1.0);
 
     if (ground) {
-        vec2 cell = world / CELL;
-        vec2 aa = max(stride / CELL, vec2(1e-4));
-        vec2 lines = abs(fract(cell + 0.5) - 0.5) / aa;
-        float grid = max(1.0 - smoothstep(0.0, 1.3, lines.x), 1.0 - smoothstep(0.0, 1.3, lines.y));
+        // Lines 1.04 px wide; where the world is drawn coarse, the two ways
+        // of them cross as often as chance has them meet.
+        vec2 cells = CELL * unit;
+        float across = lines(world.x / CELL, 1.04 / cells.x, 0.5 * spread / cells.x);
+        float along = lines(world.y / CELL, 1.04 / cells.y, 0.5 * spread / cells.y);
+        float grid = max(across, along);
+        if (spread > 0.0) grid += min(across, along) * (1.0 - grid);
         // The floor fades into the distance by its depth on the screen, so
         // its glide never jumps when it comes round.
         float fade = exp(-(world.y - cycle(16.0) * 8.0 * CELL + 4.0 * CELL) / 2600.0);
@@ -153,9 +155,9 @@ vec4 backdrop(vec2 px) {
         // The floor holds a little light of its own near the horizon.
         light += cyan * 0.05 * exp(-(px.y - horizon) / 90.0);
 
-        light += cyan * lightCycle(world, stride, -3.0, 9.0, 0.0) * fade;
-        light += vec3(0.75, 0.97, 1.0) * lightCycle(world, stride, 2.0, 12.0, 0.35) * fade;
-        light += ORANGE * lightCycle(world, stride, 6.0, 15.0, 0.7) * fade;
+        light += cyan * lightCycle(world, unit.x, -3.0, 9.0, 0.0) * fade;
+        light += vec3(0.75, 0.97, 1.0) * lightCycle(world, unit.x, 2.0, 12.0, 0.35) * fade;
+        light += ORANGE * lightCycle(world, unit.x, 6.0, 15.0, 0.7) * fade;
     } else {
         // Black sky, a band of light along the horizon, faint high cloud.
         float above = horizon - px.y;
