@@ -1,4 +1,4 @@
-// omarchy-cinema contract 12
+// omarchy-cinema contract 13
 // Roadster: the 2026 Roadster's cockpit, drawn like a fighter jet's display.
 // A floor of red dots runs out to a thin white horizon and rushes toward the
 // viewer, with streaks of speed along it. A wireframe wedge turns slowly on
@@ -324,12 +324,13 @@ vec4 backdrop(vec2 px) {
 
     // The bar's lower edge: a red line with a white marker sweeping along it,
     // starting and ending off screen so its wrap never shows.
-    if (reserved.x > 0.0) {
-        float edge = glowLine(abs(px.y - reserved.x), 1.1);
+    float underBar;
+    if (atBar(px, underBar)) {
+        float edge = glowLine(abs(underBar), 1.1);
         float marker = exp(-abs(px.x + 300.0 - cycle(8.0) * (resolution.x + 600.0)) / 45.0);
         light += red * edge * 0.8;
         light += WHITE * edge * marker * 2.5;
-        light += red * 0.05 * step(px.y, reserved.x);
+        light += red * 0.05 * step(underBar, 0.0);
     }
 
     // Bright light saturates toward white, as it does on film.

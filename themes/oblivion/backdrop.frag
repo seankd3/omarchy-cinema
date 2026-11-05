@@ -1,4 +1,4 @@
-// omarchy-cinema contract 12
+// omarchy-cinema contract 13
 // Oblivion: Tower 49 at dawn. A high pale sky over a sea of cloud that slides
 // slowly toward the tower, the sun low on the horizon and the broken moon faint
 // in the daylight. Every window is a pane of the tower's glass, traced by a fine
@@ -372,8 +372,8 @@ vec4 backdrop(vec2 px) {
 
     // The bar's lower edge: a fine pale blue line with a soft glint gliding
     // along it, and the frosted bar above lifted toward white.
-    if (reserved.x > 0.0) {
-        float below = px.y - reserved.x;
+    float below;
+    if (atBar(px, below)) {
         col = mix(col, vec3(1.0), 0.3 * step(below, 0.0));
         col = mix(col, accent, (1.0 - smoothstep(0.3, 1.0, abs(below))) * 0.6);
         float gx = cycle(15.0) * (resolution.x + 800.0) - 400.0;

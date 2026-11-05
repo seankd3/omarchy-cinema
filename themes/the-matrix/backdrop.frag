@@ -1,4 +1,4 @@
-// omarchy-cinema contract 12
+// omarchy-cinema contract 13
 // The Matrix: the code, and the code is this very shader, or what the agents
 // on this machine are writing once the user turns that on
 // (specs/agent-rain.md). It rains down the black screen in mirrored glyphs,
@@ -274,8 +274,8 @@ vec4 backdrop(vec2 px) {
 
     // The bar's lower edge: a phosphor line with a drip of brighter light
     // running along it, and the rain dimmed under the bar so its text reads.
-    if (reserved.x > 0.0) {
-        float below = px.y - reserved.x;
+    float below;
+    if (atBar(px, below)) {
         light *= mix(1.0, 0.3, step(below, 0.0));
         light += green * glowLine(abs(below), 1.0) * (0.45 + 0.15 * voice);
         float drip = cycle(9.0) * (resolution.x + 600.0) - 300.0;

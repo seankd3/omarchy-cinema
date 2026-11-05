@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 12
+// omarchy-cinema contract 13
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -14,9 +14,8 @@
 // closing); window(px, i) says all of each. `focused` is the focused window's
 // rect (x, y, w, h), easing to a new window when focus moves and then
 // following it exactly; with none it is a rect in the middle of the screen
-// (focusAlpha says how present it is). `reserved` is the room the bar and
-// other panels keep along each edge (top, right, bottom, left): the bar's
-// lower edge is at y = reserved.x.
+// (focusAlpha says how present it is). `reserved` is the room panels keep
+// along each edge (top, right, bottom, left).
 //
 // `time` is the world's own clock, in seconds: it runs at the wall clock's
 // speed while windows move, open, close, take focus or slide between
@@ -244,6 +243,15 @@ float glowLine(float d, float w) {
 // point a twentieth of a display level, so it need not be drawn.
 float glowReach(float strength, float falloff) {
     return falloff * log(strength * 5100.0);
+}
+
+// Where a film's bar lights (Jarvis's reaches furthest, glowReach()): px in
+// it or `below` its lower edge (y = reserved.x) by under BAR px. A film draws
+// its bar only within `float below; if (atBar(px, below))`.
+const float BAR = 76.0;
+bool atBar(vec2 px, out float below) {
+    below = px.y - reserved.x;
+    return reserved.x > 0.0 && below < BAR;
 }
 
 // Distance from p to the segment from a to b.

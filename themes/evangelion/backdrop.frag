@@ -1,4 +1,4 @@
-// omarchy-cinema contract 12
+// omarchy-cinema contract 13
 // Evangelion: NERV's displays. A honeycomb wakes like an AT field round the
 // windows, rings ripple out from the focused one, and far behind lies
 // Unit-01's purple lattice. The windows stand in the field, lit from above
@@ -231,17 +231,16 @@ vec4 backdrop(vec2 px) {
               + answer.rgb * mix(1.0, 0.8, glass)) * (0.5 + 0.5 * shade);
 
     // The bar's lower edge: an orange line, and under it a strip of hazard
-    // stripes that crawls along, lit where a bright run sweeps across. Its
-    // light ends 40 px below the edge.
-    float below = px.y - reserved.x;
-    if (reserved.x > 0.0 && below < 40.0) {
+    // stripes that crawls along, lit where a bright run sweeps across.
+    float below;
+    if (atBar(px, below)) {
         light += orange * glowLine(abs(below), 1.1) * 0.8;
         float stripe = abs(fract((px.x + below - cycle(3.0) * 54.0) / 18.0) - 0.5);
         float hazard = smoothstep(0.22, 0.26, stripe) * smoothstep(3.5, 4.5, below) * (1.0 - smoothstep(9.5, 10.5, below));
         // The run starts and ends well off screen, so its wrap never shows.
         float run = exp(-abs(px.x + 900.0 - cycle(9.0) * (resolution.x + 1800.0)) / 260.0);
         light += mix(orange, RED, 0.35) * hazard * (0.12 + 1.4 * run);
-        light += orange * 0.05 * step(px.y, reserved.x);
+        light += orange * 0.05 * step(below, 0.0);
     }
 
     if (seen.over >= 0) light += sheen(px, seen.over);

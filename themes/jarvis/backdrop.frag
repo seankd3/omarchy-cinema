@@ -1,4 +1,4 @@
-// omarchy-cinema contract 12
+// omarchy-cinema contract 13
 // Jarvis: a holographic globe in a gyroscope of rings, turning behind the
 // focused window and sized to it. It glows through the glass and past the
 // window's edges; light pools in the seams between windows and wakes the hex
@@ -307,14 +307,14 @@ vec4 backdrop(vec2 px) {
 
     // The bar's lower edge: a thin holographic line, a tick every 40 pixels
     // hanging from it, and an amber marker sweeping across.
-    if (reserved.x > 0.0) {
-        float below = px.y - reserved.x;
+    float below;
+    if (atBar(px, below)) {
         light += cyan * glowLine(abs(below), 1.0, HALO) * 0.6;
         float tick = 1.0 - smoothstep(0.5, 1.5, abs(fract(px.x / 40.0 + 0.5) - 0.5) * 40.0);
         light += cyan * tick * step(0.0, below) * step(below, 6.0) * 0.45;
         float marker = exp(-abs(px.x - cycle(12.0) * resolution.x) / 50.0);
         light += AMBER * marker * glowLine(abs(below), 2.0, HALO) * 0.9;
-        light += cyan * 0.04 * step(px.y, reserved.x);
+        light += cyan * 0.04 * step(below, 0.0);
     }
 
     // Bright light saturates toward white, as it does on film.
