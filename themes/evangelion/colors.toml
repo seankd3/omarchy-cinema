@@ -40,3 +40,7 @@ bright_magenta = "#cba6ff"
 # Half of each window's background stays (film.lua), so the AT field reads
 # through the windows.
 glass = "0.5"
+
+# Reaches furthest (contract.glsl, REACH): the hold, gone by 450 px; moving
+# windows are met apart.
+reach = "450"

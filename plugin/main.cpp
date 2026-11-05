@@ -993,12 +993,9 @@ void main() {
     }
 
     // What every draw of this frame reads alike: the windows' block (0,
-    // bound), three vec4s a shape, (x, y, w, h), (alpha, rounding, lift,
-    // depth), (velocity x, y, windowFlare()'s swell and landing), then which
-    // of the first 32 reach each of the monitor's 32 by 32 tiles (within the
-    // film's REACH of them and of where they were in the last 0.3 s); and the
-    // impulses, kept by the film's programs, aged by the monotonic clock (not
-    // `time`, which wraps), each naming its window by its place in `shapes`.
+    // bound; contract.glsl's Windows, a shape a window) and the impulses,
+    // kept by the film's programs, aged by the monotonic clock (not `time`,
+    // which wraps), each naming its window by its place in `shapes`.
     void uploadShapes(const PHLMONITOR& monitor, const std::vector<SShape>& shapes) {
         const auto size = monitor->m_size;
         const auto now  = std::chrono::steady_clock::now();

@@ -42,6 +42,6 @@ bright_magenta = "#ff9fcc"
 # the windows.
 glass = "0.55"
 
-# Past this many px a window moves no point a level: its pooled light, exp(-d / 120),
-# reaches furthest but for the floor lines, met apart.
+# Reaches furthest (contract.glsl, REACH): its pooled light, exp(-d / 120); the
+# floor lines are met apart.
 reach = "600"

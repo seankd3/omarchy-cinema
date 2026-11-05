@@ -45,6 +45,5 @@ bright_magenta = "#d2b2ea"
 glass = "0.2"
 frost = "1"
 
-# Past this many px a window moves no point a level: the focus's nearness, exp(-d /
-# 160), reaches furthest.
+# Reaches furthest (contract.glsl, REACH): the focus's nearness, exp(-d / 160).
 reach = "600"

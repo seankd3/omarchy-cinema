@@ -40,6 +40,5 @@ bright_magenta = "#c9b6ff"
 # and muted text keeps 4.9:1 at worst.
 glass = "0.6"
 
-# Past this many px a window moves no point a level: its pooled light, exp(-d / 110),
-# reaches furthest.
+# Reaches furthest (contract.glsl, REACH): its pooled light, exp(-d / 110).
 reach = "800"

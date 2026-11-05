@@ -45,6 +45,5 @@ bright_magenta = "#875abc"
 # pane below the white the apps chose their dimmer text against.
 glass = "0.7"
 
-# Past this many px a window moves no point a level: its lift's light, exp(-d / 120),
-# reaches furthest.
+# Reaches furthest (contract.glsl, REACH): its lift's light, exp(-d / 120).
 reach = "600"

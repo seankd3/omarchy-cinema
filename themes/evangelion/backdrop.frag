@@ -9,7 +9,6 @@
 
 const vec3 RED = vec3(1.0, 0.16, 0.08);
 const vec3 PURPLE = vec3(0.40, 0.20, 0.85);
-const vec3 GREEN = vec3(0.55, 0.92, 0.22);
 const vec3 WARM_LIGHT = vec3(1.0, 0.86, 0.62);
 const float CELL = 28.0; // honeycomb spacing in pixels: two cells span a gap
 // Where NERV's light comes from: above, a little to the left. Shadows fall
@@ -117,16 +116,19 @@ vec4 backdrop(vec2 px) {
     // px is behind, their shadows, falling away from the light, further and
     // softer the more focus lifts a window, and the field's hold on them: the
     // honeycomb packs tighter toward each window's edge, its cells smallest
-    // there, and lets go as a window fades (held.xy is the shift from the
-    // screen to the honeycomb, held.z how tightly it packs).
+    // there, and lets go as a window fades and from 250 to 450 px out
+    // (held.xy is the shift from the screen to the honeycomb, held.z how
+    // tightly it packs).
     Seen seen = UNSEEN;
     float shadow = 0.0;
     vec3 held = vec3(0.0);
+    uint reached = windowsAt(px);
     for (int i = 0; i < windowCount; i++) {
+        if (!reaches(reached, i)) continue;
         Window w = window(px, i);
         see(seen, w);
         float beyond = max(w.d, 0.0);
-        float grip = exp(-beyond / 70.0);
+        float grip = exp(-beyond / 70.0) * (1.0 - smoothstep(250.0, 450.0, beyond));
         held += vec3(edgeNormal(px, w.rect, w.rounding) * 0.7 * beyond, 1.0) * grip;
         // Exactly 0 past offset plus softness from the window's edge.
         float soft = 18.0 + 40.0 * w.lift, offset = 24.0 + 44.0 * w.lift;
@@ -146,7 +148,7 @@ vec4 backdrop(vec2 px) {
 
     // A dragged window moves the viewpoint: the honeycomb, the nearer layer,
     // shifts against it by a few pixels, the far lattice by a third of that.
-    vec2 view = focusedIndex >= 0 ? window(px, focusedIndex).velocity * 0.003 : vec2(0.0);
+    vec2 view = focusVelocity() * 0.003;
 
     // Far behind: slow purple haze and a lattice three times the size, offset
     // against the focused window so it reads as deeper than the near one.
@@ -165,12 +167,12 @@ vec4 backdrop(vec2 px) {
     // between windows add up) and most near the focused one. A moving window
     // sets it rippling: rings of cells light and run outward from the window,
     // and the cells where it has just been stay lit behind it, fading.
-    // The cell is a point of its own, so the windows are met again there.
+    // The cell is a point of its own, so the windows are met again there:
+    // those reaching px, a cell away, and the moving ones.
     float wake = 0.0, stir = 0.0;
-    Seen atCell = UNSEEN;
     for (int i = 0; i < windowCount; i++) {
+        if (!reaches(reached, i) && windowTexels[3 * i + 2].xy == vec2(0.0)) continue;
         Window w = window(cell.xy, i);
-        see(atCell, w);
         wake += 0.6 * exp(-abs(w.d) / 28.0);
         vec2 v = w.velocity;
         float speed = length(v);
@@ -186,7 +188,7 @@ vec4 backdrop(vec2 px) {
             stir += (1.4 - 0.3 * float(k)) * pace * exp(-abs(fieldDistance(cell.xy, ago(w, 0.03 * float(k)))) / 26.0);
         }
     }
-    float toFocus = abs(atCell.focus);
+    float toFocus = focusedIndex < 0 ? FAR : abs(window(cell.xy, focusedIndex).d);
     wake += 2.0 * exp(-toFocus / 40.0) + 0.35 * exp(-toFocus / 500.0);
     // The field breathes gently with your voice round the focused window.
     wake += voice * 0.6 * exp(-toFocus / 80.0);
@@ -214,16 +216,15 @@ vec4 backdrop(vec2 px) {
     // Each cell is a tile with a bright rim and a dark seam to its
     // neighbours. Awake cells glow steadily and swell together in broad
     // patches that drift slowly, so the field breathes instead of glittering
-    // cell by cell; a few burn Unit-01 green. Where the field packs tight
-    // round a window its rims glow brighter, as if holding the window.
-    float seed = hash(cell.xy * 0.0137 + 0.31);
+    // cell by cell. Where the field packs tight round a window its rims glow
+    // brighter, as if holding the window. A rim fades out at its cell's
+    // edge, so float noise cannot hand an edge pixel to the next cell.
     float swell = smoothstep(0.25, 0.75, noise(cell.xy * 0.006 + orbit(30.0, 1.2)));
     float lit = min(wake, 2.5) * (0.5 + 0.7 * swell) + ripple * 1.6;
-    vec3 tint = seed > 0.97 ? GREEN * 0.7 : orange;
     float tile = smoothstep(2.0, 3.5, cell.z);
-    float rim = glowLine(abs(cell.z - 3.0), 0.9) * (1.0 + 0.5 * min(held.z, 1.0));
+    float rim = glowLine(abs(cell.z - 3.0), 0.9) * (1.0 + 0.5 * min(held.z, 1.0)) * smoothstep(0.0, 0.5, cell.z);
     light += orange * glowLine(cell.z, 0.8) * 0.035;
-    light += tint * (tile * 0.06 + rim * 0.3) * lit * veil * shade;
+    light += orange * (tile * 0.06 + rim * 0.3) * lit * veil * shade;
 
     // A cell the field's answer or a moving window reaches burns whole, its
     // rim near white, and through the glass too, where its tile carries the
