@@ -148,9 +148,10 @@ case ${1:-} in
     exit 75 ;;
   --queue) shift; (($#)) && enqueue "$@"; exit ;;
   --away)
-    [[ $(hyprctl -j monitors | jq '[.[] | select(.dpmsStatus)] | length') == 0 ]] && exit 0
+    # Each answer counts only from a query that succeeded (pipefail).
+    hyprctl -j monitors | jq -e 'length > 0 and all(.[]; .dpmsStatus == false)' >/dev/null && exit 0
     session=$(loginctl show-user "$(id -un)" -p Display --value) && [[ -n $session ]] &&
-      [[ $(loginctl show-session "$session" -p LockedHint --value) == yes ]]
+      locked=$(loginctl show-session "$session" -p LockedHint --value) && [[ $locked == yes ]]
     exit ;;
   --supervise) shift; supervise "$@" ;;
   --runner)
