@@ -27,6 +27,8 @@ vec4 cinemaShade(vec3 rgb) {
 // theme drawn solid.
 #if USE_BLUR
 vec4 cinemaHold(vec4 pix, vec2 uv, float k) {
+    // No frost and nothing of the app's: not drawn (the bar's layer is screen-sized).
+    if (k <= 0.0 && pix == vec4(0.0)) discard;
     // Where the frost cannot move a pixel a level (k to 1/255: an opaque
     // pixel of a 0.999 window) it is the app's, so text keeps its exact
     // level; dithered in full from two levels.
