@@ -16,9 +16,9 @@
 // Every object a client makes is accepted through one dispatcher that reads
 // the protocol's own message tables: a request creates the objects its
 // signature names and a "destroy" or "release" ends its object. Only the few
-// requests below change anything. Once a second it pings its client and
-// tells each window its size again (see beat). tools/hidden-desktop builds
-// and runs it.
+// requests below change anything. Once a second until the first frame it
+// pings its client and tells each window its size again (see beat).
+// tools/hidden-desktop builds and runs it.
 
 #define _GNU_SOURCE
 #include <EGL/egl.h>
@@ -155,7 +155,7 @@ static void configure(struct wl_resource *toplevel) {
 // it to send them. It also creates that window's output, and starts listening
 // for its size, only after reading what came back to those requests: a
 // configure read with them is lost and the screen stays unsized, so each
-// window is told its size again.
+// window is told its size again, until a frame shows it has one.
 static int beat(void *unused) {
     struct wl_resource *r;
     wl_resource_for_each(r, &fc.shells) xdg_wm_base_send_ping(r, ++fc.serial);
@@ -195,6 +195,7 @@ static void act(struct wl_resource *r, const char *request, union wl_argument *a
     } else if (!strcmp(request, "wl_surface.commit")) {
         // A buffer is a new frame. Nothing reads it, so it is free again at once.
         if (!wl_list_empty(&s->attached)) {
+            wl_event_source_timer_update(fc.beat, 0);
             char line[64];
             snprintf(line, sizeof line, "c %lld\n", monotonic());
             note(line);
