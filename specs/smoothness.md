@@ -63,8 +63,10 @@ Hyprland only composites.
   windows' block which of them reach each of 32 by 32 tiles, and a film's
   loop reads its tile once and skips the rest. Moving frame, world passes
   at full size: the same at 3 windows, 5 to 14% less at 6, 15 to 24% less
-  at 10. Evangelion's held honeycomb reaches the whole screen: it meets
-  every window.
+  at 10. Evangelion's held honeycomb meets every window: a far window
+  still shifts its cells by a millionth of a pixel, which moves cell edges
+  through pixels, so culled at 1500 px it is 17 to 27 levels off and is
+  exact only at 2000 px, where the tiles cost 5 to 10% more than none.
 - **A wake or a shadow pays only where it reaches.** A moving window's ghosts
   are drawn only outside it and within a reach of where it was; past that
   their light moves no point a twentieth of a display level (a hundredth in
