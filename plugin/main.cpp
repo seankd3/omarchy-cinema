@@ -469,13 +469,12 @@ void main() {
 
     // A film's reach in px or its frost's samples: up to five ASCII digits,
     // and three after a point (as tools/preview.py reads it, and always a
-    // float); anything else is unbounded.
-    float reachOf(const std::string& value) {
-        static const std::regex PX(R"([0-9]{1,5}(\.[0-9]{0,3})?)");
-        float                   reach = INFINITY;
-        if (std::regex_match(value, PX))
-            std::from_chars(value.data(), value.data() + value.size(), reach);
-        return reach;
+    // float); anything else is `otherwise`.
+    float amountOf(const std::string& value, float otherwise) {
+        static const std::regex AMOUNT(R"([0-9]{1,5}(\.[0-9]{0,3})?)");
+        if (std::regex_match(value, AMOUNT))
+            std::from_chars(value.data(), value.data() + value.size(), otherwise);
+        return otherwise;
     }
 
     // The theme's shader, palette and glass, from the theme Omarchy has just
@@ -521,7 +520,7 @@ void main() {
                 if (match[1] == "glass")
                     g->glass = glassOf(match[2]);
                 else
-                    (match[1] == "reach" ? g->reach : g->samples) = reachOf(match[2]);
+                    (match[1] == "reach" ? g->reach : g->samples) = amountOf(match[2], match[1] == "reach" ? INFINITY : 4);
             }
             if (!std::regex_search(line, match, PALETTE))
                 continue;
