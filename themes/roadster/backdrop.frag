@@ -174,11 +174,10 @@ vec4 backdrop(vec2 px) {
     // One pass over the windows: the nearest edge, how near any is, how much
     // window there is, their shadows on the floor (cast toward the viewer
     // from the horizon, further and softer with lift), and faint corner
-    // brackets on every window but the focused one, which the lock frame
-    // holds.
-    // The floor's lanes bow out round each window's foot (`bend`, pixels
-    // across), and its lines run from the foot's corners toward the viewer.
-    // And a moving window's speed lines.
+    // brackets 22 to 31 px out (lit to their glow's 31 px) on every window
+    // but the focused one, which the lock frame holds. The floor's lanes bow
+    // out round each window's foot (`bend`, pixels across). And a moving
+    // window's speed lines.
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0, bend = 0.0;
     vec3 speeding = vec3(0.0);
@@ -193,14 +192,14 @@ vec4 backdrop(vec2 px) {
         vec4 r = w.rect;
         float lift = w.lift;
         shadow = max(shadow, windowShadow(px, w, vec2(0.0, 26.0 + 44.0 * lift), 18.0 + 34.0 * lift));
-        if (i != focusedIndex) light += red * glowLine(brackets(px, r, 22.0, 34.0), 1.0) * 0.4 * a;
+        if (i != focusedIndex && abs(edgeDistance(w) - 22.0) < 54.0 + w.rounding) light += red * glowLine(brackets(px, r, 22.0, 34.0), 1.0) * 0.4 * a;
         float side = px.x < r.x + r.z * 0.5 ? -1.0 : 1.0;
         bend += side * 34.0 * exp(-max(d, 0.0) / 60.0) * smoothstep(r.y, r.y + r.w, px.y) * (1.0 - 0.6 * lift) * a;
         speeding += speedLines(px, w, red);
     }
     // Only a window standing on the floor (its foot below the horizon) has
-    // floor lines, and they run on from the corner, never back, across the
-    // whole floor, past its reach: every window is met for them.
+    // floor lines, and they run on from the corner, never back, past its
+    // reach: every window is met for them.
     for (int i = 0; i < windowCount; i++) {
         Window w = window(px, i);
         vec4 r = w.rect;
@@ -209,6 +208,7 @@ vec4 backdrop(vec2 px) {
             vec2 corner = vec2(r.x + r.z * float(k), foot);
             vec2 dir = normalize(corner - vanish + vec2(0.0, 1e-3));
             float off = abs(dot(px - corner, vec2(-dir.y, dir.x)));
+            if (off > glowReach(0.04, 20.0)) continue;
             float run = dot(px - corner, dir);
             light += red * (glowLine(off, 1.0) * 0.5 + 0.04 * exp(-off / 20.0)) * exp(-max(run, 0.0) / 260.0) * step(0.0, run) * w.alpha;
         }
