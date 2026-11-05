@@ -13,7 +13,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 
 if [[ ${1:-} == --inside ]]; then
-  slug=$2 out=$3 ends=$4
+  slug=$2 out=$3
   hyprctl plugin list | grep -q '^Plugin backdrop ' || { echo "theme-previews: the backdrop plugin did not load" >&2; exit 1; }
 
   # Apps start the way Omarchy starts them, from Hyprland, so they have its
@@ -71,9 +71,10 @@ if [[ ${1:-} == --inside ]]; then
   # would read as the theme's cost. A still is kept only when every 2 s
   # since btop started, the capture's included, was idle: at most 10% busy
   # in all and 30% on each core, and the 1 and 5 minute loads under 3. Any
-  # other 2 s starts btop's graph afresh. A machine still busy a minute
-  # before the run ends (`ends`) leaves the still to a later run (75: it
-  # waits in tools/yield's queue).
+  # other 2 s starts btop's graph afresh. A machine still busy after 10
+  # minutes of this leaves the still to a later run (75: it waits in
+  # tools/yield's queue); the run's other 10 minutes are for the desktop's
+  # setup and end, which take about a minute and a half.
   sample() {
     local name rest s
     while read -r name rest && [[ $name == cpu* ]]; do
@@ -97,8 +98,8 @@ if [[ ${1:-} == --inside ]]; then
   fresh() { pkill -x -P "$(<"$XDG_RUNTIME_DIR/cinema-btop.pid")" btop || true; }
   fresh
   idle || true
-  for ((n = 0; n <= 20;)); do
-    ((EPOCHSECONDS < ends - 60)) || { echo "theme-previews: the machine stayed busy; $slug waits for a later run" >&2; exit 75; }
+  for ((n = 0, waited = SECONDS + 600; n <= 20;)); do
+    ((SECONDS < waited)) || { echo "theme-previews: the machine stayed busy; $slug waits for a later run" >&2; exit 75; }
     ((n == 20)) && grim "$out/$slug.png"
     sleep 2
     if idle; then n=$((n + 1)); else n=0 && fresh; fi
@@ -107,7 +108,6 @@ if [[ ${1:-} == --inside ]]; then
 fi
 
 "$here/tools/yield" --within >/dev/null || exec "$here/tools/yield" "$0" "$@"
-ends=$("$here/tools/yield" --ends)
 if (($#)); then
   slugs=("$@")
 else
@@ -126,7 +126,7 @@ for slug in "${slugs[@]}"; do
   mkdir "$out/$slug"
   status=0
   "$here/tools/hidden-desktop" --fresh --size 2560x1440 --scale 1.333333 --theme "$slug" --out "$out/$slug" \
-    "$here/tools/theme-previews" --inside "$slug" "$out/$slug" "$ends" || status=$?
+    "$here/tools/theme-previews" --inside "$slug" "$out/$slug" || status=$?
   ((status == 75)) && exit 75
   if ((status)); then
     echo "theme-previews: $slug failed; $out/$slug/hypr.*/*/hyprland.log and desktop.log say what the desktop did" >&2

@@ -22,8 +22,6 @@
 #   tools/yield --within [WxH]   for the tools: 1 outside any run; in one, 0
 #                                when WxH fits it (with no WxH it prints the
 #                                run's largest size), else 75 (it is queued)
-#   tools/yield --ends           in a run, the second (epoch) it is ended at;
-#                                1 outside any
 #
 # In ${XDG_STATE_HOME:-~/.local/state}/omarchy-cinema/bench: log, a line a
 # run; queue/, a file a waiting run (its directory, environment and
@@ -41,12 +39,12 @@ mkdir -p "$state/queue" "$state/out" "$runs"
 # its parent.
 proc() { local s; read -r s 2>/dev/null <"/proc/$1/stat" || return 1; s=(${s##*) }); echo "${s[19]} ${s[1]}"; }
 
-# The run this process is in, from its ancestors: the run's PID, the second
-# it is ended at and its largest size (none while nobody is at the screen).
+# The run this process is in, from its ancestors: the run's PID and largest
+# size (none while nobody is at the screen).
 within() {
   local pid=$PPID start parent mine size
   while ((pid > 1)) && read -r start parent < <(proc "$pid"); do
-    if read -r mine ends size 2>/dev/null <"$runs/$pid" && [[ $mine == "$start" ]]; then run=$pid end=$ends max=$size; return 0; fi
+    if read -r mine size 2>/dev/null <"$runs/$pid" && [[ $mine == "$start" ]]; then run=$pid max=$size; return 0; fi
     pid=$parent
   done
   return 1
@@ -109,7 +107,7 @@ supervise() {
   present && who=present max=1440x900 limit=11
   [[ $who == present && -n $queued ]] && exit 75
   read -r start _ < <(proc $$)
-  echo "$start $((EPOCHSECONDS + limit)) $max" >"$runs/$$"
+  echo "$start $max" >"$runs/$$"
   trap 'rm -f "$runs/$$" "$runs/$$.waits"' EXIT
   # Should the supervisor itself be ended, the gap is as long as a whole run.
   [[ $who == present ]] && echo $((EPOCHSECONDS + 30)) >"$runs/gap"
@@ -148,7 +146,6 @@ case ${1:-} in
     : >"$runs/$run.waits"
     echo "yield: $2 is more than $max while someone is at the screen" >&2
     exit 75 ;;
-  --ends) within && echo "$end"; exit ;;
   --queue) shift; (($#)) && enqueue "$@"; exit ;;
   --away)
     # Each answer counts only from a query that succeeded (pipefail).
