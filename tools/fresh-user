@@ -72,9 +72,10 @@ if [[ ${1:-} == --inside ]]; then
   exit
 fi
 
+"$here/tools/yield" --within || exec "$here/tools/yield" "$0" "$@"
 film=${1:-jarvis}
 [[ -f $here/themes/$film/backdrop.frag ]] || { echo "fresh-user: $film is not a film theme" >&2; exit 2; }
 out=$(mktemp -d)
 # The desktop is small: this tests the paths, not the look.
-timeout 180 "$here/tools/hidden-desktop" --fresh --size 1280x800 --scale 1 --out "$out" "$here/tools/fresh-user" --inside "$film" "$out"
+"$here/tools/hidden-desktop" --fresh --size 1280x800 --scale 1 --out "$out" "$here/tools/fresh-user" --inside "$film" "$out"
 rm -rf "$out"

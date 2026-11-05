@@ -112,9 +112,11 @@ plugin idle 1.0 and 0.6, with no plugin 2.0 frames.
 ## Measuring
 
 - A bench takes frames from the session on the same GPU, and GPU priority
-  does not protect it. While someone uses the machine: at most 1440x900 and
-  15 s a run, with an equal gap. Full size only while every monitor sleeps
-  or the session is locked, behind a watchdog.
+  does not protect it, so benches yield to the person at the screen: every
+  tool that draws on the GPU runs in `tools/yield`, which gives a run 15 s
+  and 1440x900 at most while someone is there, and a gap as long after it.
+  What does not fit waits in its queue for the session locked or every
+  monitor asleep, and ends the moment someone is back.
 - The GPU clock is not fixed (754 MHz most runs, 2340 seen once while
   another client kept it busy): record it per run and compare only runs at
   one clock.

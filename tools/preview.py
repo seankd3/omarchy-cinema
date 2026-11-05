@@ -17,7 +17,9 @@ landed while you speak into the focused one, and a window opening, one
 closing and focus moving.
 """
 
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -49,6 +51,21 @@ FRAME_MAIN = (ROOT / "plugin/main-frame.glsl").read_text()
 # Hyprland's own window shader, from the installed build's headers, as the
 # plugin takes it from the running build (main.cpp, glassShaderSource()).
 SHADERS = Path("/usr/include/hyprland/src/render/shaders")
+
+
+def bench(size=None):
+    """GPU runs go through tools/yield, which yields them to the person at
+    the screen: outside a run this process starts again inside one, and in
+    one, a `size` (w, h) larger than the run allows queues it (exit 75)."""
+    door = str(ROOT / "tools/yield")
+    status = subprocess.run([door, "--within", *([f"{size[0]}x{size[1]}"] if size else [])]).returncode
+    if status == 1:
+        os.execv(door, [door, sys.executable, *sys.orig_argv[1:]])
+    if status:
+        sys.exit(status)
+
+
+bench()
 
 
 def palette(theme):
@@ -198,6 +215,7 @@ def half_world(ctx, theme, t, windows, focused, levels=1, **answers):
 def render(theme, t, windows, focused, frame=None, **answers):
     """One scene() drawn off screen: the backdrop as RGB, or a frame as
     premultiplied RGBA."""
+    bench(PIXELS)
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     world = half_world(ctx, theme, t, windows, focused, **answers) if frame is not None else None
     draw = scene(ctx, theme, t, windows, focused, frame=frame, world=world, **answers)
@@ -290,6 +308,7 @@ def glass(theme, image, t, windows, focused, border=True, **answers):
     colors = palette(theme)
     scale = PIXELS[0] / LOGICAL[0]
     levels = min(max(int(np.floor(np.log2(max(2 * setting(theme, "frost", 3) * scale, 1)) + 0.5)), 1), 6)
+    bench(PIXELS)
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
     world = half_world(ctx, theme, t, windows, focused, levels, **answers)

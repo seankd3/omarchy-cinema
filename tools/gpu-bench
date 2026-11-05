@@ -13,8 +13,8 @@ With --frames it times the moment's windows' frames instead, each drawn over
 the whole screen (outside its band a frame returns at once). A CHECKOUT is
 timed from its own tools/preview.py, which needs scene() and storyboard()
 (this tool's first commit has them, on an unchanged plugin and films, as a
-base to time against). Run it under the hidden desktop's lock: it shares the
-GPU.
+base to time against). It runs in tools/yield, as preview.py does: it shares
+the GPU.
 """
 import importlib.util
 import sys
@@ -39,6 +39,7 @@ def main():
     frames = "--frames" in args
     films = [a for k, a in enumerate(args) if not a.startswith("--") and (k == 0 or args[k - 1] != "--moment")]
     here = str(Path(__file__).resolve().parent.parent)
+    checkout(here).bench(checkout(here).PIXELS)
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     runs = []
     for film in films:

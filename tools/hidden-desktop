@@ -32,8 +32,7 @@
 # 2880x1800 at 1.25, unless --size and --scale say otherwise.
 #
 # Each wait lasts as long as what it waits for is alive, however loaded the
-# machine is; a deadline for the whole run is the caller's: run it under
-# timeout(1), as theme-previews does.
+# machine is; the whole run's deadline is tools/yield's, which it runs in.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -185,7 +184,7 @@ if [[ ${1:-} == --inside ]]; then
   exit
 fi
 
-size=2880x1800 scale=1.25 theme="" out="" plugin="" fresh=""
+args=("$@") size=2880x1800 scale=1.25 theme="" out="" plugin="" fresh=""
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --fresh) fresh=1; shift; continue ;;
@@ -199,6 +198,7 @@ while [[ ${1:-} == --* ]]; do
   shift 2
 done
 (($#)) || { echo "usage: tools/hidden-desktop [--fresh] [--size WxH] [--scale S] [--theme SLUG] [--plugin SO] [--out DIR] <command> [args...]" >&2; exit 2; }
+"$here/tools/yield" --within "$size" || { (($? == 1)) && exec "$here/tools/yield" "$0" "${args[@]}"; exit 75; }
 
 build=$here/tools/build
 frameclock=$build/frameclock

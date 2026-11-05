@@ -22,9 +22,7 @@
 #   gpu     the hidden Hyprland's SM share (nvidia-smi pmon) and its GPU ms a
 #           frame rendered
 #   wait    ms a second the hidden Hyprland waited for a CPU (schedstat)
-# Each desktop runs at the lowest CPU and disk priority, under a two and a half
-# minute deadline, and holds /tmp/omarchy-cinema-hidden.lock, so only one
-# hidden desktop runs on the machine at a time.
+# It runs in tools/yield, which yields it to the person at the screen.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -127,6 +125,7 @@ if [[ ${1:-} == --inside ]]; then
   exit
 fi
 
+"$here/tools/yield" --within || exec "$here/tools/yield" "$0" "$@"
 rounds=3 theme=tron-legacy size=()
 while [[ ${1:-} == --* ]]; do
   case $1 in
@@ -163,8 +162,7 @@ for ((round = 1; round <= rounds; round++)); do
     mkdir "$out"
     plugin=()
     [[ -n ${plugins[i]} ]] && plugin=(--plugin "${plugins[i]}")
-    nice -n 19 ionice -c 3 flock /tmp/omarchy-cinema-hidden.lock timeout 150 "$here/tools/hidden-desktop" "${size[@]}" --theme "$theme" \
-      "${plugin[@]}" --out "$out" "$here/tools/smoothness" --inside "$out" &
+    "$here/tools/hidden-desktop" "${size[@]}" --theme "$theme" "${plugin[@]}" --out "$out" "$here/tools/smoothness" --inside "$out" &
     desktop=$!
     until [[ -s $out/start ]] || ! kill -0 "$desktop" 2>/dev/null; do sleep 0.2; done
     pid=$(pgrep -f -- "-c $here/tools/hidden-desktop.lua" | head -1 || true)
