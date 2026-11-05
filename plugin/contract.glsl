@@ -235,24 +235,19 @@ void see(inout Seen s, Window w) {
 // lines() take that mean, so a thin line neither floods the frost nor beads.
 uniform float spread;
 
-// The integral from 0 to x of a line's crisp core, 1 - smoothstep(0, w, |x|),
-// and of a glow exp(-|x| / s).
+// The integral from 0 to x of a line's crisp core, 1 - smoothstep(0, w, |x|).
 float coreArea(float x, float w) {
     float u = min(abs(x) / w, 1.0);
     return sign(x) * (min(abs(x), w) - w * u * u * u * (1.0 - 0.5 * u));
 }
 
-float glowArea(float x, float s) {
-    return sign(x) * s * (1.0 - exp(-abs(x) / s));
-}
-
 // A line `d` pixels away: a crisp core `w` pixels wide in a soft glow,
 // `halo.x` bright and fading over `halo.y` core widths; most films glow
-// vec2(0.25, 5.0).
+// vec2(0.25, 5.0). Its core is the mean over `spread` (the glow is soft
+// enough as it is).
 float glowLine(float d, float w, vec2 halo) {
-    float s = w * halo.y, a = d - 0.5 * spread, b = d + 0.5 * spread;
-    if (spread <= 0.0) return (1.0 - smoothstep(0.0, w, d)) + halo.x * exp(-d / s);
-    return (coreArea(b, w) - coreArea(a, w) + halo.x * (glowArea(b, s) - glowArea(a, s))) / spread;
+    float core = spread > 0.0 ? (coreArea(d + 0.5 * spread, w) - coreArea(d - 0.5 * spread, w)) / spread : 1.0 - smoothstep(0.0, w, d);
+    return core + halo.x * exp(-d / (w * halo.y));
 }
 
 // Lines at every whole number of x, each a crisp core w wide round it, as
