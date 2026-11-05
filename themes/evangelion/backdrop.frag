@@ -148,7 +148,7 @@ vec4 backdrop(vec2 px) {
 
     // Far behind: slow purple haze and a lattice three times the size, offset
     // against the focused window so it reads as deeper than the near one.
-    float haze = noise(px * 0.0016 + orbit(180.0, 1.5)) * noise(px * 0.0045 - orbit(120.0, 2.0));
+    float haze = 0.5 * noise(px * 0.0016 + orbit(180.0, 1.5));
     vec3 far = hexCell(px + (centre - resolution * 0.5) * 0.05 + view * 0.35, CELL * 3.0);
     light += PURPLE * (0.1 * haze * haze + glowLine(far.z, 1.0) * (0.015 + 0.25 * haze) * veil);
 
@@ -209,13 +209,11 @@ vec4 backdrop(vec2 px) {
     light *= shade;
 
     // Each cell is a tile with a bright rim and a dark seam to its
-    // neighbours. Awake cells glow steadily and swell together in broad
-    // patches that drift slowly, so the field breathes instead of glittering
+    // neighbours. Awake cells glow steadily, so the field never glitters
     // cell by cell. Where the field packs tight round a window its rims glow
     // brighter, as if holding the window. A rim fades out at its cell's
     // edge, so float noise cannot hand an edge pixel to the next cell.
-    float swell = smoothstep(0.25, 0.75, noise(cell.xy * 0.006 + orbit(30.0, 1.2)));
-    float lit = min(wake, 2.5) * (0.5 + 0.7 * swell) + ripple * 1.6;
+    float lit = min(wake, 2.5) * 0.85 + ripple * 1.6;
     float tile = smoothstep(2.0, 3.5, cell.z);
     float rim = glowLine(abs(cell.z - 3.0), 0.9) * (1.0 + 0.5 * min(held.z, 1.0)) * smoothstep(0.0, 0.5, cell.z);
     light += orange * glowLine(cell.z, 0.8) * 0.035;
