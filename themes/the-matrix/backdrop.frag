@@ -184,10 +184,9 @@ vec4 backdrop(vec2 px) {
         if (speed < 40.0) continue;
         float pace = min(speed / 1500.0, 1.0) * w.alpha;
         pull -= v.x * 0.02 * exp(-max(d, 0.0) / 80.0) * pace;
-        // Past 340 px from where the window was in the last 0.14 s (its last
-        // ghost's lag) the wake, 0.8 exp(-340 / 30) of the rain's light, moves
-        // no point a twentieth of a display level, so it is not drawn there.
-        if (d < 0.0 || edgeDistance(w) > 340.0 + speed * 0.14) continue;
+        // The wake, 0.8 exp(-d / 30) of the rain's light, only within its
+        // reach of where the window was in the last 0.14 s (its last ghost's lag).
+        if (d < 0.0 || edgeDistance(w) > glowReach(0.8, 30.0) + speed * 0.14) continue;
         for (int k = 1; k <= 4; k++) {
             vec4 ghost = w.rect;
             ghost.xy -= v * 0.035 * float(k);

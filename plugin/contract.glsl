@@ -236,6 +236,12 @@ float glowLine(float d, float w) {
     return glowLine(d, w, vec2(0.25, 5.0));
 }
 
+// How far a glow `strength` exp(-d / falloff) reaches: past it, it moves no
+// point a twentieth of a display level, so it need not be drawn.
+float glowReach(float strength, float falloff) {
+    return falloff * log(strength * 5100.0);
+}
+
 // Distance from p to the segment from a to b.
 float segment(vec2 p, vec2 a, vec2 b) {
     vec2 ab = b - a;

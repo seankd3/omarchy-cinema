@@ -67,9 +67,8 @@ Hyprland only composites.
   every window.
 - **A wake or a shadow pays only where it reaches.** A moving window's ghosts
   are drawn only outside it and within a reach of where it was; past that
-  their light, bounded from the film's falloff and tone map, moves no point a
-  twentieth of a display level (a hundredth in Tron) per moving window, as
-  each film's comment shows. windowShadow is exactly 0 from 2 px inside the
+  their light moves no point a twentieth of a display level (a hundredth in
+  Tron) per moving window, contract.glsl's glowReach() of its glow. windowShadow is exactly 0 from 2 px inside the
   window and past its softness: 6 to 22% off a drag.
 
 At 2880x1800, GPU at 754 MHz, windows moving (2026-11-03), ms

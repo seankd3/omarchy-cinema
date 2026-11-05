@@ -130,16 +130,15 @@ vec3 holdLines(vec2 px, int i, vec3 cyan) {
 
 // A moving window's wake, which may shine: dashed afterimages of it where it just was over a wash of scanned light,
 // outside the window itself, and the lattice it sweeps across lit up
-// (`lattice`). It is gone as soon as the window stops. Past 70 px from
-// where the window was in the last 0.16 s (its last afterimage's lag) the
-// wash is 0 and the dashes' glow, 4 x 0.28 exp(-70 / 7.5), moves no point
-// a twentieth of a display level, so it is not drawn there.
+// (`lattice`). It is gone as soon as the window stops, and drawn only
+// within its dashes' reach of where the window was in the last 0.16 s (its
+// last afterimage's lag); the wash ends nearer.
 vec3 afterimage(vec2 px, Window w, vec3 cyan, inout float lattice) {
     vec3 light = vec3(0.0);
     vec2 v = w.velocity;
     float speed = length(v);
     // Only a moving window pays for its wake, and only where it reaches.
-    if (speed >= 40.0 && w.d > 0.0 && edgeDistance(w) < 70.0 + speed * 0.16) {
+    if (speed >= 40.0 && w.d > 0.0 && edgeDistance(w) < glowReach(4.0 * 0.28, 7.5) + speed * 0.16) {
         vec3 tint = w.i == focusedIndex ? mix(cyan, HOT, 0.35) : cyan;
         float wash = 0.0;
         float k = min(speed / 1200.0, 1.0) * w.alpha * smoothstep(0.0, 3.0, w.d);
@@ -292,9 +291,8 @@ vec4 backdrop(vec2 px) {
     }
 
     // Flat rings in the screen's plane, out past the window's edges, paid for
-    // within 250 px of them: past that their glows, 0.14 exp(-d / 30), move
-    // no point a twentieth of a level.
-    if (abs(r - reach * 1.12) < reach * 0.12 + 250.0) {
+    // within their glows' reach.
+    if (abs(r - reach * 1.12) < reach * 0.12 + glowReach(0.14, 30.0)) {
         float a = atan(p.y, p.x);
         float turned = a - swing;
         light += cyan * glowLine(abs(r - reach * 1.04), 1.0, HALO) * dashes(turned, r, 120.0, 0.45, -cycle(120.0)) * 0.5;

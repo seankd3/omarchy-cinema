@@ -95,10 +95,9 @@ vec4 backdrop(vec2 px) {
     // it, seen through the glass, stays lit (1 in full shadow).
     //
     // A moving window leaves its circuit behind it as a fading light trail,
-    // outside the window itself. Past 80 px from where the window was in the
-    // last 0.125 s (its last ghost's lag) the five glows, 1.8 x 0.25
-    // exp(-73 / 6.6), move no point a hundredth of a display level, so it is
-    // not drawn there.
+    // outside the window itself, drawn only within its five glows' reach (7 px
+    // out, held to a hundredth of a level: five times their strength) of
+    // where the window was in the last 0.125 s (its last ghost's lag).
     bool ground = px.y > horizon;
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0;
@@ -124,7 +123,7 @@ vec4 backdrop(vec2 px) {
             }
         }
         float speed = length(w.velocity);
-        if (speed >= 40.0 && w.d > 0.0 && edgeDistance(w) < 80.0 + speed * 0.125) {
+        if (speed >= 40.0 && w.d > 0.0 && edgeDistance(w) < 7.0 + glowReach(5.0 * 5.0 * 1.8 * 0.25, 6.6) + speed * 0.125) {
             float outside = smoothstep(0.0, 3.0, w.d);
             vec3 tint = i == focusedIndex ? ORANGE : cyan;
             for (int k = 1; k <= 5; k++) {

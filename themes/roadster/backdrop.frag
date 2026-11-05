@@ -173,11 +173,10 @@ vec3 speedLines(vec2 px, Window w, vec3 red) {
             light += red * exp(-back / (speed * 0.12)) * 0.22 * k;
         }
         // The flight path marker: a ring with wings and a fin, ahead of
-        // the leading edge, as present as the speed. Past 80 px from its
-        // middle its glow, 0.42 exp(-d / 7) past its 25 px wings, moves no
-        // point a twentieth of a level per moving window.
+        // the leading edge, as present as the speed, drawn only within its
+        // glow's reach past its 25 px wings.
         vec2 m = px - (r.xy + r.zw * 0.5 + n * (ext + 50.0 + speed * 0.02));
-        if (length(m) > 80.0) continue;
+        if (length(m) > 25.0 + glowReach(0.42, 7.0)) continue;
         float ring = abs(length(m) - 9.0);
         float wings = abs(m.y) + max(abs(abs(m.x) - 17.0) - 8.0, 0.0);
         float fin = abs(m.x) + max(abs(m.y + 13.0) - 4.0, 0.0);
