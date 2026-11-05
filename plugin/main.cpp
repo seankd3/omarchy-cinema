@@ -28,7 +28,7 @@
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/state/workspace/State.hpp>
 
-#include <hyprland/src/render/gl/GLFramebuffer.hpp>
+#include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/output/MonitorResources.hpp>
 #include <GLES3/gl32.h>
 #include <cairo/cairo.h>
@@ -120,10 +120,6 @@ void main() {
         ;
     const char* FRAME_MAIN =
 #include "main-frame.inc"
-        ;
-    const char* COPY = "#version 300 es\nprecision highp float;\n"
-#include "dither.inc"
-#include "copy.inc"
         ;
     const char* GLASS =
 #include "glass.inc"
@@ -220,13 +216,13 @@ void main() {
         bool                                  stale = true;
     };
 
-    // One of the plugin's programs (the film's backdrop and frame, the
-    // frost's copy) and where its uniforms are, each named as its shader
-    // names it; one a program lacks is -1, which GL ignores.
+    // One of the plugin's programs (the film's backdrop and frame) and where
+    // its uniforms are, each named as its shader names it; one a program
+    // lacks is -1, which GL ignores.
 #define UNIFORMS(X)                                                                                                                                               \
     X(proj) X(area) X(resolution) X(time) X(accent) X(background) X(foreground) X(focused) X(reserved) X(windowCount) X(focusedIndex) X(focusAlpha) X(feed)     \
         X(feedCount) X(feedPos) X(glyphs) X(impulses) X(impulseKinds) X(impulseWindows) X(impulseCount) X(voice) X(frameWindow) X(frameAlpha) X(frameBorder) \
-            X(drawnWorld) X(worldProj) X(source) X(level) X(size)
+            X(drawnWorld) X(worldProj)
     struct SProgram {
         GLuint id = 0;
 #define DECLARE(name) GLint name = -1;
@@ -240,21 +236,65 @@ void main() {
     // (the feed change, its count and next position), so a part of the
     // screen drawn again at rest shows the text the kept world does.
     struct SCoarse {
-        GLuint   texture = 0, fbo = 0, feed = 0;
-        int      width = 0, height = 0, levels = 0;
-        Mat3x3   proj;
-        uint64_t feedUploaded = 0;
-        uint32_t feedCount = 0, feedPos = 0;
-        // The frost target last drawn whole: its framebuffer and size.
-        GLuint   frosted = 0;
-        Vector2D frostedSize;
+        GLuint               texture = 0, fbo = 0, feed = 0;
+        int                  width = 0, height = 0, levels = 0;
+        Mat3x3               proj;
+        uint64_t             feedUploaded = 0;
+        uint32_t             feedCount = 0, feedPos = 0;
+        // The texture the glass reads the frost from (frost()), the size of
+        // the level that holds it there, and a framebuffer drawing that level.
+        WP<Render::ITexture> frosted;
+        Vector2D             frostedSize;
+        GLuint               frostFbo = 0;
     };
 
+    // A pass is a guest in Hyprland's GL context. Hyprland skips binding a
+    // program or texture unit it believes is still current, so a pass holds
+    // one of these from its first GL call to its last, uploads included, and
+    // leaves all it changes as it found it: the program, the vertex array,
+    // the textures on the films' units 4 to 6, the active unit and the
+    // uniform buffer bindings.
+    struct SGuest {
+        GLint                program = 0, vao = 0, unit = 0, uniforms = 0, block = 0;
+        std::array<GLint, 3> textures{};
+        SGuest() {
+            glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+            glGetIntegerv(GL_ACTIVE_TEXTURE, &unit);
+            glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &uniforms);
+            glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, 0, &block);
+            for (int i = 0; i < 3; i++) {
+                glActiveTexture(GL_TEXTURE4 + i);
+                glGetIntegerv(GL_TEXTURE_BINDING_2D, &textures[i]);
+            }
+        }
+        ~SGuest() {
+            glBindVertexArray(vao);
+            glUseProgram(program);
+            glBindBufferBase(GL_UNIFORM_BUFFER, 0, block);
+            glBindBuffer(GL_UNIFORM_BUFFER, uniforms);
+            for (int i = 0; i < 3; i++) {
+                glActiveTexture(GL_TEXTURE4 + i);
+                glBindTexture(GL_TEXTURE_2D, textures[i]);
+            }
+            glActiveTexture(unit);
+        }
+    };
+
+    // Its GL objects deleted, and the glass's texture given back to Hyprland:
+    // its own level 0 read again.
     void forget(const SCoarse& coarse) {
-        glDeleteFramebuffers(1, &coarse.fbo);
+        glDeleteFramebuffers(2, std::array{coarse.fbo, coarse.frostFbo}.data());
         for (const auto texture : {coarse.texture, coarse.feed})
             if (texture)
                 glDeleteTextures(1, &texture);
+        if (const auto frosted = coarse.frosted.lock()) {
+            const SGuest guest;
+            glActiveTexture(GL_TEXTURE4);
+            glBindTexture(GL_TEXTURE_2D, frosted->m_texID);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 1000);
+        }
     }
 
     // What the film's programs draw with: the unit square, the windows'
@@ -263,7 +303,7 @@ void main() {
     struct SGpu {
         GLuint   vao = 0, vbo = 0, windows = 0, glyphs = 0;
         bool     glyphsUploaded = false;
-        SProgram backdrop, frame, copy;
+        SProgram backdrop, frame;
         std::unordered_map<MONITORID, SCoarse> coarse;
     };
 
@@ -339,6 +379,7 @@ void main() {
     UP<SState> g;
 
     void settle();
+    void redraw(PHLMONITOR monitor);
     void ownWords();
 
     std::string themeDir() {
@@ -538,7 +579,7 @@ void main() {
 
     void deleteProgram() {
         auto& gpu = g->gpu;
-        for (const auto program : {gpu.backdrop.id, gpu.frame.id, gpu.copy.id})
+        for (const auto program : {gpu.backdrop.id, gpu.frame.id})
             if (program)
                 glDeleteProgram(program);
         for (const auto buffer : {gpu.vbo, gpu.windows})
@@ -551,6 +592,9 @@ void main() {
         for (const auto& [id, coarse] : gpu.coarse)
             forget(coarse);
         gpu = {};
+        // Hyprland blurs the glass itself again until a backdrop makes it.
+        for (const auto& monitor : State::monitorState()->monitors())
+            redraw(monitor);
     }
 
     // Compiles and links one of the programs from its fragment shader. A
@@ -600,7 +644,6 @@ void main() {
             return false;
         if (g->framed)
             link(g->gpu.frame, g->source + FRAME_MAIN, "the theme's frame()");
-        link(g->gpu.copy, COPY, "the frost's copy");
 
         auto& gpu = g->gpu;
         GLint vao = 0, buffer = 0;
@@ -1287,39 +1330,6 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         glUniform1f(p.voice, answer.voice);
     }
 
-    // A pass is a guest in Hyprland's GL context. Hyprland skips binding a
-    // program or texture unit it believes is still current, so a pass holds
-    // one of these from its first GL call to its last, uploads included, and
-    // leaves all it changes as it found it: the program, the vertex array,
-    // the textures on the films' units 4 to 6, the active unit and the
-    // uniform buffer bindings.
-    struct SGuest {
-        GLint                program = 0, vao = 0, unit = 0, uniforms = 0, block = 0;
-        std::array<GLint, 3> textures{};
-        SGuest() {
-            glGetIntegerv(GL_CURRENT_PROGRAM, &program);
-            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
-            glGetIntegerv(GL_ACTIVE_TEXTURE, &unit);
-            glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &uniforms);
-            glGetIntegeri_v(GL_UNIFORM_BUFFER_BINDING, 0, &block);
-            for (int i = 0; i < 3; i++) {
-                glActiveTexture(GL_TEXTURE4 + i);
-                glGetIntegerv(GL_TEXTURE_BINDING_2D, &textures[i]);
-            }
-        }
-        ~SGuest() {
-            glBindVertexArray(vao);
-            glUseProgram(program);
-            glBindBufferBase(GL_UNIFORM_BUFFER, 0, block);
-            glBindBuffer(GL_UNIFORM_BUFFER, uniforms);
-            for (int i = 0; i < 3; i++) {
-                glActiveTexture(GL_TEXTURE4 + i);
-                glBindTexture(GL_TEXTURE_2D, textures[i]);
-            }
-            glActiveTexture(unit);
-        }
-    };
-
     // Binds the film's textures, with the kept world's text, and its world
     // drawn at half size unless that is being drawn (`drawing`), and the
     // windows, sets the program's state with `set` and binds the square.
@@ -1345,32 +1355,33 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
     }
 
     // The glass's frost: the coarse world softened through its mipmap, its
-    // last level as soft as the film's frost, copied into the framebuffer
-    // Hyprland's glass reads, so Hyprland need not blur the screen itself.
-    // It leaves that framebuffer bound, for its caller to put back.
-    void frost(PHLMONITOR monitor, SCoarse& coarse) {
-        const auto resources = monitor->resources();
-        auto*      target    = resources ? dynamic_cast<Render::GL::CGLFramebuffer*>(resources->m_blurFB.get()) : nullptr;
-        if (!target || !target->isAllocated())
-            return;
-        coarse.frosted     = target->getFBID();
-        coarse.frostedSize = target->m_size;
-        auto& gpu          = g->gpu;
+    // last level as soft as the film's frost, copied at its own size into
+    // level 1 of the texture Hyprland's glass reads (its blur framebuffer's),
+    // made the one level read there. Every reader samples that texture where
+    // it reads the screen, so no copy is screen-sized, and Hyprland need not
+    // blur the screen itself. Its level 0 stays Hyprland's (forget()). It
+    // leaves the coarse world's framebuffer bound, for its caller to put back.
+    void frost(SCoarse& coarse, const SP<Render::ITexture>& glass) {
+        const int last = coarse.levels - 1;
+        const int width = std::max(coarse.width >> last, 1), height = std::max(coarse.height >> last, 1);
         glActiveTexture(GL_TEXTURE4);
         glBindTexture(GL_TEXTURE_2D, coarse.texture);
         glGenerateMipmap(GL_TEXTURE_2D);
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target->getFBID());
-        glViewport(0, 0, target->m_size.x, target->m_size.y);
-        g_pHyprOpenGL->disableScissor();
-        glUseProgram(gpu.copy.id);
-        const Mat3x3 whole(std::array<float, 9>{2, 0, -1, 0, 2, -1, 0, 0, 1});
-        glUniformMatrix3fv(gpu.copy.proj, 1, GL_TRUE, whole.getMatrix().data());
-        glUniform4f(gpu.copy.area, 0, 0, 1, 1);
-        glUniform1i(gpu.copy.source, 4);
-        glUniform1f(gpu.copy.level, float(coarse.levels - 1));
-        glUniform2f(gpu.copy.size, target->m_size.x, target->m_size.y);
-        glBindVertexArray(gpu.vao);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.texture, last);
+        if (coarse.frosted.lock() != glass || coarse.frostedSize != Vector2D(width, height)) {
+            glBindTexture(GL_TEXTURE_2D, glass->m_texID);
+            glTexImage2D(GL_TEXTURE_2D, 1, GL_RGB10_A2, width, height, 0, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, nullptr);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 1);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 1);
+            if (!coarse.frostFbo)
+                glGenFramebuffers(1, &coarse.frostFbo);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.frostFbo);
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glass->m_texID, 1);
+            coarse.frosted     = glass;
+            coarse.frostedSize = {width, height};
+        }
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.frostFbo);
+        glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     }
 
     // What the plugin's passes share: they read no blur of Hyprland's, and
@@ -1413,9 +1424,9 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             const int  width = (monitor->m_transformedSize.x + 1) / 2, height = (monitor->m_transformedSize.y + 1) / 2;
             const int  levels    = frostLevels(monitor);
             const auto resources = monitor->resources();
-            auto*      target    = resources ? dynamic_cast<Render::GL::CGLFramebuffer*>(resources->m_blurFB.get()) : nullptr;
+            const auto glass     = resources && resources->m_blurFB && resources->m_blurFB->isAllocated() ? resources->m_blurFB->getTexture() : nullptr;
             const bool resized   = coarse.width != width || coarse.height != height || coarse.levels != levels;
-            const bool whole     = resized || state.stale || !target || target->getFBID() != coarse.frosted || target->m_size != coarse.frostedSize;
+            const bool whole     = resized || state.stale || !glass || glass != coarse.frosted.lock();
             state.stale          = false;
             if (!g->glyphPixels.empty()) {
                 glActiveTexture(GL_TEXTURE5);
@@ -1471,7 +1482,8 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
                 prepare(coarse, true, set);
                 g_pHyprOpenGL->disableScissor();
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-                frost(monitor, coarse);
+                if (glass)
+                    frost(coarse, glass);
                 glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
                 glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
                 glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
@@ -1767,8 +1779,10 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
     // or snapshotted on its own draws in an isolated scene, without it, as
     // its windows there are not where the monitor's scene has them.
     void onStage(const Event::SRenderStageEvent& event) {
-        if (!g || event.stage != RENDER_POST_WALLPAPER || g->source.empty() || !event.context || !event.monitor)
+        if (!g || event.stage != RENDER_POST_WALLPAPER || !event.context || !event.monitor)
             return;
+        // A theme that is no film (or one that does not compile) gives the
+        // glass back to Hyprland here, on its first frame (program()).
         auto& ctx = event.context->get();
         if (ctx.readOnlyEffects() || !program())
             return;
@@ -1867,7 +1881,5 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pHyprRenderer->context().m_pass.removeAllOfType("CBackdropPass");
     g_pHyprOpenGL->makeEGLCurrent();
     deleteProgram();
-    for (const auto& monitor : State::monitorState()->monitors())
-        redraw(monitor);
     g.reset();
 }

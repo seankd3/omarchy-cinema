@@ -37,8 +37,10 @@ small, as the glass's frost; what a frosted window covers is never drawn;
 Hyprland only composites.
 
 - **The plugin makes the frost.** The backdrop draws the world at half size
-  and puts its mipmap's level as soft as the film's `frost` in Hyprland's
-  blur framebuffer, so Hyprland queues no blur. The bar and the
+  and makes its mipmap's level as soft as the film's `frost`, at that
+  level's own size, the one level of Hyprland's blur texture that is read:
+  every reader samples it where it reads the screen, so Hyprland queues no
+  blur and nothing is copied screen-sized (0.35 to 0.45 ms). The bar and the
   notifications read the same frost (film.lua's xray rule): their layers
   cover the screen or stay mapped empty down its edge, and a live blur under
   them cost 0.8 ms every frame. A notification over a window shows the
