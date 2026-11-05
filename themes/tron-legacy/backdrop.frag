@@ -75,9 +75,6 @@ float gridLit(vec2 px) {
     return lit;
 }
 
-// Past REACH a window moves no point a level: its pooled light, exp(-d / 90),
-// reaches furthest.
-const float REACH = 800.0;
 
 vec4 backdrop(vec2 px) {
     vec3 cyan = accent;

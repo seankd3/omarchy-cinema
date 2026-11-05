@@ -249,9 +249,6 @@ void wake(vec2 px, Window w, inout float glow, inout float blue, inout float par
     }
 }
 
-// Past REACH a window moves no point a level: its lift's light, exp(-d / 120),
-// reaches furthest.
-const float REACH = 600.0;
 
 vec4 backdrop(vec2 px) {
     float horizon = horizonY();

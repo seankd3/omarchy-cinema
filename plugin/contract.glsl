@@ -162,9 +162,9 @@ float rectDistance(vec2 px, vec4 rect, float radius) {
 // ... }`, and asks all it needs of each there: at 2880x1800 every further
 // loop over three windows cost a draw 0.2 to 0.6 ms.
 //
-// A film says how far its windows reach, `const float REACH = <px>;`: past
-// it from a window and from where it was in the last 0.3 s, the window moves
-// no point a level. Its loop then meets at px only the windows that reach
+// A film says how far its windows reach as colors.toml's `reach = "<px>"`
+// (REACH): past it from a window and from where it was in the last 0.3 s,
+// the window moves no point a level. Its loop then meets at px only the windows that reach
 // it: `uint reached = windowsAt(px);` before, `if (!reaches(reached, i))
 // continue;` first. Without REACH every window reaches every point.
 struct Window {

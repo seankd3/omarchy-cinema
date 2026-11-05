@@ -44,3 +44,7 @@ bright_magenta = "#d2b2ea"
 # (a sample of the rain, 99th percentile).
 glass = "0.2"
 frost = "1"
+
+# Past this many px a window moves no point a level: the focus's nearness, exp(-d /
+# 160), reaches furthest.
+reach = "600"

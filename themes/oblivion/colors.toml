@@ -44,3 +44,7 @@ bright_magenta = "#875abc"
 # and film.lua keeps a light film's frost bright, so the glass never greys the
 # pane below the white the apps chose their dimmer text against.
 glass = "0.7"
+
+# Past this many px a window moves no point a level: its lift's light, exp(-d / 120),
+# reaches furthest.
+reach = "600"

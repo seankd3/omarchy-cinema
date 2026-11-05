@@ -298,7 +298,7 @@ void main() {
         uint64_t                                generation = 1;
         uint64_t                                compiled   = 0;
         bool                                    framed     = false; // the film's shader defines frame()
-        float                                   reach      = INFINITY; // its REACH (contract.glsl)
+        float                                   reach      = INFINITY; // colors.toml's, in px (contract.glsl, REACH)
         SGpu                                    gpu;
         // How far the windows' depth goes (specs/depth.md, "Tiers"): 0 is the
         // backdrop alone, with no answers, no frames and no facts moving.
@@ -447,6 +447,13 @@ void main() {
         return error == std::errc{} && end == value.data() + value.size() && std::isfinite(glass) ? std::clamp(glass, 0.F, 1.F) : 0.85F;
     }
 
+    // A film's reach in px; anything but a number of px reaches everywhere.
+    float reachOf(const std::string& value) {
+        float      reach        = 0;
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), reach);
+        return error == std::errc{} && end == value.data() + value.size() && reach >= 0 ? reach : INFINITY;
+    }
+
     // The theme's shader, palette and glass, from the theme Omarchy has just
     // applied. Any backdrop.frag makes the theme a film (as film.lua decides);
     // one written for another contract than this build's, or for none, is not
@@ -476,19 +483,21 @@ void main() {
         g->source         = shader.empty() ? "" : std::string(CONTRACT) + "\n#line 1\n" + shader;
         static const std::regex FRAME(R"(\bvec4\s+frame\s*\()");
         g->framed         = std::regex_search(shader, FRAME);
-        static const std::regex REACH(R"(\bconst\s+float\s+REACH\s*=\s*([0-9.]+))");
-        std::smatch             reach;
-        g->reach          = std::regex_search(shader, reach, REACH) ? std::stof(reach[1]) : INFINITY;
 
         static const std::regex PALETTE(R"re(^\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})")re");
-        static const std::regex GLASS(R"re(^\s*glass\s*=\s*"\s*([^"\s]*)\s*")re");
+        static const std::regex SETTING(R"re(^\s*(glass|reach)\s*=\s*"\s*([^"\s]*)\s*")re");
         std::istringstream      colors(readFile(dir + "/colors.toml"));
         g->backgrounds.clear();
         g->glass = 0.85F;
+        g->reach = INFINITY;
         for (std::string line; std::getline(colors, line);) {
             std::smatch match;
-            if (std::regex_search(line, match, GLASS))
-                g->glass = glassOf(match[1]);
+            if (std::regex_search(line, match, SETTING)) {
+                if (match[1] == "glass")
+                    g->glass = glassOf(match[2]);
+                else
+                    g->reach = reachOf(match[2]);
+            }
             if (!std::regex_search(line, match, PALETTE))
                 continue;
             const auto name  = match[1].str();

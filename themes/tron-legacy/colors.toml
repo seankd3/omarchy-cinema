@@ -39,3 +39,7 @@ bright_magenta = "#dcbcff"
 
 # Clearer glass than the others, so the Grid reads through (film.lua).
 glass = "0.4"
+
+# Past this many px a window moves no point a level: its pooled light, exp(-d / 90),
+# reaches furthest.
+reach = "800"

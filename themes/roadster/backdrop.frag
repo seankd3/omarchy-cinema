@@ -187,9 +187,6 @@ vec3 speedLines(vec2 px, Window w, vec3 red) {
     return light;
 }
 
-// Past REACH a window moves no point a level: its pooled light, exp(-d / 120),
-// reaches furthest but for the floor lines, met apart.
-const float REACH = 600.0;
 
 vec4 backdrop(vec2 px) {
     vec3 red = accent;
@@ -225,7 +222,7 @@ vec4 backdrop(vec2 px) {
     }
     // Only a window standing on the floor (its foot below the horizon) has
     // floor lines, and they run on from the corner, never back, across the
-    // whole floor, past REACH: every window is met for them.
+    // whole floor, past its reach: every window is met for them.
     for (int i = 0; i < windowCount; i++) {
         Window w = window(px, i);
         vec4 r = w.rect;
