@@ -55,6 +55,20 @@ if [[ ${1:-} == --inside ]]; then
   # captures a second apart (a desktop at rest draws nothing; Files' loading
   # spinner turns).
   sleep 6
+  # btop shows the whole machine, so other work on it would read as the
+  # theme's cost: the capture waits until the machine has been idle for the
+  # last 40 s of btop's graph, at most 10% of its CPU time busy in each 2 s
+  # btop draws and its load average under 3, however long that takes
+  # (tools/yield bounds the run).
+  busy() { local s; read -r s </proc/stat; s=(${s#cpu }); echo $((s[0] + s[1] + s[2] + s[5] + s[6] + s[7])) $((s[0] + s[1] + s[2] + s[3] + s[4] + s[5] + s[6] + s[7])); }
+  read -r was all < <(busy)
+  for ((quiet = 0; quiet < 20;)); do
+    sleep 2
+    read -r now total < <(busy)
+    read -r load _ </proc/loadavg
+    (((now - was) * 10 <= total - all && ${load%.*} < 3)) && quiet=$((quiet + 1)) || quiet=0
+    was=$now all=$total
+  done
   # A new user's first login greets them (Omarchy's first-run notices), and
   # with no network in the sandbox nvim's plugins keep saying they cannot
   # download (noice's message split): neither is the theme, and the notices
