@@ -49,9 +49,8 @@ at `render.pre` (live windows with renderWindow's full fade alpha and their
 rounding, plus windows fading out after closing) and, when it differs from what
 it last drew, damages the whole monitor and marks the blur cache dirty, so this
 very frame redraws the backdrop and the glass. Windows reach the shader as a
-uniform block, which a pixel reads as constants rather than fetching a
-texture, up to 256 on a monitor, and each pixel reads and measures once each
-window that reaches it (contract.glsl's `window()` and `REACH`).
+uniform block, up to 256 on a monitor (specs/smoothness.md), and each pixel
+reads and measures once each window that reaches it (contract.glsl's `window()` and `REACH`).
 
 **Still at rest.** The world's own motion runs on a clock of the desktop's
 (contract.glsl, `time`): while windows move, open, close, take focus or slide
