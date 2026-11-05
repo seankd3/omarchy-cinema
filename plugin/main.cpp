@@ -447,11 +447,12 @@ void main() {
         return error == std::errc{} && end == value.data() + value.size() && std::isfinite(glass) ? std::clamp(glass, 0.F, 1.F) : 0.85F;
     }
 
-    // A film's reach in px, digits with a decimal point at most (as
-    // tools/preview.py reads it); anything else reaches everywhere.
+    // A film's reach in px: up to five ASCII digits, and three after a point
+    // (as tools/preview.py reads it, and always a float); anything else
+    // reaches everywhere.
     float reachOf(const std::string& value) {
-        static const std::regex PX(R"(\d+(\.\d*)?)");
-        float                   reach = INFINITY; // kept when out of a float's range, as from_chars does
+        static const std::regex PX(R"([0-9]{1,5}(\.[0-9]{0,3})?)");
+        float                   reach = INFINITY;
         if (std::regex_match(value, PX))
             std::from_chars(value.data(), value.data() + value.size(), reach);
         return reach;
