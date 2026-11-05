@@ -296,8 +296,7 @@ vec4 backdrop(vec2 px) {
         for (int i = 0; i < windowCount; i++) {
             if (!reaches(reached, i)) continue;
             Window w = window(px, i);
-            vec2 away = normalize(vec2((w.rect.x + w.rect.z * 0.5 - sun.x) / resolution.x, 0.6));
-            shadow = max(shadow, windowShadow(px, w, away * (24.0 + 56.0 * w.lift), 22.0 + 46.0 * w.lift));
+            shadow = max(shadow, windowShadow(px, w, vec2((w.rect.x + w.rect.z * 0.5 - sun.x) / resolution.x, 0.6), 24.0 + 56.0 * w.lift, 22.0 + 46.0 * w.lift));
             wake(px, w, trail, fringe, part);
         }
         col = mix(col, SLATE, 0.4 * shadow);

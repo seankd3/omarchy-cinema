@@ -299,16 +299,16 @@ vec2 edgeNormal(vec2 px, vec4 rect, float radius) {
     return g * vec2(p.x < 0.0 ? -1.0 : 1.0, p.y < 0.0 ? -1.0 : 1.0);
 }
 
-// The shadow window w casts on the world, `offset` away from its light and
-// `soft` wide: 1 in full shadow. It fades out over the window's edge, from
-// 3 px outside it to 2 px inside, so the world seen through its own glass
-// stays lit. It is exactly 0 from 2 px inside the window in, and further
-// than `soft` from the shadow's rect, which is no nearer than the window
-// less the offset; only the points between pay.
-float windowShadow(vec2 px, Window w, vec2 offset, float soft) {
+// The shadow window w casts on the world, `offset` px along `away` (any
+// length) from its light and `soft` wide: 1 in full shadow. It fades out
+// over the window's edge, from 3 px outside it to 2 px inside, so the world
+// seen through its own glass stays lit. It is exactly 0 from 2 px inside the
+// window in, and further than `soft` from the shadow's rect, which is no
+// nearer than the window less the offset; only the points between pay.
+float windowShadow(vec2 px, Window w, vec2 away, float offset, float soft) {
     float edge = edgeDistance(w);
-    if (edge <= -2.0 || edge - length(offset) >= soft) return 0.0;
-    float d = rectDistance(px - offset, w.rect, w.rounding);
+    if (edge <= -2.0 || edge - offset >= soft) return 0.0;
+    float d = rectDistance(px - normalize(away) * offset, w.rect, w.rounding);
     return (1.0 - smoothstep(-soft, soft, d)) * smoothstep(-2.0, 3.0, edge) * w.alpha;
 }
 

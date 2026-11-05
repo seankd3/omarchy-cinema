@@ -205,8 +205,7 @@ vec4 backdrop(vec2 px) {
         Window w = window(px, i);
         see(seen, w);
         near += exp(-max(w.d, 0.0) / 110.0);
-        vec2 away = normalize(w.rect.xy + w.rect.zw * 0.5 - arc + vec2(0.0, -1e-3));
-        shadow = max(shadow, windowShadow(px, w, away * (36.0 + 56.0 * w.lift), 22.0 + 40.0 * w.lift));
+        shadow = max(shadow, windowShadow(px, w, w.rect.xy + w.rect.zw * 0.5 - arc + vec2(0.0, -1e-3), 36.0 + 56.0 * w.lift, 22.0 + 40.0 * w.lift));
         after += afterimage(px, w, cyan, swept);
     }
     near = min(near, 1.0);

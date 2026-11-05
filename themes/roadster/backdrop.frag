@@ -191,7 +191,7 @@ vec4 backdrop(vec2 px) {
         near += exp(-max(d, 0.0) / 120.0);
         vec4 r = w.rect;
         float lift = w.lift;
-        shadow = max(shadow, windowShadow(px, w, vec2(0.0, 26.0 + 44.0 * lift), 18.0 + 34.0 * lift));
+        shadow = max(shadow, windowShadow(px, w, vec2(0.0, 1.0), 26.0 + 44.0 * lift, 18.0 + 34.0 * lift));
         if (i != focusedIndex && abs(edgeDistance(w) - 22.0) < 54.0 + w.rounding) light += red * glowLine(brackets(px, r, 22.0, 34.0), 1.0) * 0.4 * a;
         float side = px.x < r.x + r.z * 0.5 ? -1.0 : 1.0;
         bend += side * 34.0 * exp(-max(d, 0.0) / 60.0) * smoothstep(r.y, r.y + r.w, px.y) * (1.0 - 0.6 * lift) * a;
