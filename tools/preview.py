@@ -343,7 +343,7 @@ void main() {
 def glass(theme, image, t, windows, focused, border=True, **answers):
     """`image` with the windows over it as the film's glass shows them: the
     plugin's frost (the world at half size, softened through its mipmap as
-    far as the film's frost, that level read alone, frost() in main.cpp),
+    far as the film's frost, that level read in 8 bits, frost() in main.cpp),
     then each window, 0.999 opaque, drawn by Hyprland's window shader with
     the glass in it: its background the theme's, a block of text lines in
     the foreground and muted colours, and a lit border on the focused one
@@ -355,9 +355,8 @@ def glass(theme, image, t, windows, focused, border=True, **answers):
     levels = min(max(int(np.floor(np.log2(max(2 * setting(theme, "frost", 3) * scale, 1)) + 0.5)), 1), 6)
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
-    frost = half_world(ctx, theme, t, windows, focused, levels, **answers)
-    frost.build_mipmaps(levels - 1, levels - 1)
-    frost.filter = (moderngl.LINEAR, moderngl.LINEAR)
+    world = half_world(ctx, theme, t, windows, focused, levels, **answers)
+    frost = ctx.texture((PIXELS[0] >> levels, PIXELS[1] >> levels), 4, world.read(level=levels - 1))
 
     shown = ctx.texture(PIXELS, 4, image.convert("RGBA").transpose(Image.FLIP_TOP_BOTTOM).tobytes())
     ctx.framebuffer([shown]).use()

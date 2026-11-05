@@ -30,6 +30,7 @@
 
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/output/MonitorResources.hpp>
+#include <hyprgraphics/egl/Egl.hpp>
 #include <GLES3/gl32.h>
 #include <cairo/cairo.h>
 #include <fcntl.h>
@@ -241,11 +242,12 @@ void main() {
         Mat3x3               proj;
         uint64_t             feedUploaded = 0;
         uint32_t             feedCount = 0, feedPos = 0;
-        // The texture the glass reads the frost from (frost()), the size of
-        // the level that holds it there, and a framebuffer drawing that level.
-        WP<Render::ITexture> frosted;
-        Vector2D             frostedSize;
-        GLuint               frostFbo = 0;
+        // The texture the glass reads the frost from (frost()), as its levels
+        // were made (its size and format, and the frost's level), and a
+        // framebuffer drawing the frost.
+        WP<Render::ITexture>                 frosted;
+        std::tuple<Vector2D, DRMFormat, int> frostedAs;
+        GLuint                               frostFbo = 0;
     };
 
     // A pass is a guest in Hyprland's GL context. Hyprland skips binding a
@@ -282,7 +284,7 @@ void main() {
     };
 
     // Its GL objects deleted, and the glass's texture given back to Hyprland:
-    // its own level 0 read again.
+    // its level 0 read again.
     void forget(const SCoarse& coarse) {
         glDeleteFramebuffers(2, std::array{coarse.fbo, coarse.frostFbo}.data());
         for (const auto texture : {coarse.texture, coarse.feed})
@@ -292,8 +294,8 @@ void main() {
             const SGuest guest;
             glActiveTexture(GL_TEXTURE4);
             glBindTexture(GL_TEXTURE_2D, frosted->m_texID);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 1000);
+            frosted->minFilter = GL_LINEAR;
+            frosted->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         }
     }
 
@@ -1354,34 +1356,49 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         g_pHyprOpenGL->disableScissor();
     }
 
+    // Whether the glass's texture in `blur` is the one the frost was made in,
+    // as it was made: Hyprland makes its level 0 again for a new size or format.
+    bool frosts(const SCoarse& coarse, const SP<Render::IFramebuffer>& blur) {
+        return blur->getTexture() == coarse.frosted.lock() && coarse.frostedAs == std::tuple{blur->m_size, blur->m_drmFormat, coarse.levels};
+    }
+
     // The glass's frost: the coarse world softened through its mipmap, its
-    // last level as soft as the film's frost, copied at its own size into
-    // level 1 of the texture Hyprland's glass reads (its blur framebuffer's),
-    // made the one level read there. Every reader samples that texture where
-    // it reads the screen, so no copy is screen-sized, and Hyprland need not
-    // blur the screen itself. Its level 0 stays Hyprland's (forget()). It
-    // leaves the coarse world's framebuffer bound, for its caller to put back.
-    void frost(SCoarse& coarse, const SP<Render::ITexture>& glass) {
-        const int last = coarse.levels - 1;
-        const int width = std::max(coarse.width >> last, 1), height = std::max(coarse.height >> last, 1);
+    // last level as soft as the film's frost, copied into the level of that
+    // size of the texture Hyprland's glass reads (its blur framebuffer's), to
+    // which every read of that texture is held. A reader samples it by the
+    // coordinates it reads the screen at, and sizes it by its level 0, both
+    // as before; nothing is copied screen-sized, and Hyprland need not blur
+    // the screen itself. Level 0 stays Hyprland's (forget()). It leaves the
+    // coarse world's framebuffer bound, for its caller to put back.
+    void frost(SCoarse& coarse, const SP<Render::IFramebuffer>& blur) {
+        const auto glass = blur->getTexture();
+        const int  last = coarse.levels - 1, level = coarse.levels;
+        const auto size  = [&](const Vector2D& v, int i) { return std::array{std::max(int(v.x) >> i, 1), std::max(int(v.y) >> i, 1)}; };
         glActiveTexture(GL_TEXTURE4);
         glBindTexture(GL_TEXTURE_2D, coarse.texture);
         glGenerateMipmap(GL_TEXTURE_2D);
         glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.texture, last);
-        if (coarse.frosted.lock() != glass || coarse.frostedSize != Vector2D(width, height)) {
+        if (!frosts(coarse, blur)) {
+            const auto format = Hyprgraphics::Egl::getPixelFormatFromDRM(blur->m_drmFormat);
             glBindTexture(GL_TEXTURE_2D, glass->m_texID);
-            glTexImage2D(GL_TEXTURE_2D, 1, GL_RGB10_A2, width, height, 0, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV, nullptr);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 1);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 1);
+            for (int i = 1; i <= level; i++)
+                glTexImage2D(GL_TEXTURE_2D, i, format->glInternalFormat ? format->glInternalFormat : format->glFormat, size(blur->m_size, i)[0], size(blur->m_size, i)[1], 0,
+                             format->glFormat, format->glType, nullptr);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, level);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, level);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, level);
+            glass->minFilter = GL_LINEAR_MIPMAP_NEAREST;
+            glass->setTexParameter(GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
             if (!coarse.frostFbo)
                 glGenFramebuffers(1, &coarse.frostFbo);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.frostFbo);
-            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glass->m_texID, 1);
-            coarse.frosted     = glass;
-            coarse.frostedSize = {width, height};
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glass->m_texID, level);
+            coarse.frosted   = glass;
+            coarse.frostedAs = {blur->m_size, blur->m_drmFormat, level};
         }
+        const auto from = size({double(coarse.width), double(coarse.height)}, last), to = size(blur->m_size, level);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.frostFbo);
-        glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glBlitFramebuffer(0, 0, from[0], from[1], 0, 0, to[0], to[1], GL_COLOR_BUFFER_BIT, GL_LINEAR);
     }
 
     // What the plugin's passes share: they read no blur of Hyprland's, and
@@ -1424,9 +1441,9 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             const int  width = (monitor->m_transformedSize.x + 1) / 2, height = (monitor->m_transformedSize.y + 1) / 2;
             const int  levels    = frostLevels(monitor);
             const auto resources = monitor->resources();
-            const auto glass     = resources && resources->m_blurFB && resources->m_blurFB->isAllocated() ? resources->m_blurFB->getTexture() : nullptr;
+            const auto blur      = resources && resources->m_blurFB && resources->m_blurFB->isAllocated() ? resources->m_blurFB : nullptr;
             const bool resized   = coarse.width != width || coarse.height != height || coarse.levels != levels;
-            const bool whole     = resized || state.stale || !glass || glass != coarse.frosted.lock();
+            const bool whole     = resized || state.stale || !blur || !frosts(coarse, blur);
             state.stale          = false;
             if (!g->glyphPixels.empty()) {
                 glActiveTexture(GL_TEXTURE5);
@@ -1482,8 +1499,8 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
                 prepare(coarse, true, set);
                 g_pHyprOpenGL->disableScissor();
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-                if (glass)
-                    frost(coarse, glass);
+                if (blur)
+                    frost(coarse, blur);
                 glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
                 glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
                 glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
