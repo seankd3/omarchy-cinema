@@ -451,7 +451,10 @@ void main() {
     // tools/preview.py reads it); anything else reaches everywhere.
     float reachOf(const std::string& value) {
         static const std::regex PX(R"(\d+(\.\d*)?)");
-        return std::regex_match(value, PX) ? std::stof(value) : INFINITY;
+        float                   reach = INFINITY; // kept when out of a float's range, as from_chars does
+        if (std::regex_match(value, PX))
+            std::from_chars(value.data(), value.data() + value.size(), reach);
+        return reach;
     }
 
     // The theme's shader, palette and glass, from the theme Omarchy has just
