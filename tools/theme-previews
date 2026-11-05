@@ -13,7 +13,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 
 if [[ ${1:-} == --inside ]]; then
-  slug=$2 out=$3
+  slug=$2 out=$3 ends=$4
   hyprctl plugin list | grep -q '^Plugin backdrop ' || { echo "theme-previews: the backdrop plugin did not load" >&2; exit 1; }
 
   # Apps start the way Omarchy starts them, from Hyprland, so they have its
@@ -69,11 +69,11 @@ if [[ ${1:-} == --inside ]]; then
 
   # btop shows the whole machine since it started, so other work on it
   # would read as the theme's cost. A still is kept only when every 2 s
-  # btop has drawn, and the one after the capture, was idle: at most 10%
-  # busy in all and 30% on each core, and the 1 and 5 minute loads under 3.
-  # Any other sample starts btop's graph afresh. A machine still busy after
-  # 15 minutes leaves the still to a later run (75: it waits in tools/yield's
-  # queue).
+  # since btop started, the capture's included, was idle: at most 10% busy
+  # in all and 30% on each core, and the 1 and 5 minute loads under 3. Any
+  # other 2 s starts btop's graph afresh. A machine still busy a minute
+  # before the run ends (`ends`) leaves the still to a later run (75: it
+  # waits in tools/yield's queue).
   sample() {
     local name rest s
     while read -r name rest && [[ $name == cpu* ]]; do
@@ -81,32 +81,33 @@ if [[ ${1:-} == --inside ]]; then
       echo "$name $((s[0] + s[1] + s[2] + s[5] + s[6] + s[7])) $((s[0] + s[1] + s[2] + s[3] + s[4] + s[5] + s[6] + s[7]))"
     done </proc/stat
   }
-  quiet() {
-    local -A was all
+  # The CPU's counters as last read, so the 2 s are back to back: whether
+  # it was idle since the last reading.
+  declare -A was all
+  idle() {
     local name b t one five most calm=1
-    while read -r name b t; do was[$name]=$b all[$name]=$t; done < <(sample)
-    sleep 2
     while read -r name b t; do
       most=30 && [[ $name == cpu ]] && most=10
-      (((b - was[$name]) * 100 <= most * (t - all[$name]))) || calm=0
+      (((b - ${was[$name]:-0}) * 100 <= most * (t - ${all[$name]:-0}))) || calm=0
+      was[$name]=$b all[$name]=$t
     done < <(sample)
     read -r one five _ </proc/loadavg
     ((calm && ${one%.*} < 3 && ${five%.*} < 3))
   }
   fresh() { pkill -x -P "$(<"$XDG_RUNTIME_DIR/cinema-btop.pid")" btop || true; }
   fresh
-  until
-    for ((n = 0; n < 20;)); do
-      ((SECONDS < 900)) || { echo "theme-previews: the machine stayed busy; $slug waits for a later run" >&2; exit 75; }
-      if quiet; then n=$((n + 1)); else n=0 && fresh; fi
-    done
-    grim "$out/$slug.png"
-    quiet
-  do fresh; done
+  idle || true
+  for ((n = 0; n <= 20;)); do
+    ((EPOCHSECONDS < ends - 60)) || { echo "theme-previews: the machine stayed busy; $slug waits for a later run" >&2; exit 75; }
+    ((n == 20)) && grim "$out/$slug.png"
+    sleep 2
+    if idle; then n=$((n + 1)); else n=0 && fresh; fi
+  done
   exit
 fi
 
 "$here/tools/yield" --within >/dev/null || exec "$here/tools/yield" "$0" "$@"
+ends=$("$here/tools/yield" --ends)
 if (($#)); then
   slugs=("$@")
 else
@@ -125,7 +126,7 @@ for slug in "${slugs[@]}"; do
   mkdir "$out/$slug"
   status=0
   "$here/tools/hidden-desktop" --fresh --size 2560x1440 --scale 1.333333 --theme "$slug" --out "$out/$slug" \
-    "$here/tools/theme-previews" --inside "$slug" "$out/$slug" || status=$?
+    "$here/tools/theme-previews" --inside "$slug" "$out/$slug" "$ends" || status=$?
   ((status == 75)) && exit 75
   if ((status)); then
     echo "theme-previews: $slug failed; $out/$slug/hypr.*/*/hyprland.log and desktop.log say what the desktop did" >&2
