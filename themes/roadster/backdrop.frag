@@ -188,19 +188,20 @@ vec4 backdrop(vec2 px) {
         Window w = window(px, i);
         see(seen, w);
         float a = w.alpha, d = w.d;
-        near += exp(-max(d, 0.0) / 120.0);
+        float e = exp(-max(d, 0.0) / 120.0);
+        near += e;
         vec4 r = w.rect;
         float lift = w.lift;
         shadow = max(shadow, windowShadow(px, w, vec2(0.0, 1.0), 26.0 + 44.0 * lift, 18.0 + 34.0 * lift));
         if (i != focusedIndex && abs(edgeDistance(w) - 22.0) < 54.0 + w.rounding) light += red * glowLine(brackets(px, r, 22.0, 34.0), 1.0) * 0.4 * a;
         float side = px.x < r.x + r.z * 0.5 ? -1.0 : 1.0;
-        bend += side * 34.0 * exp(-max(d, 0.0) / 60.0) * smoothstep(r.y, r.y + r.w, px.y) * (1.0 - 0.6 * lift) * a;
+        bend += side * 34.0 * e * e * smoothstep(r.y, r.y + r.w, px.y) * (1.0 - 0.6 * lift) * a;
         speeding += speedLines(px, w, red);
     }
     // Only a window standing on the floor (its foot below the horizon) has
     // floor lines, and they run on from the corner, never back, past its
-    // reach: every window is met for them.
-    for (int i = 0; i < windowCount; i++) {
+    // reach: every window is met for them, below the horizon.
+    for (int i = 0; i < (px.y > horizon ? windowCount : 0); i++) {
         Window w = window(px, i);
         vec4 r = w.rect;
         float foot = r.y + r.w;
