@@ -1,31 +1,11 @@
-// Draws the current Omarchy theme's backdrop between the wallpaper and the
-// windows, inside the frame Hyprland is drawing, from the windows' geometry in
-// that frame, so it never trails them.
-//
-// A theme with a backdrop ships backdrop.frag, a fragment shader written
-// against contract.glsl. The user's Hyprland config loads this plugin once a
-// session and nothing unloads it. A theme switch reloads Hyprland's config:
-// the shader and palette are read again from the applied theme then, and a
-// theme without backdrop.frag leaves the plugin idle (no draw, no timer).
-//
-// Hyprland advances its animations, then emits render.pre, then reads the
-// frame's damage. At render.pre the plugin reads the windows as they will be
-// drawn; if they differ from what it last drew, it damages the whole monitor
-// and the glass, so this same frame draws the new backdrop. The backdrop's own
-// motion runs on the desktop's: its clock runs while the windows move and
-// eases to a stop after them (contract.glsl, `time`), so a still desktop
-// draws nothing and asks for no frames.
-//
-// A backdrop can also draw text: a theme that ships glyphs.png reads its own
-// backdrop.frag, or, once the user turns it on, the newest plaintext of the
-// agents on this machine, which the cinema-feed service sends to a datagram
-// socket the plugin owns (specs/agent-rain.md).
+// The backdrop plugin: SPEC.md is its design, specs/smoothness.md its cost.
+// What only the code says: Hyprland 0.57's internals it leans on, cited
+// beside each use, and the GL state it borrows (SGuest).
 
 #define WLR_USE_UNSTABLE
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
-#include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/desktop/state/Fadeout.hpp>
 #include <hyprland/src/desktop/state/FadingOutState.hpp>
@@ -240,13 +220,17 @@ void main() {
         bool                                  stale = true;
     };
 
-    // One of the film's programs, the backdrop's or the frame's, and where
-    // its uniforms are.
+    // One of the plugin's programs (the film's backdrop and frame, the
+    // frost's copy) and where its uniforms are, each named as its shader
+    // names it; one a program lacks is -1, which GL ignores.
+#define UNIFORMS(X)                                                                                                                                               \
+    X(proj) X(area) X(resolution) X(time) X(accent) X(background) X(foreground) X(focused) X(reserved) X(windowCount) X(focusedIndex) X(focusAlpha) X(feed)     \
+        X(feedCount) X(feedPos) X(glyphs) X(impulses) X(impulseKinds) X(impulseWindows) X(impulseCount) X(voice) X(frameWindow) X(frameAlpha) X(frameBorder) \
+            X(drawnWorld) X(worldProj) X(source) X(level) X(size)
     struct SProgram {
         GLuint id = 0;
-        GLint  proj, area, resolution, time, accent, background, foreground, focused, reserved, windowCount, focusedIndex, focusAlpha;
-        GLint  feedUniform, feedCount, feedPos, glyphsUniform;
-        GLint  impulses, impulseKinds, impulseWindows, impulseCount, voice, frameWindow, frameAlpha, frameBorder, drawnWorld, worldProj;
+#define DECLARE(name) GLint name = -1;
+        UNIFORMS(DECLARE)
     };
 
     // A monitor's world as it was last drawn whole, kept until the world
@@ -279,10 +263,7 @@ void main() {
     struct SGpu {
         GLuint   vao = 0, vbo = 0, windows = 0, glyphs = 0;
         bool     glyphsUploaded = false;
-        SProgram backdrop, frame;
-        // COPY's program, and where its uniforms are.
-        GLuint   copy = 0;
-        GLint    copyProj = -1, copyArea = -1, copySource = -1, copyLevel = -1, copySize = -1;
+        SProgram backdrop, frame, copy;
         std::unordered_map<MONITORID, SCoarse> coarse;
     };
 
@@ -300,9 +281,6 @@ void main() {
         bool                                    framed     = false; // the film's shader defines frame()
         float                                   reach      = INFINITY; // colors.toml's, in px (contract.glsl, REACH)
         SGpu                                    gpu;
-        // How far the windows' depth goes (specs/depth.md, "Tiers"): 0 is the
-        // backdrop alone, with no answers, no frames and no facts moving.
-        SP<Config::Values::CIntValue>           depth;
         // Each monitor's frames shown, and its sleep and wake, which can pass
         // without a frame.
         std::vector<CHyprSignalListener>        watches;
@@ -324,9 +302,9 @@ void main() {
         // Hyprland keeps a closed window's rounding inside its fadeout, out of
         // reach, and forgets which window it was, so the plugin keeps both
         // beside: each window fadeout's rounding and stable id from the moment
-        // it is made until Hyprland lets it go.
+        // it is made until Hyprland lets it go (the config's rounding and no
+        // id for one already running when the plugin loaded).
         std::unordered_map<const void*, SClosed> closed;
-        std::unordered_set<const void*>         seenFadeouts;
         // The window whose fadeout comes next, held until its radius is read:
         // a client can destroy it in the same call that closes it, and
         // rounding() reads only its rules and the config.
@@ -560,7 +538,7 @@ void main() {
 
     void deleteProgram() {
         auto& gpu = g->gpu;
-        for (const auto program : {gpu.backdrop.id, gpu.frame.id, gpu.copy})
+        for (const auto program : {gpu.backdrop.id, gpu.frame.id, gpu.copy.id})
             if (program)
                 glDeleteProgram(program);
         for (const auto buffer : {gpu.vbo, gpu.windows})
@@ -575,16 +553,16 @@ void main() {
         gpu = {};
     }
 
-    // Compiles and links one of the film's programs, the film's source with
-    // `main` after it. A failure is reported once and leaves `p` empty.
-    bool link(SProgram& p, const std::string& main, const char* what) {
+    // Compiles and links one of the programs from its fragment shader. A
+    // failure is reported once and leaves `p` empty.
+    bool link(SProgram& p, const std::string& fragment, const char* what) {
         std::string  log;
         const GLuint vert = compileStage(GL_VERTEX_SHADER, VERTEX, log);
-        const GLuint frag = vert ? compileStage(GL_FRAGMENT_SHADER, g->source + main, log) : 0;
+        const GLuint frag = vert ? compileStage(GL_FRAGMENT_SHADER, fragment, log) : 0;
         if (!vert || !frag) {
             if (vert)
                 glDeleteShader(vert);
-            HyprlandAPI::addNotification(g->handle, std::format("[backdrop] the theme's {} does not compile: {}", what, log), CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+            HyprlandAPI::addNotification(g->handle, std::format("[backdrop] {} does not compile: {}", what, log), CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
             return false;
         }
         p.id = glCreateProgram();
@@ -597,38 +575,13 @@ void main() {
         GLint ok = 0;
         glGetProgramiv(p.id, GL_LINK_STATUS, &ok);
         if (!ok) {
-            HyprlandAPI::addNotification(g->handle, std::format("[backdrop] the theme's {} does not link", what), CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+            HyprlandAPI::addNotification(g->handle, std::format("[backdrop] {} does not link", what), CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
             glDeleteProgram(p.id);
             p = {};
             return false;
         }
-        const auto at  = [&](const char* name) { return glGetUniformLocation(p.id, name); };
-        p.proj          = at("proj");
-        p.area          = at("area");
-        p.resolution    = at("resolution");
-        p.time          = at("time");
-        p.accent        = at("accent");
-        p.background    = at("background");
-        p.foreground    = at("foreground");
-        p.focused       = at("focused");
-        p.reserved      = at("reserved");
-        p.windowCount   = at("windowCount");
-        p.focusedIndex  = at("focusedIndex");
-        p.focusAlpha    = at("focusAlpha");
-        p.feedUniform   = at("feed");
-        p.feedCount     = at("feedCount");
-        p.feedPos       = at("feedPos");
-        p.glyphsUniform = at("glyphs");
-        p.impulses      = at("impulses");
-        p.impulseKinds  = at("impulseKinds");
-        p.impulseWindows = at("impulseWindows");
-        p.impulseCount  = at("impulseCount");
-        p.voice         = at("voice");
-        p.frameWindow   = at("frameWindow");
-        p.frameAlpha    = at("frameAlpha");
-        p.frameBorder   = at("frameBorder");
-        p.drawnWorld    = at("drawnWorld");
-        p.worldProj     = at("worldProj");
+#define FIND(name) p.name = glGetUniformLocation(p.id, #name);
+        UNIFORMS(FIND)
         if (const GLuint block = glGetUniformBlockIndex(p.id, "Windows"); block != GL_INVALID_INDEX)
             glUniformBlockBinding(p.id, block, 0);
         return true;
@@ -643,27 +596,11 @@ void main() {
             return g->gpu.backdrop.id != 0;
         g->compiled = g->generation;
         deleteProgram();
-        if (g->source.empty() || !link(g->gpu.backdrop, BACKDROP_MAIN, "backdrop.frag"))
+        if (g->source.empty() || !link(g->gpu.backdrop, g->source + BACKDROP_MAIN, "the theme's backdrop.frag"))
             return false;
         if (g->framed)
-            link(g->gpu.frame, FRAME_MAIN, "frame()");
-        {
-            std::string  log;
-            const GLuint vert = compileStage(GL_VERTEX_SHADER, VERTEX, log), frag = compileStage(GL_FRAGMENT_SHADER, COPY, log);
-            auto&        gpu  = g->gpu;
-            gpu.copy          = glCreateProgram();
-            glAttachShader(gpu.copy, vert);
-            glAttachShader(gpu.copy, frag);
-            glBindAttribLocation(gpu.copy, 0, "pos");
-            glLinkProgram(gpu.copy);
-            glDeleteShader(vert);
-            glDeleteShader(frag);
-            gpu.copyProj   = glGetUniformLocation(gpu.copy, "proj");
-            gpu.copyArea   = glGetUniformLocation(gpu.copy, "area");
-            gpu.copySource = glGetUniformLocation(gpu.copy, "source");
-            gpu.copyLevel  = glGetUniformLocation(gpu.copy, "level");
-            gpu.copySize   = glGetUniformLocation(gpu.copy, "size");
-        }
+            link(g->gpu.frame, g->source + FRAME_MAIN, "the theme's frame()");
+        link(g->gpu.copy, COPY, "the frost's copy");
 
         auto& gpu = g->gpu;
         GLint vao = 0, buffer = 0;
@@ -737,10 +674,10 @@ void main() {
     }
 
     // Whether the world answers the desktop now, read at the moment it is
-    // asked: depth on and the world moving on some monitor. Nothing is
-    // collected while it does not.
+    // asked: the world moving on some monitor. Nothing is collected while it
+    // does not.
     bool answering() {
-        return g && g->depth->value() != 0 && std::ranges::any_of(State::monitorState()->monitors(), moves);
+        return g && std::ranges::any_of(State::monitorState()->monitors(), moves);
     }
 
     // Lets go of everything pending: impulses and the last voice reading.
@@ -791,20 +728,20 @@ void main() {
     // rules again, as the fadeout's own copy sees. Run at each close event and
     // before reading a scene; forgets fadeouts Hyprland has let go.
     void claimFadeouts() {
+        static auto                     ROUNDING = CConfigValue<Config::INTEGER>("decoration:rounding");
         std::unordered_set<const void*> alive;
         for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
             if (!isWindowFadeout(fadeout))
                 continue;
             alive.insert(fadeout.get());
-            if (g->seenFadeouts.insert(fadeout.get()).second && g->closing) {
-                g->closed[fadeout.get()] = {g->closing->presentation().rounding(), g->closing->metadata().stableID()};
+            if (const auto [entry, fresh] = g->closed.try_emplace(fadeout.get(), SClosed{float(*ROUNDING)}); fresh && g->closing) {
+                entry->second = {g->closing->presentation().rounding(), g->closing->metadata().stableID()};
                 for (auto& [id, state] : g->monitors)
                     if (state.focusedWindow.lock() == g->closing)
                         state.focusFadeout = fadeout;
             }
         }
         g->closing.reset();
-        std::erase_if(g->seenFadeouts, [&](const void* f) { return !alive.contains(f); });
         std::erase_if(g->closed, [&](const auto& entry) { return !alive.contains(entry.first); });
     }
 
@@ -907,10 +844,8 @@ void main() {
             if (step(motion, position + monitor->m_position, w == focused, now))
                 addImpulse(position + monitor->m_position + size / 2.0, std::clamp(float(std::hypot(motion.velocity[0], motion.velocity[1]) / 3000.0), 0.25F, 1.F),
                            IMPULSE_LAND, w);
-            const bool still = g->depth->value() == 0;
-            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(),
-                                    still ? std::array<float, 2>{} : motion.velocity, still ? 0.F : motion.lift, 0.F,
-                                    w->metadata().stableID()});
+            scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, drawn.fadeAlpha, w->presentation().rounding(), motion.velocity,
+                                    motion.lift, 0.F, w->metadata().stableID()});
             if (pinned) {
                 stacking.push_back(1e9 + order);
                 continue;
@@ -922,7 +857,6 @@ void main() {
         // the active one and every special workspace still visible, even one
         // being dismissed (Hyprland 0.57.0 src/render/Renderer.cpp:1300, 3598).
         claimFadeouts();
-        static auto ROUNDING = CConfigValue<Config::INTEGER>("decoration:rounding");
         for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
             const auto workspace = fadeout->workspace().lock();
             if (scene.shapes.size() == WINDOWS_MAX)
@@ -932,11 +866,9 @@ void main() {
                 continue;
             const auto position = fadeout->position(Desktop::View::IGeometric::GEOMETRIC_CURRENT) - monitor->m_position;
             const auto size     = fadeout->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-            const auto closed   = g->closed.find(fadeout.get());
             if (!focusedHere && fadeout == state.focusFadeout.lock())
                 scene.focusedIndex = scene.shapes.size();
-            // Only a fadeout already running when the plugin loaded has none.
-            const auto window = closed != g->closed.end() ? closed->second : SClosed{float(*ROUNDING)};
+            const auto window = g->closed[fadeout.get()];
             scene.shapes.push_back({{float(position.x), float(position.y), float(size.x), float(size.y)}, fadeout->alpha(), window.rounding, {}, 0, 0, window.id});
             const auto plane = fadeout->plane();
             stacking.push_back(drawOrder(workspace,
@@ -1074,13 +1006,7 @@ void main() {
         for (size_t i = 0; i < shapes.size(); i++) {
             const auto& s  = shapes[i];
             const auto  at = block.shapes.begin() + i * 12;
-            std::copy(s.rect.begin(), s.rect.end(), at);
-            at[4] = s.alpha;
-            at[5] = s.rounding;
-            at[6] = s.lift;
-            at[7] = s.depth;
-            at[8] = s.velocity[0];
-            at[9] = s.velocity[1];
+            std::ranges::copy(std::array{s.rect[0], s.rect[1], s.rect[2], s.rect[3], s.alpha, s.rounding, s.lift, s.depth, s.velocity[0], s.velocity[1]}, at);
             const float r = g->reach + 0.3F * std::hypot(s.velocity[0], s.velocity[1]);
             for (int y = tile(s.rect[1] - r, size.y); i < 32 && y <= tile(s.rect[1] + s.rect[3] + r, size.y); y++)
                 for (int x = tile(s.rect[0] - r, size.x); x <= tile(s.rect[0] + s.rect[2] + r, size.x); x++)
@@ -1089,10 +1015,6 @@ void main() {
         glBufferData(GL_UNIFORM_BUFFER, sizeof(block), &block, GL_STREAM_DRAW);
     }
 
-    // Takes the newest valid snapshot waiting on the feed socket, at most
-    // FEED_BUDGET datagrams a wakeup, never waiting: a truncated, oversized or
-    // malformed one is dropped, and any valid one, a repeat too, says the
-    // feed is alive.
     // A voice reading: the loudness now (whether speech is on, which the
     // feed also sends, no film answers).
     void onVoice(const uint8_t* data) {
@@ -1154,6 +1076,10 @@ void main() {
         return 0;
     }
 
+    // Takes the newest valid snapshot waiting on the feed socket, at most
+    // FEED_BUDGET datagrams a wakeup, never waiting: a truncated, oversized or
+    // malformed one is dropped, and any valid one, a repeat too, says the
+    // feed is alive.
     int onFeed(int fd, uint32_t, void*) {
         if (!g)
             return 0;
@@ -1242,22 +1168,11 @@ void main() {
             close(g->feedLock);
     }
 
-    // Glass: in a film theme, a window's background (the theme's background
-    // colour) turns to glass, and everything drawn over it (text, icons, lines,
-    // logos) keeps its full opacity.
-    //
-    // Hyprland fades a whole window by its opacity, text included, so the glass
-    // is drawn where Hyprland draws windows: its own surface shader, the
-    // version in this very build, with one step added after the window's pixel
-    // is read: a pixel in one of the theme's background colours (background,
-    // dark, darker, lighter) becomes glass at the theme's glass, and every
-    // other pixel keeps exactly the opacity the app drew it with. It runs
-    // only in the shader's blur variant (film.lua turns render:use_shader_blur_blend on), which
-    // Hyprland uses only for windows it blurs: a solid browser, video or photo
-    // is never touched. Hyprland reads shaders from a directory before its
-    // built-in ones, so the patched shader is written to one of the plugin's
-    // and loaded with reloadShaders; Hyprland's own come back when the theme
-    // has no backdrop or the plugin unloads.
+    // The glass (SPEC.md, "Glass"): Hyprland's own surface shader from this
+    // build, with cinemaGlass() after the window's pixel is read (blur
+    // variant only) and cinemaHold() where the frost is composited. Hyprland
+    // reads shaders from a directory before its built-in ones, so it is
+    // written to one of the plugin's and loaded with reloadShaders.
     std::string glassShaderSource() {
         const auto glass = g->glass;
         if (g->source.empty() || glass >= 1.F || g->backgrounds.empty())
@@ -1336,8 +1251,8 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         glUniform1i(p.windowCount, scene.shapes.size());
         glUniform1i(p.focusedIndex, scene.focusedIndex);
         glUniform1f(p.focusAlpha, scene.focusAlpha);
-        glUniform1i(p.glyphsUniform, 5);
-        glUniform1i(p.feedUniform, 6);
+        glUniform1i(p.glyphs, 5);
+        glUniform1i(p.feed, 6);
         glUniform1i(p.feedCount, gpu.glyphsUploaded && kept.feedUploaded ? int(kept.feedCount) : 0);
         glUniform1i(p.feedPos, int(kept.feedPos));
         glUniform1f(p.voice, answer.voice);
@@ -1423,6 +1338,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
     // The glass's frost: the coarse world softened through its mipmap, its
     // last level as soft as the film's frost, copied into the framebuffer
     // Hyprland's glass reads, so Hyprland need not blur the screen itself.
+    // It leaves that framebuffer bound, for its caller to put back.
     void frost(PHLMONITOR monitor, SCoarse& coarse) {
         const auto resources = monitor->resources();
         auto*      target    = resources ? dynamic_cast<Render::GL::CGLFramebuffer*>(resources->m_blurFB.get()) : nullptr;
@@ -1430,28 +1346,22 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             return;
         coarse.frosted     = target->getFBID();
         coarse.frostedSize = target->m_size;
-        GLint draw = 0;
-        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
-        std::array<GLint, 4> viewport{};
-        glGetIntegerv(GL_VIEWPORT, viewport.data());
-        auto& gpu = g->gpu;
+        auto& gpu          = g->gpu;
         glActiveTexture(GL_TEXTURE4);
         glBindTexture(GL_TEXTURE_2D, coarse.texture);
         glGenerateMipmap(GL_TEXTURE_2D);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target->getFBID());
         glViewport(0, 0, target->m_size.x, target->m_size.y);
         g_pHyprOpenGL->disableScissor();
-        glUseProgram(gpu.copy);
+        glUseProgram(gpu.copy.id);
         const Mat3x3 whole(std::array<float, 9>{2, 0, -1, 0, 2, -1, 0, 0, 1});
-        glUniformMatrix3fv(gpu.copyProj, 1, GL_TRUE, whole.getMatrix().data());
-        glUniform4f(gpu.copyArea, 0, 0, 1, 1);
-        glUniform1i(gpu.copySource, 4);
-        glUniform1f(gpu.copyLevel, float(coarse.levels - 1));
-        glUniform2f(gpu.copySize, target->m_size.x, target->m_size.y);
+        glUniformMatrix3fv(gpu.copy.proj, 1, GL_TRUE, whole.getMatrix().data());
+        glUniform4f(gpu.copy.area, 0, 0, 1, 1);
+        glUniform1i(gpu.copy.source, 4);
+        glUniform1f(gpu.copy.level, float(coarse.levels - 1));
+        glUniform2f(gpu.copy.size, target->m_size.x, target->m_size.y);
         glBindVertexArray(gpu.vao);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
     }
 
     // What the plugin's passes share: they read no blur of Hyprland's, and
@@ -1553,10 +1463,10 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
                 prepare(coarse, true, set);
                 g_pHyprOpenGL->disableScissor();
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                frost(monitor, coarse);
                 glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
                 glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
                 glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-                frost(monitor, coarse);
             }
             // At full size over the damage Hyprland leaves it: all of it but
             // what frosted windows cover (CGlassPass). Not kept between
@@ -1709,7 +1619,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             const auto window = owningWindow();
             if (!g || g->source.empty() || !window || ctx.readOnlyEffects())
                 return;
-            if (m_layer == DECORATION_LAYER_OVER && g->framed && g->depth->value() > 0)
+            if (m_layer == DECORATION_LAYER_OVER && g->framed)
                 Render::IHyprRenderer::addPassElement(ctx, makeUnique<CFramePass>(monitor, window->metadata().stableID(), a, float(window->presentation().borderSize())));
             else if (m_layer == DECORATION_LAYER_UNDER && frosted(ctx, window, drawn)) {
                 const auto [position, size] = drawnBox(window, drawn, monitor);
@@ -1795,7 +1705,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
     // leaving, both announced before Hyprland marks them; a window going
     // fullscreen; a monitor coming, sleeping or waking): the glass the theme
     // asks for; answers let go if the world no longer answers, so turning
-    // depth or animations off and on again brings nothing back; and the
+    // animations off and on again brings nothing back; and the
     // world drawn whole where it moves, and standing still where it does not.
     void settled(void*) {
         if (!g)
@@ -1878,9 +1788,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     g         = makeUnique<SState>();
     g->handle = handle;
-    g->depth      = makeShared<Config::Values::CIntValue>("plugin:backdrop:depth", "How far windows' depth goes: 0 the backdrop alone (no answers or frames), above 0 with them (specs/depth.md, \"Tiers\")", 2,
-                                                         Config::Values::SIntValueOptions{.min = 0, .max = 3});
-    HyprlandAPI::addConfigValueV2(handle, g->depth);
     openFeed();
     readTheme();
     claimFadeouts();

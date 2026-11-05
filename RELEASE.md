@@ -35,7 +35,7 @@ adds a settings file, a menu or a knob that Omarchy does not already have.
      easing, so with it off the plugin redraws only when windows change.
    - *No gaps*, *Corners*: apply to the cinema spacing and rounding.
    - *Glassy bar*: the bar's glass.
-   Finer values are Hyprland keys (`plugin:backdrop:depth`, the gaps):
+   Finer values are Hyprland keys (the gaps):
    `film.lua` sets defaults, the user's `~/.config/hypr` and the toggles load
    after it and win.
 4. **Anyone can make one.** Copy a cinema theme directory (Omarchy's

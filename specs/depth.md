@@ -52,7 +52,7 @@ Each is one fact with one source; nothing is stored that can be computed.
   or the bridge goes. Amplitude and activity only; the bridge carries no
   audio or transcript, and nothing is stored or logged. The screen does show
   that speech is happening, and how loud, to anyone who sees it, live or in
-  a recording; `plugin:backdrop:depth 0` turns every answer off.
+  a recording; *No animations* turns every answer off.
 - **Light** is not plugin data: each film defines its light (direction,
   colour) as constants in its own `backdrop.frag`, used by `backdrop()` for
   shadows and by `frame()` for rims, so the two always agree.
@@ -84,12 +84,6 @@ this frame, at half size (`worldAt()`).
   moves in.
 
 At rest the plugin draws nothing (specs/smoothness.md, "Still at rest").
-
-### Tiers
-
-`plugin:backdrop:depth`: `0` is the backdrop alone, with no answers, no
-frames and no facts moving; above 0 (default `2`) the films answer and frame
-their windows.
 
 ## Not built
 
