@@ -447,11 +447,11 @@ void main() {
         return error == std::errc{} && end == value.data() + value.size() && std::isfinite(glass) ? std::clamp(glass, 0.F, 1.F) : 0.85F;
     }
 
-    // A film's reach in px; anything but a number of px reaches everywhere.
+    // A film's reach in px, digits with a decimal point at most (as
+    // tools/preview.py reads it); anything else reaches everywhere.
     float reachOf(const std::string& value) {
-        float      reach        = 0;
-        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), reach);
-        return error == std::errc{} && end == value.data() + value.size() && reach >= 0 ? reach : INFINITY;
+        static const std::regex PX(R"(\d+(\.\d*)?)");
+        return std::regex_match(value, PX) ? std::stof(value) : INFINITY;
     }
 
     // The theme's shader, palette and glass, from the theme Omarchy has just

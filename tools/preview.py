@@ -177,7 +177,10 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
     # 32 reach (main.cpp, uploadShapes()).
     data = np.zeros((3 * 256, 4), dtype="f4")
     tiles = np.zeros((32, 32), dtype="u4")
-    reach = setting(theme, "reach", np.inf)
+    # As main.cpp reads it: the last line's, digits with a point at most,
+    # else everywhere.
+    found = re.findall(r'^\s*reach\s*=\s*"\s*([^"\s]*)\s*"', (theme / "colors.toml").read_text(), re.M)
+    reach = float(found[-1]) if found and re.fullmatch(r"\d+(\.\d*)?", found[-1]) else np.inf
     for i, rect in enumerate(windows):
         v = velocity[i] if velocity else (0.0, 0.0)
         data[3 * i] = rect
