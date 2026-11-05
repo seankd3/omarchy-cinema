@@ -66,8 +66,8 @@ Hyprland only composites.
   at 10 (Tron's runs disagreed: 3.17 ms to 3.50, and to 2.88).
   Evangelion's hold on its honeycomb lets go 450 px out and a rim fades
   out at its cell's edge, so float noise moves no cell (a one-ulp nudge
-  moved 75,000 pixels up to 86 levels before); culled, it is exact and 6
-  to 23% cheaper at 3 to 10 windows.
+  moved 75,000 pixels up to 86 levels before); culled, it is within a
+  level, its world passes 3% (3 windows) to 23% (10) cheaper.
 - **A wake or a shadow pays only where it reaches.** A moving window's ghosts
   are drawn only outside it and within a reach of where it was; past that
   their light moves no point a twentieth of a display level (a hundredth in
