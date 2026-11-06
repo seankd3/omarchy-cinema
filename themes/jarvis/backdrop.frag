@@ -1,4 +1,4 @@
-// omarchy-cinema contract 13
+// omarchy-cinema contract 14
 // Jarvis: a holographic globe in a gyroscope of rings, turning behind the
 // focused window and sized to it. It glows through the glass and past the
 // window's edges; light pools in the seams between windows and wakes the hex
@@ -26,13 +26,7 @@ float dashes(float a, float r, float count, float duty, float turn) {
 
 // Dots on a hexagonal lattice, `size` pixels apart.
 float hexDots(vec2 px, float size) {
-    vec2 p = px / size;
-    vec2 r = vec2(1.0, 1.7320508);
-    vec2 h = r * 0.5;
-    vec2 a = mod(p, r) - h;
-    vec2 b = mod(p - h, r) - h;
-    vec2 g = dot(a, a) < dot(b, b) ? a : b;
-    return 1.0 - smoothstep(0.03, 0.075, length(g));
+    return 1.0 - smoothstep(0.03, 0.075, length(hexOffset(px / size)));
 }
 
 // Dust: a mote in some cells of a grid that rises a cell every 10 seconds.
@@ -121,7 +115,7 @@ vec3 afterimage(vec2 px, Window w, vec3 cyan, inout float lattice) {
     if (speed >= 40.0 && w.d > 0.0 && edgeDistance(w) < glowReach(4.0 * 0.28, 7.5) + speed * 0.16) {
         vec3 tint = w.i == focusedIndex ? mix(cyan, HOT, 0.35) : cyan;
         float wash = 0.0;
-        float k = min(speed / 1200.0, 1.0) * w.alpha * smoothstep(0.0, 3.0, w.d);
+        float k = wakeStrength(w, 1200.0);
         for (int g = 1; g <= 4; g++) {
             vec4 ghost = ago(w, 0.04 * float(g));
             float d = rectDistance(px, ghost, w.rounding);

@@ -1,4 +1,4 @@
-// omarchy-cinema contract 13
+// omarchy-cinema contract 14
 // Roadster: the 2026 Roadster's cockpit, drawn like a fighter jet's display.
 // A floor of red dots runs out to a thin white horizon and rushes toward the
 // viewer, with streaks of speed along it. A wireframe wedge turns slowly on
@@ -131,7 +131,7 @@ vec3 speedLines(vec2 px, Window w, vec3 red) {
     // Only a moving window pays for its lines (a loop count, not a
     // branch, so the work is skipped, not merely masked).
     for (int on = 0; on < (speed < 40.0 ? 0 : 1); on++) {
-        float k = min(speed / 1200.0, 1.0) * w.alpha * smoothstep(0.0, 3.0, w.d);
+        float k = wakeStrength(w, 1200.0);
         vec4 r = w.rect;
         vec2 n = v / max(speed, 1e-3);
         vec2 side = vec2(-n.y, n.x);

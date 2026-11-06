@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 13
+// omarchy-cinema contract 14
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -36,7 +36,6 @@ uniform float time;
 uniform vec2 resolution;
 uniform vec3 accent;
 uniform vec3 background;
-uniform vec3 foreground;
 uniform vec4 focused;
 uniform vec4 reserved;
 // Three vec4s a window, at most 256 windows: (x, y, w, h), (alpha,
@@ -228,6 +227,13 @@ void see(inout Seen s, Window w) {
 // Helpers several films share (a helper enters the contract once two films
 // answer a fact the same way).
 
+// How wide, in logical px, each pixel being drawn takes the mean of the
+// world over: 0 at the screen's own size, where a pixel shows its middle.
+// The world drawn for the glass's frost is coarser, and a line sized to the
+// screen's pixels should cover each of its pixels as much as it covers the
+// screen pixels there, or it floods the frost.
+uniform float spread;
+
 // A line `d` pixels away: a crisp core `w` pixels wide in a soft glow,
 // `halo.x` bright and fading over `halo.y` core widths; most films glow
 // vec2(0.25, 5.0).
@@ -326,6 +332,20 @@ float windowFlare(int i, float landing) {
     return dot(windowTexels[3 * i + 2].zw, vec2(1.0, landing));
 }
 
+// How strongly a moving window w leaves its wake: by its speed, in full at
+// `full` px a second, and its fade, from just outside it.
+float wakeStrength(Window w, float full) {
+    return min(length(w.velocity) / full, 1.0) * w.alpha * smoothstep(0.0, 3.0, w.d);
+}
+
+// The offset of p from the nearest point of a hexagonal lattice, its rows a
+// unit apart.
+vec2 hexOffset(vec2 p) {
+    vec2 r = vec2(1.0, 1.7320508), h = r * 0.5;
+    vec2 a = mod(p, r) - h, b = mod(p - h, r) - h;
+    return dot(a, a) < dot(b, b) ? a : b;
+}
+
 // A soft rise over `rise` seconds and fade until `life`, for brief answers.
 float swell(float age, float rise, float life) {
     return smoothstep(0.0, rise, age) * (1.0 - smoothstep(rise, life, age));
@@ -355,8 +375,8 @@ float glassSide(float d, float width) {
     return (1.0 - smoothstep(0.0, width, d)) * smoothstep(-2.0, 0.0, d);
 }
 
-// The world as the backdrop drew it in this frame for the glass's frost
-// (colors.toml's frost_samples), filtered, at px: what a frame shows bent
+// The world as the backdrop drew it in this frame for the glass's frost,
+// filtered, at px: what a frame shows bent
 // through the glass's edge, read instead of drawn again. Only frame() reads it.
 uniform sampler2D drawnWorld;
 uniform mat3 worldProj;

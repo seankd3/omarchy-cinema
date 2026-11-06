@@ -1,4 +1,4 @@
-// omarchy-cinema contract 13
+// omarchy-cinema contract 14
 // Evangelion: NERV's displays. A honeycomb wakes like an AT field round the
 // windows, rings ripple out from the focused one, and far behind lies
 // Unit-01's purple lattice. The windows stand in the field, lit from above
@@ -15,12 +15,7 @@ const vec2 LIGHT = vec2(-0.34, -0.94);
 // The flat-topped hexagon of a honeycomb `size` pixels apart that holds px:
 // its centre (xy) and how far px is inside its edge (z), in pixels.
 vec3 hexCell(vec2 px, float size) {
-    vec2 p = px.yx / size;
-    vec2 r = vec2(1.0, 1.7320508);
-    vec2 h = r * 0.5;
-    vec2 a = mod(p, r) - h;
-    vec2 b = mod(p - h, r) - h;
-    vec2 g = dot(a, a) < dot(b, b) ? a : b;
+    vec2 p = px.yx / size, g = hexOffset(p);
     float inside = 0.5 - max(abs(g.x), dot(abs(g), vec2(0.5, 0.8660254)));
     return vec3((p - g).yx * size, inside * size);
 }

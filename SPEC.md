@@ -34,9 +34,9 @@ shader over the monitor, with the windows' real geometry for that frame
 window, the palette and a clock. The windows are the ones Hyprland itself
 draws on that monitor in that frame (`shouldRenderWindow`), so the backdrop
 cannot trail them. Shapes are exact rounded rectangles (signed distance), not
-textures. The plugin also makes the glass's frost: it draws the world at half
-the monitor's size, softens it through its mipmap as far as the film's
-`frost` and makes that level the texture Hyprland's glass reads, so Hyprland
+textures. The plugin also makes the glass's frost: it draws the world at twice
+the size of the level as soft as the film's `frost` and makes that level the
+texture Hyprland's glass reads, so Hyprland
 never blurs the screen itself. A frosted window covers what is under it
 opaque, and each says so to Hyprland's own occlusion from under its surface,
 so at full size the world is drawn only where it is seen as it is, and
