@@ -148,8 +148,11 @@ case ${1:-} in
     exit 75 ;;
   --queue) shift; (($#)) && enqueue "$@"; exit ;;
   --away)
-    # Each answer counts only from a query that succeeded (pipefail).
-    hyprctl -j monitors | jq -e 'length > 0 and all(.[]; .dpmsStatus == false)' >/dev/null && exit 0
+    # Each answer counts only from a query that succeeded (pipefail): every
+    # running Hyprland's monitors asleep, never asked of the one a queued
+    # run's environment names, which may have ended since it was queued.
+    sigs=$(hyprctl instances -j | jq -r '.[].instance') && [[ -n $sigs ]] &&
+      (for sig in $sigs; do hyprctl -i "$sig" -j monitors | jq -e 'length > 0 and all(.[]; .dpmsStatus == false)' >/dev/null || exit 1; done) && exit 0
     session=$(loginctl show-user "$(id -un)" -p Display --value) && [[ -n $session ]] &&
       locked=$(loginctl show-session "$session" -p LockedHint --value) && [[ $locked == yes ]]
     exit ;;
