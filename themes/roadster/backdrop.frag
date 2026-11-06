@@ -365,5 +365,5 @@ vec4 frame(vec2 px, Window w) {
         col += behind * 1.2 * edge * 0.85 + tint * line + mix(tint, WHITE, 0.5) * line * passing * 2.0;
         a = clamp(max(edge * 0.85, line * (1.0 + passing)), 0.0, 1.0);
     }
-    return vec4(col, a) * w.alpha;
+    return vec4(col, a);
 }

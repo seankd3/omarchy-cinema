@@ -389,10 +389,11 @@ vec4 worldAt(vec2 px) {
 // optionally, frame(px, w): window w's edge in that world (specs/depth.md,
 // part 2), a premultiplied colour over a band reaching 48 px outside the
 // window and at most 2 px inside it, drawn above the window in its own pass,
-// so it moves and fades with it. A frame shows the world through the
-// glass's thickness with worldAt() at a bent point. Hyprland's border
-// and shadow stay on under a frame: the frame program's main colours the
-// border ring with the film's edge. A derivative (dFdx, fwidth) is undefined
-// in a branch that can differ within a 2x2 quad: take it before the branch.
+// so it moves and fades with it: return it unfaded. A frame shows the world
+// through the glass's thickness with worldAt() at a bent point. Hyprland's
+// border and shadow stay on under a frame: the frame program's main colours
+// the border ring with the film's edge. A derivative (dFdx, fwidth) is
+// undefined in a branch that can differ within a 2x2 quad: take it before
+// the branch.
 vec4 backdrop(vec2 px);
 vec4 frame(vec2 px, Window w);

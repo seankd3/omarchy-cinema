@@ -317,5 +317,5 @@ vec4 frame(vec2 px, Window w) {
     vec3 behind = d < 10.0 ? worldAt(px - n * (max(d, 0.0) + 8.0)).rgb - background : vec3(0.0);
     vec3 glow = (tint * strength + behind * 4.0) * line;
     float a = clamp(max(edge * 0.85, (1.0 - smoothstep(0.0, 1.0, x)) * min(strength, 1.0)), 0.0, 1.0);
-    return vec4((background + behind) * edge * 0.85 + glow, a) * w.alpha;
+    return vec4((background + behind) * edge * 0.85 + glow, a);
 }

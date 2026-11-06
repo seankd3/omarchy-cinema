@@ -343,5 +343,5 @@ vec4 frame(vec2 px, Window w) {
         col += behind * 1.1 * edge * 0.9 + tint * rim + mix(tint, behind, 0.5) * rim * passing * 1.8;
         a = clamp(max(edge * 0.9, rim), 0.0, 1.0);
     }
-    return vec4(col, a) * w.alpha;
+    return vec4(col, a);
 }
