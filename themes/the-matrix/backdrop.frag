@@ -54,6 +54,7 @@ vec3 column(vec2 at, vec2 cell, float id, float span, float period, float phase,
     float across = 1.0 - abs(fract(at.x) - 0.5) * 2.0;
     float glow = lit.x * across * across;
     if (lit.x < 0.01 || feedCount == 0) return vec3(0.0, 0.0, glow);
+    fine(true);
     // Each stream carries its own stretch of the text, the newest of
     // it at the head and older characters up its tail, so the text falls
     // with the drop.
@@ -96,7 +97,9 @@ vec2 blurred(vec2 px, vec4 depth, float layer, float shift) {
     vec4 d = drop(floor(at.x), layer, depth.z, depth.w);
     if (d.x == 0.0) return vec2(0.0);
     vec2 c = 1.0 - abs(fract(at) - 0.5) * 2.0;
-    return drops(px.y, depth.y, d.y, d.x, d.z, d.w).xy * c.x * c.y;
+    vec2 lit = drops(px.y, depth.y, d.y, d.x, d.z, d.w).xy;
+    fine(lit.x >= 0.1);
+    return lit * c.x * c.y;
 }
 
 // The near rain's glyph cell holding px, its columns shifted `shift` across:
@@ -243,6 +246,7 @@ vec4 backdrop(vec2 px) {
             float at = (px.x + shift) / NEAR_RAIN.x;
             vec4 d = drop(floor(at), 0.0, NEAR_RAIN.z, NEAR_RAIN.w);
             if (d.x > 0.0) {
+                fine(over < 20.0);
                 vec3 lit = drops(rect.y - 1.0, NEAR_RAIN.y, d.y, d.x, d.z, d.w);
                 float splash = (lit.y * 1.5 + lit.x * lit.x * 0.4) * exp(-over / 5.0)
                     * exp(-abs(fract(at) - 0.5) * NEAR_RAIN.x / 8.0);
@@ -254,6 +258,7 @@ vec4 backdrop(vec2 px) {
     // The answers' own glow, and a landing's glyphs, read only where a
     // landing reaches.
     float ink = answer.z > 0.0 && feedCount > 0 ? nearInk(px, shift) : 0.0;
+    fine(ink > 0.0);
     light += green * answer.x + (green * answer.z * 1.2 + HEAD * min(answer.w, 2.0) * 1.4) * ink;
 
     // The gaps between windows glow faintly green, a little more as you

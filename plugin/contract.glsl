@@ -144,6 +144,22 @@ float rectDistance(vec2 px, vec4 rect, float radius) {
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
 }
 
+// How wide, in logical px, each pixel being drawn takes the mean of the
+// world over: 0 at the screen's own size, where a pixel shows its middle.
+// The world drawn for the glass's frost is coarser, and a line sized to the
+// screen's pixels should cover each of its pixels as much as it covers the
+// screen pixels there, or it floods the frost.
+uniform float spread;
+
+// Where the world is finer than the coarse world's pixels: a film marks a
+// point a coarse pixel would blur with fine(), as glowLine() marks its
+// lines. The full-size world is drawn only round a marked coarse pixel, and
+// is the coarse world read bilinear everywhere else.
+float marked = 0.0;
+void fine(bool here) {
+    if (here) marked = 1.0;
+}
+
 // Window i as the point px sees it: everything the plugin says of it, read
 // once: its rect, alpha (fading with it), rounding, lift (easing to 1 while
 // it has focus and back), depth (its place in the stack, 0 on top), velocity
@@ -213,6 +229,7 @@ struct Seen {
 const Seen UNSEEN = Seen(FAR, -1, FAR, -1, FAR);
 
 void see(inout Seen s, Window w) {
+    fine(abs(w.d) < 3.0 + spread);
     if (w.d < s.nearest) {
         s.nearest = w.d;
         s.closest = w.i;
@@ -227,17 +244,11 @@ void see(inout Seen s, Window w) {
 // Helpers several films share (a helper enters the contract once two films
 // answer a fact the same way).
 
-// How wide, in logical px, each pixel being drawn takes the mean of the
-// world over: 0 at the screen's own size, where a pixel shows its middle.
-// The world drawn for the glass's frost is coarser, and a line sized to the
-// screen's pixels should cover each of its pixels as much as it covers the
-// screen pixels there, or it floods the frost.
-uniform float spread;
-
 // A line `d` pixels away: a crisp core `w` pixels wide in a soft glow,
 // `halo.x` bright and fading over `halo.y` core widths; most films glow
 // vec2(0.25, 5.0).
 float glowLine(float d, float w, vec2 halo) {
+    fine(d < w * (1.0 + 2.0 * halo.y) + spread);
     return (1.0 - smoothstep(0.0, w, d)) + halo.x * exp(-d / (w * halo.y));
 }
 

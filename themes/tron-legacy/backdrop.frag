@@ -35,6 +35,7 @@ float linesArea(float x, float w) {
 
 float lines(float x, float w, float h) {
     float at = fract(x + 0.5) - 0.5;
+    fine(abs(at) < w + 2.0 * h);
     if (h <= 0.0) return 1.0 - smoothstep(0.0, w, abs(at));
     return (linesArea(at + h, w) - linesArea(at - h, w)) / (2.0 * h);
 }
@@ -48,6 +49,7 @@ float lightCycle(vec2 world, float unit, float lane, float period, float phase) 
     float behind = head - world.y;
     if (behind < 0.0) return 0.0;
     float trail = exp(-behind / 320.0);
+    fine(abs(world.x - laneX) * unit < 2.0 + spread);
     return (1.0 - smoothstep(0.0, 2.0, abs(world.x - laneX) * unit)) * trail * (behind < 6.0 ? 3.0 : 1.0);
 }
 
@@ -110,6 +112,7 @@ vec4 backdrop(vec2 px) {
     // out, held to a hundredth of a level: five times their strength) of
     // where the window was in the last 0.125 s (its last ghost's lag).
     bool ground = px.y > horizon;
+    fine(abs(px.y - horizon) < spread);
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0;
     vec2 pull = vec2(0.0);

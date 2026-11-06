@@ -146,6 +146,7 @@ vec3 speedLines(vec2 px, Window w, vec3 red) {
             float start = seed * 40.0;
             float len = speed * (0.06 + 0.14 * hash(vec2(lane, 9.7)));
             float across = abs(fract(off / 18.0) - 0.5) * 18.0;
+            fine(seed >= 0.35 && across < 1.4 + spread);
             float streak = step(0.35, seed) * step(start, back) * (1.0 - smoothstep(start, start + len, back))
                 * (1.0 - smoothstep(0.5, 1.4, across));
             light += mix(red, WHITE, 0.55 + 0.4 * seed) * streak * 1.2 * k;
@@ -247,6 +248,7 @@ vec4 backdrop(vec2 px) {
         // their average, a faint red sheen running into the horizon.
         float rows = below * below / (CAMERA * resolution.y);
         float clean = smoothstep(1.7, 4.0, rows);
+        fine(rows > 1.7 && (length(fp - dotAt) < radius + 0.6 + spread || min(rows, below / CAMERA) < 2.0 * (spread + radius)));
         float fade = exp(-depth / 140.0);
         // What lit the floor flares its dots toward white.
         vec3 tint = mix(red, WHITE, min(lit * 0.25, 0.7));
@@ -261,6 +263,7 @@ vec4 backdrop(vec2 px) {
             float head = (1.0 - fract(cycle(3.0) + seed * 9.0)) * 160.0;
             float behind = depth - head;
             float across = abs(fract(cell.x) - 0.5) * below / CAMERA;
+            fine(across < 1.2 + spread);
             float dash = step(0.0, behind) * exp(-behind / 8.0) * (1.0 - smoothstep(0.4, 1.2, across));
             light += mix(red, WHITE, 0.6) * dash * fade * 0.6 * veil * shade;
         }

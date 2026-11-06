@@ -61,6 +61,7 @@ float brokenMoon(vec2 px, vec2 at, float R) {
     // The hollow is a second disc bitten out; its rim is rough rock.
     float rough = (noise(p * 0.16) - 0.5) * R * 0.16 + (noise(p * 0.5 + 7.0) - 0.5) * R * 0.05;
     float hollow = length(p - cut * R * 0.95) - R * 0.62 + rough;
+    fine(r < R + 0.5 + spread);
     float body = (1.0 - smoothstep(R - 1.0, R + 0.5, r)) * smoothstep(-0.8, 0.8, hollow);
     // Seas on its face, the limb darker toward the edge, and the fresh
     // fracture a shade brighter than the old face.
@@ -72,6 +73,7 @@ float brokenMoon(vec2 px, vec2 at, float R) {
     float arc = across + 0.004 * along * along - R * 0.1;
     float width = R * (0.25 + 0.006 * max(along, 0.0));
     if (along > R * 0.3 && abs(arc) < width) {
+        fine(true);
         vec2 cell = floor(p / 5.0);
         float fall = exp(-max(along - R * 0.4, 0.0) / (R * 1.1)) * (1.0 - abs(arc) / width);
         if (hash(cell + 11.0) > 1.0 - 0.5 * fall) {
@@ -147,6 +149,7 @@ vec2 sunAt() {
 
 // A thin line `d` pixels away, `w` wide: 1 on it.
 float ink(float d, float w) {
+    fine(d < w * 1.4 + spread);
     return 1.0 - smoothstep(w * 0.4, w * 1.4, d);
 }
 
@@ -213,6 +216,7 @@ void wake(vec2 px, Window w, inout float glow, inout float blue, inout float par
             float t = clamp(dot(px - a, tail) / max(dot(tail, tail), 1e-3), 0.0, 1.0);
             float dist = segment(px, a, a + tail);
             float w = 2.0 + 16.0 * t;
+            fine(dist < 3.0 * w + spread && t < 1.0);
             glow += exp(-dist / w) * (1.0 - t) * 1.2 * k;
             blue += exp(-dist / (w * 2.6)) * (1.0 - t) * 0.7 * k;
         }
@@ -273,6 +277,7 @@ vec4 backdrop(vec2 px) {
     vec3 col = !open ? vec3(0.0) : px.y < horizon ? sky(px, horizon, sun) : cloudDeck(px + flow, horizon, sun, tops.x, slope);
     // The sun itself: a soft white disc in a wide warm bloom, hazy at dawn.
     float ds = length(px - sun);
+    fine(abs(px.y - horizon) < spread || abs(ds - 18.0) < 4.0 + spread);
     col = mix(col, SUN, 0.45 * exp(-ds / 380.0) + 0.5 * exp(-ds / 70.0));
     col = mix(col, vec3(1.0), 1.0 - smoothstep(14.0, 22.0, ds));
 
@@ -311,6 +316,7 @@ vec4 backdrop(vec2 px) {
             float fade = c.alpha;
             vec4 rect = c.rect;
             // A fine blue line traced a little off each pane.
+            fine(abs(nearest - 12.0) < 1.05 + spread || nearest < 10.0);
             float line = 1.0 - smoothstep(0.35, 1.05, abs(nearest - 12.0));
             col = mix(col, accent, line * 0.55 * fade);
             // Light catches the edge facing the sun, and a glint runs along it.
@@ -329,6 +335,7 @@ vec4 backdrop(vec2 px) {
         // present as the focus, so it fades with a closing window.
         float fd = focusAlpha > 0.0 ? rectDistance(px, focused, 0.0) : FAR;
         if (abs(fd - RING) < 12.0) {
+            fine(true);
             float fade = focusAlpha;
             vec4 ring = focused + vec4(-RING, -RING, 2.0 * RING, 2.0 * RING);
             float behind = fract(cycle(12.0) - around(px, ring)) * 2.0 * (ring.z + ring.w);
@@ -373,6 +380,7 @@ vec4 backdrop(vec2 px) {
     // along it, and the frosted bar above lifted toward white.
     float below;
     if (atBar(px, below)) {
+        fine(abs(below) < 8.0 + spread);
         col = mix(col, vec3(1.0), 0.3 * step(below, 0.0));
         col = mix(col, accent, (1.0 - smoothstep(0.3, 1.0, abs(below))) * 0.6);
         float gx = cycle(15.0) * (resolution.x + 800.0) - 400.0;

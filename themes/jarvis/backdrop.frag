@@ -26,7 +26,9 @@ float dashes(float a, float r, float count, float duty, float turn) {
 
 // Dots on a hexagonal lattice, `size` pixels apart.
 float hexDots(vec2 px, float size) {
-    return 1.0 - smoothstep(0.03, 0.075, length(hexOffset(px / size)));
+    float o = length(hexOffset(px / size));
+    fine(o < 0.075 + spread / size);
+    return 1.0 - smoothstep(0.03, 0.075, o);
 }
 
 // Dust: a mote in some cells of a grid that rises a cell every 10 seconds.
@@ -39,6 +41,7 @@ float motes(vec2 px) {
     float seed = hash(id);
     if (seed < 0.82) return 0.0;
     vec2 at = vec2(hash(id + 7.1), hash(id + 3.7)) * 0.8 + 0.1;
+    fine(length(fract(p) - at) < 0.06 + spread / 70.0);
     float twinkle = 0.5 + 0.5 * sin(TAU * (cycle(4.0) + seed * 9.0));
     return (1.0 - smoothstep(0.0, 0.06, length(fract(p) - at))) * twinkle;
 }
@@ -49,6 +52,7 @@ float motes(vec2 px) {
 float globe(vec2 p, float R, out float rim) {
     vec2 q = p / R;
     float q2 = dot(q, q);
+    fine(abs(length(p) - R) < spread);
     rim = 0.0;
     if (q2 > 1.0) return 0.0;
     float z = sqrt(1.0 - q2);
@@ -127,6 +131,7 @@ vec3 afterimage(vec2 px, Window w, vec3 cyan, inout float lattice) {
             light += tint * glowLine(abs(d), 1.5, HALO) * dash * fade * 1.3 * k;
             wash = max(wash, (1.0 - smoothstep(-30.0, 30.0, d)) * fade);
         }
+        fine(wash * k > 0.005);
         light += tint * wash * (0.55 + 0.45 * sin(px.y * TAU / 5.0)) * 0.5 * k;
         lattice += 3.0 * wash * k;
     }
