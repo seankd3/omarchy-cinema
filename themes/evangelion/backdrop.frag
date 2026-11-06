@@ -1,4 +1,4 @@
-// omarchy-cinema contract 14
+// omarchy-cinema contract 15
 // Evangelion: NERV's displays. A honeycomb wakes like an AT field round the
 // windows, rings ripple out from the focused one, and far behind lies
 // Unit-01's purple lattice. The windows stand in the field, lit from above
@@ -113,8 +113,7 @@ vec4 backdrop(vec2 px) {
     float shadow = 0.0;
     vec3 held = vec3(0.0);
     uint reached = windowsAt(px), near = 0u;
-    for (int i = 0; i < windowCount; i++) {
-        if (!reaches(reached, i)) continue;
+    for (int i = -1; next(reached, i);) {
         Window w = window(px, i);
         see(seen, w);
         // Its wake (below) reaches px's cell, which is within 16.2 px of px.
@@ -161,7 +160,7 @@ vec4 backdrop(vec2 px) {
     // those whose wake reaches it, and the moving ones.
     float wake = 0.0, stir = 0.0;
     for (int i = 0; i < windowCount; i++) {
-        if (!reaches(near, i) && windowTexels[3 * i + 2].xy == vec2(0.0)) continue;
+        if (i < 32 && (near >> i & 1u) == 0u && windowTexels[3 * i + 2].xy == vec2(0.0)) continue;
         Window w = window(cell.xy, i);
         wake += 0.6 * exp(-abs(w.d) / 28.0);
         float speed = length(w.velocity);

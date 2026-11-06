@@ -1,4 +1,4 @@
-// omarchy-cinema contract 14
+// omarchy-cinema contract 15
 // The Matrix: the code, and the code is this very shader, or what the agents
 // on this machine are writing once the user turns that on
 // (specs/agent-rain.md). It rains down the black screen in mirrored glyphs,
@@ -161,8 +161,7 @@ vec4 backdrop(vec2 px) {
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0, pull = 0.0, wake = 0.0;
     uint reached = windowsAt(px);
-    for (int i = 0; i < windowCount; i++) {
-        if (!reaches(reached, i)) continue;
+    for (int i = -1; next(reached, i);) {
         Window w = window(px, i);
         see(seen, w);
         float d = w.d;

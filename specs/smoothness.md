@@ -61,7 +61,9 @@ Hyprland only composites.
 - **A pixel meets only the windows that reach it.** A film says how far
   its windows reach (`REACH`, contract 11), the plugin marks in the
   windows' block which of them reach each of 32 by 32 tiles, and a film's
-  loop reads its tile once and skips the rest. Moving frame, world passes
+  loop reads its tile once and walks only the windows it holds
+  (contract.glsl's next(); testing each window's bit instead cost the world
+  passes 1 to 6% more at 10 windows, 1440x900). Moving frame, world passes
   at full size: the same at 3 windows, 5 to 14% less at 6, 15 to 24% less
   at 10 (Tron's runs disagreed: 3.17 ms to 3.50, and to 2.88).
   Evangelion's honeycomb hold lets go 450 px out and a rim fades out

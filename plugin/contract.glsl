@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 14
+// omarchy-cinema contract 15
 // The backdrop contract: everything a theme's backdrop.frag can know. The
 // plugin puts this in front of the theme's backdrop.frag, which defines
 // backdrop(): the colour of one point of the screen.
@@ -149,16 +149,15 @@ float rectDistance(vec2 px, vec4 rect, float radius) {
 // it has focus and back), depth (its place in the stack, 0 on top), velocity
 // (px a second), and d, px's distance to it, pushed away as it fades, so a
 // window fading in grows out of nothing and one fading out sinks away. A
-// film meets the windows at px in
-// one loop, `for (int i = 0; i < windowCount; i++) { Window w = window(px, i);
-// ... }`, and asks all it needs of each there: at 2880x1800 every further
+// film meets the windows that reach px in one loop, `uint reached =
+// windowsAt(px); for (int i = -1; next(reached, i);) { Window w = window(px,
+// i); ... }`, and asks all it needs of each there: at 2880x1800 every further
 // loop over three windows cost a draw 0.2 to 0.6 ms.
 //
 // A film says how far its windows reach as colors.toml's `reach = "<px>"`
 // (REACH): past it from a window and from where it was in the last 0.3 s,
-// the window moves no point a level. Its loop then meets at px only the windows that reach
-// it: `uint reached = windowsAt(px);` before, `if (!reaches(reached, i))
-// continue;` first. Without REACH every window reaches every point.
+// the window moves no point a level. Without REACH every window reaches
+// every point.
 struct Window {
     int i;
     vec4 rect;
@@ -173,8 +172,14 @@ uint windowsAt(vec2 px) {
     return windowTiles[k / 4][k % 4];
 }
 
-bool reaches(uint windows, int i) {
-    return i >= 32 || (windows >> uint(i) & 1u) != 0u;
+// The window after i (-1 before the first) in a set of windows: a bit for
+// each of 0 to 31, as windowsAt() gives, and every window from 32 on; false
+// past the last. The lowest bit's index is its float's exponent, exactly
+// (GLSL ES 3.0 has no findLSB).
+bool next(uint windows, inout int i) {
+    uint left = i < 31 ? windows & ~0u << uint(i + 1) : 0u;
+    i = left == 0u ? max(i + 1, 32) : int(floatBitsToUint(float(left & ~left + 1u)) >> 23) - 127;
+    return i < windowCount;
 }
 
 Window window(vec2 px, int i) {
