@@ -182,8 +182,8 @@ vec4 backdrop(vec2 px) {
     float near = 0.0, shadow = 0.0, bend = 0.0;
     vec3 speeding = vec3(0.0);
     vec2 vanish = vec2(resolution.x * 0.5, horizon);
-    uint reached = windowsAt(px);
-    for (int i = -1; next(reached, i);) {
+    uint left = windowsAt(px);
+    for (int i = -1; next(left, i);) {
         Window w = window(px, i);
         see(seen, w);
         float a = w.alpha, d = w.d;

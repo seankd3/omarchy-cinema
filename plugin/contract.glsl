@@ -149,9 +149,9 @@ float rectDistance(vec2 px, vec4 rect, float radius) {
 // it has focus and back), depth (its place in the stack, 0 on top), velocity
 // (px a second), and d, px's distance to it, pushed away as it fades, so a
 // window fading in grows out of nothing and one fading out sinks away. A
-// film meets the windows that reach px in one loop, `uint reached =
-// windowsAt(px); for (int i = -1; next(reached, i);) { Window w = window(px,
-// i); ... }`, and asks all it needs of each there: at 2880x1800 every further
+// film meets the windows that reach px in one loop, `uint left =
+// windowsAt(px); for (int i = -1; next(left, i);) { Window w = window(px, i);
+// ... }`, and asks all it needs of each there: at 2880x1800 every further
 // loop over three windows cost a draw 0.2 to 0.6 ms.
 //
 // A film says how far its windows reach as colors.toml's `reach = "<px>"`
@@ -172,13 +172,13 @@ uint windowsAt(vec2 px) {
     return windowTiles[k / 4][k % 4];
 }
 
-// The window after i (-1 before the first) in a set of windows: a bit for
-// each of 0 to 31, as windowsAt() gives, and every window from 32 on; false
-// past the last. The lowest bit's index is its float's exponent, exactly
-// (GLSL ES 3.0 has no findLSB).
-bool next(uint windows, inout int i) {
-    uint left = i < 31 ? windows & ~0u << uint(i + 1) : 0u;
+// The next window i (-1 before the first) of a set, taken out of `left`, the
+// windows left to meet: a bit for each of 0 to 31, as windowsAt() gives, and
+// every window from 32 on; false past the last. The lowest bit's index is its
+// float's exponent, exactly (GLSL ES 3.0 has no findLSB).
+bool next(inout uint left, inout int i) {
     i = left == 0u ? max(i + 1, 32) : int(floatBitsToUint(float(left & ~left + 1u)) >> 23) - 127;
+    left &= left - 1u;
     return i < windowCount;
 }
 

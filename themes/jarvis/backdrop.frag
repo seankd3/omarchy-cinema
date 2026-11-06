@@ -193,8 +193,8 @@ vec4 backdrop(vec2 px) {
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0, swept = 0.0;
     vec3 after = vec3(0.0);
-    uint reached = windowsAt(px);
-    for (int i = -1; next(reached, i);) {
+    uint left = windowsAt(px);
+    for (int i = -1; next(left, i);) {
         Window w = window(px, i);
         see(seen, w);
         near += exp(-max(w.d, 0.0) / 110.0);

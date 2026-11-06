@@ -234,8 +234,8 @@ vec4 backdrop(vec2 px) {
     Seen seen = UNSEEN;
     float near = 0.0, lifted = 0.0;
     vec2 flow = vec2(0.0);
-    uint reached = windowsAt(px);
-    for (int i = -1; next(reached, i);) {
+    uint left = windowsAt(px);
+    for (int i = -1; next(left, i);) {
         Window w = window(px, i);
         see(seen, w);
         float d = w.d;
@@ -292,7 +292,8 @@ vec4 backdrop(vec2 px) {
         // moving ones. A second look at the windows, which only the points
         // outside them take: under a pane it would cost more than it saves.
         float shadow = 0.0, trail = 0.0, fringe = 0.0, part = 0.0;
-        for (int i = -1; next(reached, i);) {
+        left = windowsAt(px);
+        for (int i = -1; next(left, i);) {
             Window w = window(px, i);
             shadow = max(shadow, windowShadow(px, w, vec2((w.rect.x + w.rect.z * 0.5 - sun.x) / resolution.x, 0.6), 24.0 + 56.0 * w.lift, 22.0 + 46.0 * w.lift));
             wake(px, w, trail, fringe, part);

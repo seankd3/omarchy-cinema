@@ -112,8 +112,8 @@ vec4 backdrop(vec2 px) {
     Seen seen = UNSEEN;
     float shadow = 0.0;
     vec3 held = vec3(0.0);
-    uint reached = windowsAt(px), near = 0u;
-    for (int i = -1; next(reached, i);) {
+    uint left = windowsAt(px), near = 0u;
+    for (int i = -1; next(left, i);) {
         Window w = window(px, i);
         see(seen, w);
         // Its wake (below) reaches px's cell, which is within 16.2 px of px.

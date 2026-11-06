@@ -160,8 +160,8 @@ vec4 backdrop(vec2 px) {
     // bright wake where it has just been.
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0, pull = 0.0, wake = 0.0;
-    uint reached = windowsAt(px);
-    for (int i = -1; next(reached, i);) {
+    uint left = windowsAt(px);
+    for (int i = -1; next(left, i);) {
         Window w = window(px, i);
         see(seen, w);
         float d = w.d;

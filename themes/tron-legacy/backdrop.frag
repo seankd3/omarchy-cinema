@@ -114,8 +114,8 @@ vec4 backdrop(vec2 px) {
     float near = 0.0, shadow = 0.0;
     vec2 pull = vec2(0.0);
     vec3 trail = vec3(0.0);
-    uint reached = windowsAt(px);
-    for (int i = -1; next(reached, i);) {
+    uint left = windowsAt(px);
+    for (int i = -1; next(left, i);) {
         Window w = window(px, i);
         see(seen, w);
         near += exp(-max(w.d, 0.0) / 90.0);
