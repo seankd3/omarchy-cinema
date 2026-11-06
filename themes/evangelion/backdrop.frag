@@ -279,5 +279,5 @@ vec4 frame(vec2 px, Window w) {
     vec3 behind = d < 10.0 ? worldAt(px - n * (max(d, 0.0) + 12.0)).rgb - background : vec3(0.0);
     vec3 glow = tint * (wall + hairline + wash) + behind * 3.0 * (wall + hairline) / max(strength, 0.3);
     float a = clamp(max(edge * 0.9, max(wall, hairline)), 0.0, 1.0);
-    return vec4((background + behind) * 1.1 * edge * 0.9 + glow, a) * w.alpha;
+    return vec4((background + behind) * 1.1 * edge * 0.9 + glow, a);
 }

@@ -258,5 +258,5 @@ vec4 frame(vec2 px, Window w) {
     float rim = glowLine(abs(d - 0.5), 1.0, HALO) * toward * (0.8 + 0.8 * lift + 1.6 * passing);
     float a = clamp(max(edge * 0.9, rim), 0.0, 1.0);
     vec3 col = behind * 1.15 * edge * 0.9 + tint * rim;
-    return vec4(col, a) * w.alpha;
+    return vec4(col, a);
 }

@@ -411,5 +411,5 @@ vec4 frame(vec2 px, Window w) {
     float halo = exp(-max(d, 0.0) / 7.0) * step(0.0, d) * (focus ? 0.12 : 0.0) * (1.0 + 2.0 * warm);
     float a = clamp(max(max(edge * 0.8, line), halo), 0.0, 1.0);
     vec3 col = bent * edge * 0.8 * (1.0 - line) + tint * line + vec3(1.0) * glint * 0.6 + tint * halo;
-    return vec4(min(col, vec3(a)), a) * w.alpha;
+    return vec4(min(col, vec3(a)), a);
 }
