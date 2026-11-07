@@ -47,14 +47,17 @@ function compile(fragment) {
   gl.bindAttribLocation(p, 0, "pos");
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
-  const at = {};
+  // Each uniform's location and type, so a value is set the way its own
+  // declaration takes it.
+  const at = {}, type = {};
   for (let i = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); i--;) {
-    const name = gl.getActiveUniform(p, i).name.replace(/\[0\]$/, "");
+    const u = gl.getActiveUniform(p, i), name = u.name.replace(/\[0\]$/, "");
     at[name] = gl.getUniformLocation(p, name);
+    type[name] = u.type;
   }
   const block = gl.getUniformBlockIndex(p, "Windows");
   if (block !== gl.INVALID_INDEX) gl.uniformBlockBinding(p, block, 0);
-  return { p, at };
+  return { p, at, type };
 }
 
 const vec3 = c => `vec3(${c.map(v => v.toFixed(6)).join(", ")})`;
@@ -395,32 +398,28 @@ function app(w) {
   return t;
 }
 
+const SETTERS = {
+  [gl.FLOAT]: "uniform1fv", [gl.FLOAT_VEC2]: "uniform2fv", [gl.FLOAT_VEC3]: "uniform3fv", [gl.FLOAT_VEC4]: "uniform4fv",
+  [gl.INT]: "uniform1iv", [gl.SAMPLER_2D]: "uniform1iv",
+};
 function set(prog, values) {
-  const at = prog.at;
   for (const [name, v] of Object.entries(values)) {
-    const loc = at[name];
-    if (!loc) continue;
-    if (name === "impulseKinds" || name === "impulseWindows") gl.uniform1iv(loc, v);
-    else if (name === "impulses") gl.uniform4fv(loc, v);
-    else if (["windowCount", "focusedIndex", "impulseCount", "frameWindow", "feedCount", "feedPos"].includes(name)) gl.uniform1i(loc, v);
-    else if (Array.isArray(v) || v instanceof Float32Array) gl[`uniform${v.length}fv`](loc, v);
-    else gl.uniform1f(loc, v);
+    if (!prog.at[name]) continue;
+    if (prog.type[name] === gl.FLOAT_MAT3) gl.uniformMatrix3fv(prog.at[name], false, v);
+    else gl[SETTERS[prog.type[name]]](prog.at[name], [v].flat());
   }
 }
 
 function filmProgram(prog, u, area, spread) {
   gl.useProgram(prog.p);
-  set(prog, { ...u.values, area, spread, feedCount, feedPos: feedCount % 16384 });
-  if (film.palette.accent && prog.at.accent) gl.uniform3fv(prog.at.accent, film.palette.accent);
-  else if (prog.at.accent) gl.uniform3fv(prog.at.accent, [1, 1, 1]);
-  if (prog.at.background) gl.uniform3fv(prog.at.background, film.palette.background || [1, 1, 1]);
+  set(prog, {
+    ...u.values, area, spread, feedCount, feedPos: feedCount % 16384,
+    accent: film.palette.accent || [1, 1, 1], background: film.palette.background || [1, 1, 1],
+    glyphs: 0, feed: 1, drawnWorld: 2, worldProj: [2, 0, 0, 0, -2, 0, -1, 1, 1],
+  });
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, glyphTex);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, feedTex);
   gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, coarse.texture);
-  if (prog.at.glyphs) gl.uniform1i(prog.at.glyphs, 0);
-  if (prog.at.feed) gl.uniform1i(prog.at.feed, 1);
-  if (prog.at.drawnWorld) gl.uniform1i(prog.at.drawnWorld, 2);
-  if (prog.at.worldProj) gl.uniformMatrix3fv(prog.at.worldProj, false, [2, 0, 0, 0, -2, 0, -1, 1, 1]);
 }
 
 const draw = () => gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -468,11 +467,8 @@ function render(t, target = { fb: null, width: canvas.width, height: canvas.heig
     const lit = w.id === focusedId;
     const accent = film.palette.accent || [1, 1, 1];
     gl.useProgram(ring.p);
-    gl.uniform2fv(ring.at.resolution, size);
-    gl.uniform4fv(ring.at.area, [r[0] - BORDER, r[1] - BORDER, r[2] + 2 * BORDER, r[3] + 2 * BORDER]);
-    gl.uniform4fv(ring.at.rect, r);
-    gl.uniform1f(ring.at.width, BORDER);
-    gl.uniform4fv(ring.at.colour, accent.map(v => v * (lit ? 1 : 0.5) * w.alpha).concat(w.alpha));
+    set(ring, { resolution: size, area: [r[0] - BORDER, r[1] - BORDER, r[2] + 2 * BORDER, r[3] + 2 * BORDER], rect: r, width: BORDER,
+                colour: accent.map(v => v * (lit ? 1 : 0.5) * w.alpha).concat(w.alpha) });
     draw();
     if (programs.frame) {
       filmProgram(programs.frame, u, [r[0] - BAND, r[1] - BAND, r[2] + 2 * BAND, r[3] + 2 * BAND], 0);
@@ -502,15 +498,10 @@ function bar() {
 }
 
 function glassBox(tex, box, alpha) {
-  const g = programs.glass;
-  gl.useProgram(g.p);
-  gl.uniform2fv(g.at.resolution, size);
-  gl.uniform4fv(g.at.area, box);
-  gl.uniform1f(g.at.alpha, alpha);
+  gl.useProgram(programs.glass.p);
+  set(programs.glass, { resolution: size, area: box, alpha, tex: 0, blurredBG: 1 });
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, coarse.frostTex);
-  gl.uniform1i(g.at.tex, 0);
-  gl.uniform1i(g.at.blurredBG, 1);
   draw();
 }
 
