@@ -50,9 +50,10 @@ settings it changed; a film still applied gives way to Tokyo Night.
 
 The [playground](https://seankd3.github.io/omarchy-cinema/play/) draws a film
 in the browser around windows you drag, with nothing installed: pick one of
-the six or a film from the gallery, edit its `backdrop.frag` and watch it
-change. Load your own repo by its GitHub URL, and give it the topic
-`omarchy-cinema` to list it in the gallery.
+a film, edit its `backdrop.frag` and watch it change. Load your own repo by
+its GitHub URL, and give it the topic `omarchy-cinema` to list it there. The
+second line of `backdrop.frag` names the film, up to its first colon or full
+stop: `// Tron Legacy: the Grid. ...`.
 
 Copy a film's directory into `~/.config/omarchy/themes/<name>`, change
 `colors.toml`, and write `backdrop.frag`: one GLSL function, `backdrop(px)`,

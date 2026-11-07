@@ -107,7 +107,7 @@ void main() {
 
 // ---- The film
 
-let film = null;   // { base, name, source, colors text, glyphs image }
+let film = null;   // { base, source, colors text, glyphs image }
 let picked = 0;    // the newest load asked for; an older one that ends later is dropped
 let programs = null;
 let glyphTex = null, feedTex = null, feedCount = 0;
@@ -134,11 +134,16 @@ function texture(width, height, internal, format, type, data, filter = gl.LINEAR
   return t;
 }
 
+// A film's name is its own: its backdrop.frag's second line up to the first
+// colon or full stop ("// Tron Legacy: the Grid. ..."), as tools/theme-repo
+// reads it for the film's repo.
+const nameOf = source => /^\/\/ ([^:.]*)/.exec(source.split("\n")[1] || "")?.[1].trim() || "Untitled film";
+
 // A theme is a base URL: backdrop.frag, colors.toml and glyphs.png under it.
-async function loadFilm(base, name) {
+async function loadFilm(base) {
   base = base.endsWith("/") ? base : base + "/";
   const ticket = ++picked;
-  $("status").textContent = `Loading ${name || base}…`;
+  $("status").textContent = "Loading the film…";
   try {
     const [source, colors] = await Promise.all([text(base + "backdrop.frag"), text(base + "colors.toml")]);
     const glyphs = await new Promise(done => {
@@ -149,7 +154,7 @@ async function loadFilm(base, name) {
       img.src = base + "glyphs.png";
     });
     if (ticket !== picked) return;
-    film = { base, name: name || base.replace(/\/$/, "").split("/").pop(), source, colors, glyphs };
+    film = { base, source, colors, glyphs };
     $("source").value = source;
     history.replaceState(null, "", "?film=" + encodeURIComponent(base));
     $("share").href = location.href;
@@ -183,13 +188,13 @@ function build() {
     };
     drop();
     programs = { ...next, base: film.base };
-    $("status").textContent = film.name;
+    $("status").textContent = nameOf(film.source);
   } catch (e) {
     // An edit that does not compile keeps the last good drawing of this
     // film; another film's never stands in for it.
     if (programs && programs.base !== film.base) drop();
     $("log").textContent = e.message.replace(/\0/g, "").trim();
-    $("status").textContent = `${film.name}: does not compile`;
+    $("status").textContent = `${nameOf(film.source)}: does not compile`;
   }
   film.palette = colors;
   film.reach = Scene.reach(film.colors);
@@ -598,11 +603,11 @@ $("still").onclick = async () => {
   const c = new OffscreenCanvas(width, height);
   c.getContext("2d").putImageData(new ImageData(rows, width, height), 0, 0);
   const blob = await c.convertToBlob({ type: "image/png" });
-  Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `0-${film.name.replace(/ /g, "-")}.png` }).click();
+  Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `0-${nameOf(film.source).replace(/ /g, "-")}.png` }).click();
   wake();
 };
 
-// ---- Films: this repo's, the gallery's, or any by URL
+// ---- Films: this repo's, the others with the topic, or any by URL
 
 function toBase(input) {
   const s = input.trim().replace(/\.git$/, "");
@@ -611,40 +616,46 @@ function toBase(input) {
   return s;
 }
 
-function entry(list, name, base, image, href) {
-  const li = document.createElement("li");
-  const b = document.createElement("button");
-  b.type = "button";
-  b.onclick = () => { $("url").value = href || base; loadFilm(base, name); };
-  if (image) { const img = Object.assign(document.createElement("img"), { src: image, alt: "", loading: "lazy" }); b.append(img); }
-  const span = document.createElement("span");
-  span.textContent = name;
-  b.append(span);
-  li.append(b);
-  list.append(li);
-}
-
 $("load").onsubmit = e => { e.preventDefault(); loadFilm(toBase($("url").value)); };
+
+// The films, each once, as cards named by the films themselves, in order: a
+// base URL that does not answer with a backdrop.frag is no film.
+async function cards(films) {
+  const named = await Promise.all(films.map(f => text(f.base + "backdrop.frag").then(nameOf, () => null)));
+  films.forEach((f, k) => {
+    if (!named[k]) return;
+    const li = document.createElement("li"), b = document.createElement("button"), span = document.createElement("span");
+    b.type = "button";
+    b.onclick = () => { $("url").value = f.href; loadFilm(f.base); };
+    b.append(Object.assign(document.createElement("img"), { src: f.base + "preview.png", alt: "", loading: "lazy" }), span);
+    span.textContent = named[k];
+    li.append(b);
+    $("films").append(li);
+  });
+  if (!$("films").children.length) $("films").textContent = "Load a film by its URL.";
+}
 
 async function lists() {
   // This repo's films, as the README's table shows them, from the same
-  // commit and origin as the page and its contract.
+  // commit and origin as the page and its contract. Each is also its own repo,
+  // which tools/theme-repo names <owner>/omarchy-<slug>-theme: in the topic's
+  // results that repo is the same film.
   const readme = await text("../README.md").catch(() => "");
-  for (const [, name, slug] of readme.matchAll(/!\[([^\]]+)\]\(themes\/([\w-]+)\/preview\.png\)/g))
-    entry($("films"), name, `../themes/${slug}/`, `../themes/${slug}/preview.png`);
-  if (!$("films").children.length) $("films").textContent = "Load a film by its URL.";
+  const owner = REPO.split("/")[0];
+  const ours = [...readme.matchAll(/\]\(themes\/([\w-]+)\/preview\.png\)/g)].map(([, slug]) => ({ slug, base: `../themes/${slug}/` }));
+  const theirs = new Set(ours.map(f => `${owner}/omarchy-${f.slug}-theme`));
+  let found = [];
   try {
     const r = await fetch("https://api.github.com/search/repositories?q=topic:omarchy-cinema&sort=updated&per_page=30");
-    const found = (await r.json()).items || [];
-    for (const repo of found) {
-      const base = `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/`;
-      entry($("gallery"), repo.full_name, base, base + "preview.png", repo.html_url);
-    }
-    if (!found.length) $("gallery").textContent = "No films have the topic yet.";
-  } catch { $("gallery").textContent = "GitHub did not answer."; }
+    found = ((await r.json()).items || []).filter(repo => !theirs.has(repo.full_name));
+  } catch {}
+  await cards([
+    ...ours.map(f => ({ base: f.base, href: f.base })),
+    ...found.map(repo => ({ base: `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/`, href: repo.html_url })),
+  ]);
 }
 
 arrange();
 lists();
 const asked = new URLSearchParams(location.search).get("film");
-loadFilm(asked || "../themes/tron-legacy/", asked ? undefined : "Tron Legacy");
+loadFilm(asked || "../themes/tron-legacy/");
