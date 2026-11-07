@@ -1,23 +1,22 @@
 #!/bin/bash
 # The engine package built as a user's makepkg builds it, in a clean Arch
-# (Arch Linux ARM on aarch64) with Omarchy's $CHANNEL repo ahead of the rest,
-# so its Hyprland is the one the plugin builds against. The source is this
-# workspace at $SHA, through the PKGBUILD's own OMARCHY_CINEMA_SOURCE.
+# (Arch Linux ARM on aarch64) set up with Omarchy's own pacman.conf and
+# mirrorlist for $CHANNEL, so its Hyprland and the packages around it are the
+# ones that channel's users get. The source is this workspace at $SHA,
+# through the PKGBUILD's own OMARCHY_CINEMA_SOURCE.
 #
 #   docker run -v <workspace>:/src -e CHANNEL=stable|edge -e SHA=<commit> <image> /src/.github/package
 set -euxo pipefail
 
-# pacman's own sandbox cannot start inside a container.
+omarchy=https://raw.githubusercontent.com/omacom/omarchy/HEAD/default/pacman/$([[ $(uname -m) == aarch64 ]] && echo aarch64/)
+curl -fsSL -o /etc/pacman.conf "$omarchy/pacman-$CHANNEL.conf"
+curl -fsSL -o /etc/pacman.d/mirrorlist "$omarchy/mirrorlist-$CHANNEL"
+# pacman's own sandbox cannot start inside a container, and Omarchy's key
+# comes with its repo rather than ahead of it.
 sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf
-if [[ $(uname -m) == aarch64 ]]; then
-  echo 'Server = https://arm-mirror.omarchy.org/$arch/$repo' >/etc/pacman.d/mirrorlist
-  keyring=archlinuxarm
-else
-  keyring=archlinux
-fi
+sed -i '/^\[omarchy\]/a SigLevel = Optional TrustAll' /etc/pacman.conf
 pacman-key --init
-pacman-key --populate "$keyring"
-sed -i "/^\[core\]/i [omarchy]\nSigLevel = Optional TrustAll\nServer = https://pkgs.omarchy.org/$CHANNEL/\$arch\n" /etc/pacman.conf
+pacman-key --populate "$([[ $(uname -m) == aarch64 ]] && echo archlinuxarm || echo archlinux)"
 pacman -Syu --noconfirm --needed base-devel git sudo
 
 useradd -m builder
