@@ -5,13 +5,8 @@
 -- user's config and Omarchy's toggles still come after it. A theme with no
 -- backdrop.frag is not a film, and gets nothing from it. A film theme then
 -- holds no Lua, which `omarchy theme install` drops: its borders come from
--- Omarchy's own template, and what differs by film is in its colors.toml:
---
---   glass  how much of a window's background stays, 1 solid to 0 clear (0.85
---          if not given); text and everything else on it stays opaque. The
---          backdrop plugin reads it with the theme.
---   frost  how far the glass blurs what is behind it, as Hyprland's blur
---          size (3 if not given): fine lettering behind it needs less
+-- Omarchy's own template, and what differs by film is in its colors.toml,
+-- whose keys plugin/contract.glsl's header names.
 --
 -- It is installed with the plugin (plugin/Makefile's install: the package in
 -- /usr/lib/omarchy-cinema, ./install in ~/.local/lib/omarchy-cinema), and
