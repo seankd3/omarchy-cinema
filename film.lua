@@ -105,14 +105,6 @@ hl.config({
   },
   render = { use_shader_blur_blend = true },
 })
--- Every shell surface that blurs (the bar, the menu, the notifications and
--- the rest, on the top and overlay layers) frosts the world behind it from the
--- windows' frost, the one the backdrop makes. Without xray Hyprland blurs a
--- layer live, from the screen, every frame it draws: not the film's frost, and
--- a blur and the world drawn again under it (specs/smoothness.md, "Frame
--- budget"). Bottom layers and layer popups always blur live (#11).
-hl.layer_rule({ match = { namespace = ".*" }, xray = true })
-
 -- A light frost: text on the glass is opaque, so nothing behind it competes,
 -- and the backdrop's lines should read through (the heavier 8 x 3 frost
 -- smeared Tron's grid to black). Omarchy's glass toggles load after the theme
@@ -126,5 +118,16 @@ local frost = { size = tonumber(colors.frost) or 3, passes = 2, brightness = col
 hl.on("config.reloaded", function()
   hl.config({ decoration = { blur = frost } })
   o.window("org\\.gnome\\.Nautilus", { opacity = "0.999 0.999" })
+  -- A shell surface's card is glass like a window's, frosted from the
+  -- windows' frost, the one the backdrop makes, on every layer, as every
+  -- window is glass (Glassy mode's list leaves out the launcher); its scrim
+  -- stays a plain dim over the screen. The shell draws its cards 0.95 to 1 opaque and its scrims
+  -- 0.5, and a layer's ignore_alpha is the line: the plugin's glass and frost
+  -- go only where the app's own alpha is above it (Omarchy's 0.3, set after
+  -- the theme, would frost the scrims). Without xray Hyprland blurs a layer
+  -- live, from the screen, every frame it draws: not the film's frost, and the
+  -- world drawn again under it (specs/smoothness.md, "Frame budget"). Bottom
+  -- layers and layer popups always blur live (#11).
+  hl.layer_rule({ match = { namespace = ".*" }, blur = true, xray = true, ignore_alpha = 0.75 })
 end)
 end

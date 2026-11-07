@@ -1276,9 +1276,10 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
 )",
                                       g->backgrounds.size(), keys, glass, vec3(g->background), vec3(g->muted)) +
                               DITHER + GLASS);
-        // A layer's ignore_alpha judges the app's own alpha, faded, not the glass's.
-        source.insert(source.find(read), "float cinemaOwn = pixColor.a;\n#if USE_BLUR\n    pixColor = cinemaGlass(pixColor);\n#endif\n\n");
-        source = std::regex_replace(source, std::regex(R"(\w+\.a <= discardAlphaValue)"), "cinemaOwn * alpha <= discardAlphaValue");
+        // A layer's ignore_alpha judges the app's own alpha: at or under it
+        // (a scrim) a pixel gets neither glass nor frost.
+        source.insert(source.find(read), "float cinemaOwn = pixColor.a;\n#if USE_BLUR\n#if USE_DISCARD\n    if (!discardAlpha || cinemaOwn > discardAlphaValue)\n#endif\n    pixColor = cinemaGlass(pixColor);\n#endif\n\n");
+        source = std::regex_replace(source, std::regex(R"(\w+\.a <= discardAlphaValue)"), "cinemaOwn <= discardAlphaValue");
         // The frost is held where Hyprland composites it, for the window's
         // pixel and, when it mirrors, the mirror's.
         static const std::regex COMPOSITE(R"((pixColor|mirrorColor) \+= (blurred\w+) \* (\w+);)");
