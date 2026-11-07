@@ -1809,7 +1809,7 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     if (__hyprland_api_get_hash() != std::string(__hyprland_api_get_client_hash())) {
-        HyprlandAPI::addNotification(handle, "[backdrop] built for another Hyprland: after a Hyprland update, log in again; otherwise run omarchy-cinema/install", CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
+        HyprlandAPI::addNotification(handle, "[backdrop] built for another Hyprland: build it again (omarchy-cinema/install, or the package), then log out and in", CHyprColor{1.0, 0.2, 0.2, 1.0}, 15000);
         throw std::runtime_error("[backdrop] version mismatch");
     }
 
