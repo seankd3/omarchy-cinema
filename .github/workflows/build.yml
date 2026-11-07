@@ -24,7 +24,10 @@ jobs:
         channel: [stable, edge]
     runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     steps:
+      # The change's own head, not the merge GitHub makes of it.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       # Arch Linux ARM's own root filesystem, as a container image, fetched
       # once a month.
       - id: month

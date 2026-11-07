@@ -135,6 +135,15 @@ if [[ -z $remove && $other == /usr/lib/omarchy-cinema/ ]]; then
   dirs ~/.local/lib/omarchy-cinema
   make -s -C "$here/plugin" install
 fi
+# The lines the engine needs: film.lua's alone once it loads the plugin;
+# an older package's needs the plugin's line too, which loads native code at
+# once, so it goes in only while no Hyprland of the user's runs.
+lines=("$film")
+grep -q 'hl.plugin.load' "$engine/film.lua" 2>/dev/null || lines=("$plugin" "$film")
+if [[ -z $remove && ${#lines[@]} == 2 ]] && ! grep -qxF "$plugin" "$hypr" && running; then
+  echo "$hypr does not load the engine yet, and this engine's film.lua does not load it either; while Hyprland runs its line would load it at once. Log out, run install from a TTY, then log in." >&2
+  exit 1
+fi
 
 # A film applied when its theme goes would stay applied as Omarchy's copy:
 # the uninstall applies Omarchy's first theme in its place.
@@ -143,14 +152,15 @@ if [[ -n $remove ]] && grep -qxF -f <(cd "$here/themes" && ls) ~/.local/state/om
   echo "applied Tokyo Night in place of the film" >&2
 fi
 
-# film.lua's line goes into the config's target just after Omarchy's
-# defaults. An earlier install's plugin line goes once the engine's film.lua
-# loads the plugin itself (a package built before it does not): the reload
-# that follows finds the plugin loaded, and film.lua keeps it.
+# The engine's lines go into the config's target just after Omarchy's
+# defaults, the plugin's first, and a plugin line it no longer needs goes:
+# the reload that follows finds the plugin loaded, and film.lua keeps it.
 target=$(readlink -f "$hypr")
 if [[ -z $remove ]]; then
-  grep -qxF "$film" "$target" || put_line "$target" "$film" 'require("default.hypr.omarchy")'
-  if grep -qxF "$plugin" "$target" && grep -q 'hl.plugin.load' "$engine/film.lua"; then take_line "$target" "$plugin"; fi
+  for (( i = ${#lines[@]} - 1; i >= 0; i-- )); do
+    grep -qxF "${lines[i]}" "$target" || put_line "$target" "${lines[i]}" 'require("default.hypr.omarchy")'
+  done
+  if [[ ${#lines[@]} == 1 ]] && grep -qxF "$plugin" "$target"; then take_line "$target" "$plugin"; fi
 fi
 [[ -n $remove && $other == /usr/lib/omarchy-cinema/ ]] && rm -rf ~/.local/lib/omarchy-cinema
 

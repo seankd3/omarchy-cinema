@@ -23,9 +23,12 @@ pacman -Syu --noconfirm --needed base-devel git sudo
 
 # A channel whose Hyprland is older than the engine needs (the PKGBUILD's
 # makedepends) is said, not built: it builds for real once the channel moves.
-need=$(source /src/PKGBUILD && printf '%s\n' "${makedepends[@]}" | grep '^hyprland')
-if ! pacman -Sp "$need" >/dev/null 2>&1; then
-  echo "::warning::Omarchy $CHANNEL ships $(pacman -Si hyprland | sed -n 's/^Version *: //p' | head -n 1) of Hyprland on $arch, and the engine needs $need"
+# Anything else that stops the build fails it.
+need=$(source /src/PKGBUILD && printf '%s\n' "${makedepends[@]}" | sed -n 's/^hyprland>=//p')
+have=$(pacman -Si hyprland | sed -n 's/^Version *: //p' | head -n 1)
+[[ -n $need && -n $have ]]
+if (( $(vercmp "$have" "$need") < 0 )); then
+  echo "::warning::not built: Omarchy $CHANNEL ships Hyprland $have on $arch, and the engine needs $need"
   exit 0
 fi
 
