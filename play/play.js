@@ -618,41 +618,36 @@ function toBase(input) {
 
 $("load").onsubmit = e => { e.preventDefault(); loadFilm(toBase($("url").value)); };
 
-// The films, each once, as cards named by the films themselves, in order: a
-// base URL that does not answer with a backdrop.frag is no film.
-async function cards(films) {
-  const named = await Promise.all(films.map(f => text(f.base + "backdrop.frag").then(nameOf, () => null)));
-  films.forEach((f, k) => {
-    if (!named[k]) return;
-    const li = document.createElement("li"), b = document.createElement("button"), span = document.createElement("span");
-    b.type = "button";
-    b.onclick = () => { $("url").value = f.href; loadFilm(f.base); };
-    b.append(Object.assign(document.createElement("img"), { src: f.base + "preview.png", alt: "", loading: "lazy" }), span);
-    span.textContent = named[k];
-    li.append(b);
-    $("films").append(li);
-  });
-  if (!$("films").children.length) $("films").textContent = "Load a film by its URL.";
+// A card for each film, in its place at once, named when the film's own
+// backdrop.frag answers: one that does not is no film, and its card goes.
+function card(f) {
+  const li = document.createElement("li"), b = document.createElement("button"), span = document.createElement("span");
+  b.type = "button";
+  b.onclick = () => { $("url").value = f.href; loadFilm(f.base); };
+  b.append(Object.assign(document.createElement("img"), { src: f.base + "preview.png", alt: "", loading: "lazy" }), span);
+  span.textContent = "…";
+  li.append(b);
+  $("films").append(li);
+  return text(f.base + "backdrop.frag").then(source => { span.textContent = nameOf(source); }, () => li.remove());
 }
 
 async function lists() {
-  // This repo's films, as the README's table shows them, from the same
+  // This repo's films first, as the README's table shows them, from the same
   // commit and origin as the page and its contract. Each is also its own repo,
-  // which tools/theme-repo names <owner>/omarchy-<slug>-theme: in the topic's
-  // results that repo is the same film.
+  // which tools/theme-repo names <owner>/omarchy-<slug>-theme: the card links
+  // there, and in the topic's results that repo is the same film.
   const readme = await text("../README.md").catch(() => "");
   const owner = REPO.split("/")[0];
-  const ours = [...readme.matchAll(/\]\(themes\/([\w-]+)\/preview\.png\)/g)].map(([, slug]) => ({ slug, base: `../themes/${slug}/` }));
-  const theirs = new Set(ours.map(f => `${owner}/omarchy-${f.slug}-theme`));
-  let found = [];
+  const ours = [...readme.matchAll(/\]\(themes\/([\w-]+)\/preview\.png\)/g)].map(([, slug]) => ({ slug, repo: `${owner}/omarchy-${slug}-theme` }));
+  const shown = ours.map(f => card({ base: `../themes/${f.slug}/`, href: `https://github.com/${f.repo}` }));
   try {
     const r = await fetch("https://api.github.com/search/repositories?q=topic:omarchy-cinema&sort=updated&per_page=30");
-    found = ((await r.json()).items || []).filter(repo => !theirs.has(repo.full_name));
+    for (const repo of (await r.json()).items || [])
+      if (!ours.some(f => f.repo === repo.full_name))
+        shown.push(card({ base: `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/`, href: repo.html_url }));
   } catch {}
-  await cards([
-    ...ours.map(f => ({ base: f.base, href: f.base })),
-    ...found.map(repo => ({ base: `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/`, href: repo.html_url })),
-  ]);
+  await Promise.allSettled(shown);
+  if (!$("films").children.length) $("films").textContent = "Load a film by its URL.";
 }
 
 arrange();
