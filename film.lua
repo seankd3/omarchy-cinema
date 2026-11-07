@@ -106,10 +106,11 @@ hl.config({
   render = { use_shader_blur_blend = true },
 })
 -- Every shell surface that blurs (the bar, the menu, the notifications and
--- whatever a rule blurs) frosts the world behind it from the windows' frost,
--- the one the backdrop makes. Without xray Hyprland blurs a layer live, from
--- the screen, every frame it draws: not the film's frost, and a blur and the
--- world drawn again under it (specs/smoothness.md, "Frame budget").
+-- the rest, on the top and overlay layers) frosts the world behind it from the
+-- windows' frost, the one the backdrop makes. Without xray Hyprland blurs a
+-- layer live, from the screen, every frame it draws: not the film's frost, and
+-- a blur and the world drawn again under it (specs/smoothness.md, "Frame
+-- budget"). Bottom layers and layer popups always blur live (#11).
 hl.layer_rule({ match = { namespace = ".*" }, xray = true })
 
 -- A light frost: text on the glass is opaque, so nothing behind it competes,
