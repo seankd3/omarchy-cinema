@@ -11,7 +11,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 base=${1:-origin/main}
-code() { perl -0pe 's{/\*.*?\*/}{ }gs; s{//[^\n]*}{}g; s{[ \t]+}{ }g; s{^ | $}{}mg; s{\n+}{\n}g'; }
+code() { perl -0pe 's{//[^\n]*|/\*.*?\*/}{ }gs; s{[ \t]+}{ }g; s{^ | $}{}mg; s{\n+}{\n}g'; }
 version() { sed -n '2s:^// omarchy-cinema contract \([1-9][0-9]*\)$:\1:p'; }
 
 was=$(git show "$base:plugin/contract.glsl")
