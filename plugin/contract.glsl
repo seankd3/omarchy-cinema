@@ -254,7 +254,7 @@ float glowLine(float d, float w) {
 
 // How far a glow `strength` exp(-d / falloff) reaches: past it, it moves no
 // point a twentieth of a display level, so it need not be drawn.
-float glowReach(float strength, float falloff) {
+float glowSpan(float strength, float falloff) {
     return falloff * log(strength * 5100.0);
 }
 
