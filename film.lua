@@ -119,15 +119,18 @@ hl.on("config.reloaded", function()
   hl.config({ decoration = { blur = frost } })
   o.window("org\\.gnome\\.Nautilus", { opacity = "0.999 0.999" })
   -- A shell surface's card is glass like a window's, frosted from the
-  -- windows' frost, the one the backdrop makes, on every layer, as every
-  -- window is glass (Glassy mode's list leaves out the launcher); its scrim
-  -- stays a plain dim over the screen. The shell draws its cards 0.95 to 1 opaque and its scrims
-  -- 0.5, and a layer's ignore_alpha is the line: the plugin's glass and frost
-  -- go only where the app's own alpha is above it (Omarchy's 0.3, set after
-  -- the theme, would frost the scrims). Without xray Hyprland blurs a layer
-  -- live, from the screen, every frame it draws: not the film's frost, and the
-  -- world drawn again under it (specs/smoothness.md, "Frame budget"). Bottom
-  -- layers and layer popups always blur live (#11).
-  hl.layer_rule({ match = { namespace = ".*" }, blur = true, xray = true, ignore_alpha = 0.75 })
+  -- windows' frost, the one the backdrop makes; its scrim stays a plain dim
+  -- over the screen. The shell draws its cards 0.95 to 1 opaque and its
+  -- scrims 0.5, and a layer's ignore_alpha is the line: the plugin's glass and
+  -- frost go only where the app's own alpha is above it (Omarchy's 0.3, set
+  -- after the theme, would frost the scrims). Without xray Hyprland blurs a
+  -- layer live, from the screen, every frame it draws: not the film's frost,
+  -- and the world drawn again under it (specs/smoothness.md, "Frame budget").
+  hl.layer_rule({ match = { namespace = ".*" }, xray = true, ignore_alpha = 0.75 })
+  -- Every surface of Omarchy's shell is glass, as every window is, also those
+  -- Glassy mode's list leaves out (the launcher). Its wallpaper is not: a
+  -- bottom or background layer always blurs live (#11).
+  hl.layer_rule({ match = { namespace = "^omarchy-.*" }, blur = true })
+  hl.layer_rule({ match = { namespace = "^omarchy-background$" }, blur = false })
 end)
 end
