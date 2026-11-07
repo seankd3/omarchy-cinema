@@ -27,4 +27,4 @@ install -o builder -m 644 /src/PKGBUILD /home/builder/PKGBUILD
 su builder -c "cd ~ && OMARCHY_CINEMA_SOURCE='file:///src#commit=$SHA' makepkg --syncdeps --noconfirm"
 
 echo "built $SHA against $(pacman -Q hyprland) from $(pacman -Si hyprland | sed -n 's/^Repository *: //p' | head -n 1), $(uname -m), Omarchy $CHANNEL"
-tar -tf /home/builder/omarchy-cinema-git-*.pkg.tar.zst | grep -x 'usr/lib/omarchy-cinema/backdrop.so'
+tar -tf /home/builder/omarchy-cinema-git-r*.pkg.tar.* | grep -x 'usr/lib/omarchy-cinema/backdrop.so'
