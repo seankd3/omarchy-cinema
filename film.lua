@@ -105,12 +105,12 @@ hl.config({
   },
   render = { use_shader_blur_blend = true },
 })
--- The bar frosts the world behind it from the same frost as the windows,
--- the one the backdrop makes, not a blur of its own each frame. So do the
--- notifications: their layer stays on screen, empty, down the right edge, and
--- a live blur under it cost a blur and the world drawn again under it, every
--- frame (specs/smoothness.md, "Frame budget").
-hl.layer_rule({ match = { namespace = "^(omarchy-bar|omarchy-notifications)$" }, xray = true })
+-- Every shell surface that blurs (the bar, the menu, the notifications and
+-- whatever a rule blurs) frosts the world behind it from the windows' frost,
+-- the one the backdrop makes. Without xray Hyprland blurs a layer live, from
+-- the screen, every frame it draws: not the film's frost, and a blur and the
+-- world drawn again under it (specs/smoothness.md, "Frame budget").
+hl.layer_rule({ match = { namespace = ".*" }, xray = true })
 
 -- A light frost: text on the glass is opaque, so nothing behind it competes,
 -- and the backdrop's lines should read through (the heavier 8 x 3 frost
