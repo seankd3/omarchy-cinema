@@ -1,0 +1,32 @@
+#!/bin/bash
+# The engine package built as a user's makepkg builds it, in a clean Arch
+# (Arch Linux ARM on aarch64) set up with Omarchy's own pacman.conf and
+# mirrorlist for $CHANNEL, so its Hyprland and the packages around it are the
+# ones that channel's users get. The source is this workspace at $SHA,
+# through the PKGBUILD's own OMARCHY_CINEMA_SOURCE.
+#
+#   docker run -v <workspace>:/src -e CHANNEL=edge -e SHA=<commit> <image> /src/.github/package
+set -euxo pipefail
+
+arch=$(uname -m) dir="" keyring=archlinux
+[[ $arch == aarch64 ]] && dir=aarch64/ keyring=archlinuxarm
+omarchy=https://raw.githubusercontent.com/omacom/omarchy/HEAD/default/pacman/$dir
+curl -fsSL -o /etc/pacman.conf "$omarchy/pacman-$CHANNEL.conf"
+curl -fsSL -o /etc/pacman.d/mirrorlist "$omarchy/mirrorlist-$CHANNEL"
+# pacman's own sandbox cannot start inside a container, and Omarchy's key
+# comes with its repo rather than ahead of it.
+sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf
+sed -i '/^\[omarchy\]/a SigLevel = Optional TrustAll' /etc/pacman.conf
+pacman-key --init
+pacman-key --populate "$keyring"
+pacman -Syu --noconfirm --needed base-devel git sudo
+
+
+useradd -m builder
+echo 'builder ALL=(ALL) NOPASSWD: ALL' >/etc/sudoers.d/builder
+git config --system --add safe.directory '*'
+install -o builder -m 644 /src/PKGBUILD /home/builder/PKGBUILD
+su builder -c "cd ~ && OMARCHY_CINEMA_SOURCE='file:///src#commit=$SHA' makepkg --syncdeps --noconfirm"
+
+echo "built $SHA against $(pacman -Q hyprland) from $(pacman -Si hyprland | sed -n 's/^Repository *: //p' | head -n 1), $arch, Omarchy $CHANNEL"
+tar -tf /home/builder/omarchy-cinema-git-r*.pkg.tar.* | grep -x 'usr/lib/omarchy-cinema/backdrop.so'

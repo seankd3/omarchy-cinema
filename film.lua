@@ -14,11 +14,28 @@
 --          size (3 if not given): fine lettering behind it needs less
 --
 -- It is installed with the plugin (plugin/Makefile's install: the package in
--- /usr/lib/omarchy-cinema, ./install in ~/.local/lib/omarchy-cinema).
+-- /usr/lib/omarchy-cinema, ./install in ~/.local/lib/omarchy-cinema), and
+-- loads it: the Hyprland config's one line for the engine runs this file.
 
 local theme = (os.getenv("XDG_STATE_HOME") or (os.getenv("HOME") .. "/.local/state")) .. "/omarchy/current/theme"
 
+-- The plugin beside this file.
+local plugin = debug.getinfo(1, "S").source:match("^@(.*)/[^/]*$") .. "/backdrop.so"
+
 return function()
+-- Native code loads only while Hyprland starts, when its first config loads
+-- come before it knows any screen, and stays loaded on every load after: a
+-- load into a running Hyprland once hung the desktop (2026-10-28), so an
+-- install in a session takes effect at the next login. Hyprland unloads a
+-- plugin no config load names, so this runs for every theme.
+local loaded = false
+for _, p in ipairs(hl.get_loaded_plugins()) do
+  loaded = loaded or p.name == "backdrop"
+end
+if loaded or #hl.get_monitors() == 0 then
+  hl.plugin.load(plugin)
+end
+
 local shader = io.open(theme .. "/backdrop.frag")
 if not shader then
   return

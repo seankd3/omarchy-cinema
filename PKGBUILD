@@ -15,7 +15,7 @@ pkgdesc="Live film backdrops drawn around the windows for Omarchy (the Hyprland 
 arch=(x86_64 aarch64)
 url="https://github.com/seankd3/omarchy-cinema"
 license=(MIT)
-makedepends=(git hyprland cairo libdrm libinput pixman wayland libxkbcommon)
+makedepends=(git 'hyprland>=0.57' cairo libdrm libinput pixman wayland libxkbcommon)
 provides=(omarchy-cinema)
 conflicts=(omarchy-cinema)
 source=("omarchy-cinema::git+${OMARCHY_CINEMA_SOURCE:-$url.git}")

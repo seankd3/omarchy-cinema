@@ -90,17 +90,20 @@ take_line() {
 hypr=~/.config/hypr/hyprland.lua
 # The engine this session loads, one of two: the package's once it is
 # installed (RELEASE.md, "Packaging"), which this install leaves alone, or
-# else this checkout's, built and installed here. The Hyprland config loads
-# its plugin once a session and then runs its film.lua just after Omarchy's
-# defaults, where a theme's own hyprland.lua runs, so a film theme holds no
-# Lua, which `omarchy theme install` drops.
+# else this checkout's, built and installed here. The Hyprland config runs
+# its film.lua just after Omarchy's defaults, where a theme's own hyprland.lua
+# runs, so a film theme holds no Lua, which `omarchy theme install` drops;
+# film.lua loads the plugin beside it, and only while Hyprland starts.
+# Installs before it put the plugin's own line ahead of it.
 if [[ -e /usr/lib/omarchy-cinema/backdrop.so ]]; then
-  plugin='hl.plugin.load("/usr/lib/omarchy-cinema/backdrop.so")'
+  engine=/usr/lib/omarchy-cinema
   film='dofile("/usr/lib/omarchy-cinema/film.lua")()'
+  plugin='hl.plugin.load("/usr/lib/omarchy-cinema/backdrop.so")'
   other=.local/lib/omarchy-cinema/
 else
-  plugin='hl.plugin.load(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/backdrop.so")'
+  engine=~/.local/lib/omarchy-cinema
   film='dofile(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/film.lua")()'
+  plugin='hl.plugin.load(os.getenv("HOME") .. "/.local/lib/omarchy-cinema/backdrop.so")'
   other=/usr/lib/omarchy-cinema/
 fi
 # A config that still loads the other engine is switched logged out: a
@@ -110,31 +113,35 @@ if grep -v '^[[:space:]]*--' "$hypr" | grep -qF "$other"; then
   exit 1
 fi
 if [[ -z $remove ]] && ! grep -qx 'require("default.hypr.omarchy")' "$hypr"; then
-  echo "$hypr does not load Omarchy's defaults as require(\"default.hypr.omarchy\"); add these lines after them, then run install again: $plugin $film" >&2
+  echo "$hypr does not load Omarchy's defaults as require(\"default.hypr.omarchy\"); add this line after them, then run install again: $film" >&2
   exit 1
 fi
-# Native code loads and unloads only at a login: Hyprland reloads its config
-# whenever the file changes and loads the plugins it names, so the plugin's
-# line is added or taken away only while no Hyprland of this user's runs
-# (from a TTY): no Hyprland process of the user's, nor its socket in the
-# runtime directory, which is a sandbox's own. film.lua's line is Lua, and
-# may come at any time. With no Hyprland, theme switches are headless.
+# Native code loads and unloads only at a login. Hyprland reloads its config
+# whenever the file changes, and film.lua loads the plugin only while
+# Hyprland starts, so its line added in a session takes effect at the next
+# login. But Hyprland unloads a plugin no line loads any more, so the line is
+# taken away only while no Hyprland of this user's runs (from a TTY): no
+# Hyprland process of the user's, nor its socket in the runtime directory,
+# which is a sandbox's own. With no Hyprland, theme switches are headless.
 running() {
   pgrep -u "$UID" -x Hyprland >/dev/null || compgen -G "${XDG_RUNTIME_DIR:-/run/user/$UID}/hypr/*/.socket.sock" >/dev/null
 }
 running || export OMARCHY_THEME_HEADLESS=1
-if [[ -n $remove ]] && grep -qxF "$plugin" "$hypr" && running; then
+if [[ -n $remove ]] && grep -qxF -e "$film" -e "$plugin" "$hypr" && running; then
   echo "$hypr loads the engine; while Hyprland runs, taking that line away would unload it at once. Log out, then run ./install --uninstall from a TTY" >&2
   exit 1
 fi
-# The build takes minutes; it comes before the check below, so nothing
-# separates that check from the edit it allows.
 if [[ -z $remove && $other == /usr/lib/omarchy-cinema/ ]]; then
   dirs ~/.local/lib/omarchy-cinema
   make -s -C "$here/plugin" install
 fi
-if [[ -z $remove ]] && ! grep -qxF "$plugin" "$hypr" && running; then
-  echo "$hypr does not load the engine yet; while Hyprland runs it would load at once. Log out, add this line after require(\"default.hypr.omarchy\") from a TTY (or run install there), then log in: $plugin" >&2
+# The lines the engine needs: film.lua's alone once it loads the plugin;
+# an older package's needs the plugin's line too, which loads native code at
+# once, so it goes in only while no Hyprland of the user's runs.
+lines=("$film")
+grep -q 'hl.plugin.load' "$engine/film.lua" 2>/dev/null || lines=("$plugin" "$film")
+if [[ -z $remove && ${#lines[@]} == 2 ]] && ! grep -qxF "$plugin" "$hypr" && running; then
+  echo "$hypr does not load the engine yet, and this engine's film.lua does not load it either; while Hyprland runs its line would load it at once. Log out, run install from a TTY, then log in." >&2
   exit 1
 fi
 
@@ -145,13 +152,15 @@ if [[ -n $remove ]] && grep -qxF -f <(cd "$here/themes" && ls) ~/.local/state/om
   echo "applied Tokyo Night in place of the film" >&2
 fi
 
-# What is missing goes into the config's target just after Omarchy's
-# defaults, the plugin's line first.
+# The engine's lines go into the config's target just after Omarchy's
+# defaults, the plugin's first, and a plugin line it no longer needs goes:
+# the reload that follows finds the plugin loaded, and film.lua keeps it.
 target=$(readlink -f "$hypr")
 if [[ -z $remove ]]; then
-  for line in "$film" "$plugin"; do
-    grep -qxF "$line" "$target" || put_line "$target" "$line" 'require("default.hypr.omarchy")'
+  for (( i = ${#lines[@]} - 1; i >= 0; i-- )); do
+    grep -qxF "${lines[i]}" "$target" || put_line "$target" "${lines[i]}" 'require("default.hypr.omarchy")'
   done
+  if [[ ${#lines[@]} == 1 ]] && grep -qxF "$plugin" "$target"; then take_line "$target" "$plugin"; fi
 fi
 [[ -n $remove && $other == /usr/lib/omarchy-cinema/ ]] && rm -rf ~/.local/lib/omarchy-cinema
 
@@ -380,3 +389,8 @@ fi
 # Omarchy's own installers do, so it has what this changed (film values,
 # popup, icons, or their absence).
 omarchy-theme-refresh || echo "omarchy-theme-refresh failed: the applied theme catches up at the next switch" >&2
+
+# An install in a session takes effect at the next login.
+if [[ -z $remove ]] && running && ! hyprctl plugin list 2>/dev/null | grep -q '^Plugin backdrop '; then
+  echo "The engine starts at your next login: log out and in." >&2
+fi

@@ -1,0 +1,29 @@
+#!/bin/bash
+# Holds each film to the contract as the engine would draw it: its first line
+# names this checkout's contract, and its backdrop.frag compiles against
+# plugin/contract.glsl with the backdrop's main, and with the frame's when it
+# defines frame(), as the plugin links them (GLSL ES 3.0, glslangValidator).
+# Errors give the film's own line numbers.
+#
+#   tools/check-film <theme-dir>...
+set -uo pipefail
+
+engine=$(cd "$(dirname "$0")/../plugin" && pwd)
+version=$(sed -n '2s:^// omarchy-cinema contract \([1-9][0-9]*\)$:\1:p' "$engine/contract.glsl")
+failed=0
+for theme in "$@"; do
+  film=$theme/backdrop.frag
+  written=$(sed -n '1s:^// omarchy-cinema contract \([1-9][0-9]*\)[[:space:]]*$:\1:p' "$film")
+  if [[ $written != "$version" ]]; then
+    echo "$film: its first line must be \"// omarchy-cinema contract $version\"" >&2
+    failed=1
+    continue
+  fi
+  mains=(main-backdrop)
+  grep -qE '\bvec4[[:space:]]+frame[[:space:]]*\(' "$film" && mains+=(main-frame)
+  for main in "${mains[@]}"; do
+    out=$(cat "$engine/contract.glsl" <(printf '\n#line 1\n') "$film" "$engine/dither.glsl" "$engine/$main.glsl" |
+      glslangValidator --stdin -S frag 2>&1) || { echo "$film, with $main.glsl:" >&2; grep -E 'ERROR|error' <<<"$out" >&2; failed=1; }
+  done
+done
+exit $failed
