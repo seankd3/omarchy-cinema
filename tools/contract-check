@@ -1,7 +1,8 @@
 #!/bin/bash
 # Holds plugin/contract.glsl to its version rule, the part of it a machine
 # can see: since <base> (a commit, origin/main if not given), its code (the
-# file without its // comments and with runs of space as one) changed while
+# file without its comments, each as one space as GLSL reads them, and
+# without blank lines or runs of space within a line) changed while
 # its version line did not, or its version went down. Either exits 1. What a
 # comment promises is the version's too; review checks that.
 #
@@ -10,7 +11,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 base=${1:-origin/main}
-code() { sed 's://.*$::' | tr '\t\n' '  ' | tr -s ' '; }
+code() { perl -0pe 's{/\*.*?\*/}{ }gs; s{//[^\n]*}{}g; s{[ \t]+}{ }g; s{^ | $}{}mg; s{\n+}{\n}g'; }
 version() { sed -n '2s:^// omarchy-cinema contract \([1-9][0-9]*\)$:\1:p'; }
 
 was=$(git show "$base:plugin/contract.glsl")

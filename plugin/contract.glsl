@@ -5,17 +5,18 @@
 // file in front of it; it defines backdrop() and may define frame() (at the
 // end). Of its colors.toml, the engine reads accent and background for the
 // shader, background and its dark, darker and lighter shades as what turns to
-// glass, muted as the text the glass keeps at 4.5:1, mode = "light" to keep
-// the frost bright, and three quoted numbers:
+// glass, muted as the text the glass keeps at 4.5:1 (or as on its shade
+// drawn solid), mode = "light" to keep the frost bright, and three quoted
+// numbers:
 //   glass  how much of a window's background stays, 1 solid to 0 clear
 //          (0.85); text and the rest of the window keep their opacity
 //   frost  how far the glass blurs the world behind it, as Hyprland's blur
 //          size (3): fine lettering behind it needs less
 //   reach  how far its windows reach, in px (REACH, at window())
 //
-// The line above is the contract's version, and a film's first line says the
-// version it is written for in the same words; an engine draws only a film
-// written for its own. Any change to this file's code, or to what it
+// Line 2 is the contract's version, and a film's first line says the version
+// it is written for in the same words; an engine draws only a film written
+// for its own. Any change to this file's code, or to what it
 // promises, is a new version (tools/contract-check catches the code).
 //
 // Lengths are logical pixels from the screen's top left. The windows are the

@@ -40,7 +40,7 @@ export function literate(text) {
   const blocks = [];
   let kind = null, run = [];
   const end = () => { if (run.length) blocks.push(kind === "c" ? prose(run) : code(run)); run = []; };
-  for (const line of lines.slice(2)) {
+  for (const line of lines.filter((_, n) => n !== 1)) {
     const comment = /^\s*\/\/ ?(.*)$/.exec(line);
     const k = comment ? "c" : "g";
     if (k !== kind) { end(); kind = k; }
