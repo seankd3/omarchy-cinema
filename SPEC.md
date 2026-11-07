@@ -113,8 +113,10 @@ never worse. The bar, blurred in the same shader, is held the same way.
 
 **Files.** Each film theme ships `gtk.css` (libadwaita variables and Nautilus
 selectors) and its folder icons (`tools/folders.py` writes an icon theme,
-`Cinema-<Film>`, at install; the theme's `icons.theme` names it and Omarchy
-applies it). GTK imports the applied theme's stylesheet through one fixed line
+`Cinema-<Film>`, in its `icons/`). Its `icons.theme` names the Yaru those
+folders inherit, which Omarchy applies, so a film without the engine has
+proper icons; the install's theme-set hook then links the film's own where GTK
+finds icon themes and uses it. GTK imports the applied theme's stylesheet through one fixed line
 in `~/.config/gtk-4.0/gtk.css`; stock themes get an empty one from
 `~/.config/omarchy/themed/gtk.css.tpl`. Icons change live.
 
