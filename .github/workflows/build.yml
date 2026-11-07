@@ -1,0 +1,43 @@
+# Every film compiles against the contract, and the engine builds against the
+# Hyprland Omarchy ships, stable and edge, on x86_64 and aarch64: on every
+# change, and every day, so a new Hyprland in either repo fails here first.
+name: build
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+jobs:
+  films:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y -qq glslang-tools
+      - run: tools/check-film themes/*/
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        channel: [stable, edge]
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    steps:
+      - uses: actions/checkout@v4
+      # Arch Linux ARM's own root filesystem, as a container image, fetched
+      # once a month.
+      - id: month
+        run: echo "month=$(date +%Y-%m)" >>"$GITHUB_OUTPUT"
+      - if: matrix.arch == 'aarch64'
+        uses: actions/cache@v4
+        with:
+          path: alarm.tar.gz
+          key: alarm-${{ steps.month.outputs.month }}
+      - if: matrix.arch == 'aarch64'
+        run: |
+          [[ -f alarm.tar.gz ]] || curl -fsSL -o alarm.tar.gz http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
+          docker import alarm.tar.gz arch
+      - if: matrix.arch == 'x86_64'
+        run: docker pull -q archlinux:base && docker tag archlinux:base arch
+      - run: docker run --rm -v "$PWD:/src" -e CHANNEL=${{ matrix.channel }} -e SHA=$(git rev-parse HEAD) arch /src/.github/package

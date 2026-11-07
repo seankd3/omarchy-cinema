@@ -1,0 +1,30 @@
+#!/bin/bash
+# The engine package built as a user's makepkg builds it, in a clean Arch
+# (Arch Linux ARM on aarch64) with Omarchy's $CHANNEL repo ahead of the rest,
+# so its Hyprland is the one the plugin builds against. The source is this
+# workspace at $SHA, through the PKGBUILD's own OMARCHY_CINEMA_SOURCE.
+#
+#   docker run -v <workspace>:/src -e CHANNEL=stable|edge -e SHA=<commit> <image> /src/.github/package
+set -euxo pipefail
+
+# pacman's own sandbox cannot start inside a container.
+sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf
+if [[ $(uname -m) == aarch64 ]]; then
+  echo 'Server = https://arm-mirror.omarchy.org/$arch/$repo' >/etc/pacman.d/mirrorlist
+  keyring=archlinuxarm
+else
+  keyring=archlinux
+fi
+pacman-key --init
+pacman-key --populate "$keyring"
+sed -i "/^\[core\]/i [omarchy]\nSigLevel = Optional TrustAll\nServer = https://pkgs.omarchy.org/$CHANNEL/\$arch\n" /etc/pacman.conf
+pacman -Syu --noconfirm --needed base-devel git sudo
+
+useradd -m builder
+echo 'builder ALL=(ALL) NOPASSWD: ALL' >/etc/sudoers.d/builder
+git config --system --add safe.directory '*'
+install -o builder -m 644 /src/PKGBUILD /home/builder/PKGBUILD
+su builder -c "cd ~ && OMARCHY_CINEMA_SOURCE='file:///src#commit=$SHA' makepkg --syncdeps --noconfirm"
+
+echo "built $SHA against $(pacman -Q hyprland) from $(pacman -Si hyprland | sed -n 's/^Repository *: //p' | head -n 1), $(uname -m), Omarchy $CHANNEL"
+tar -tf /home/builder/omarchy-cinema-git-*.pkg.tar.zst | grep -x 'usr/lib/omarchy-cinema/backdrop.so'
