@@ -1276,11 +1276,12 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
 )",
                                       g->backgrounds.size(), keys, glass, vec3(g->background), vec3(g->muted)) +
                               DITHER + GLASS);
-        source.insert(source.find(read), "#if USE_BLUR\n    pixColor = cinemaGlass(pixColor);\n#endif\n\n");
+        source.insert(source.find(read), "float cinemaOwn = pixColor.a, cinemaCard = 1.0;\n#if USE_BLUR\n#if USE_DISCARD\n    if (discardAlpha) cinemaCard = smoothstep(discardAlphaValue, 0.95, cinemaOwn);\n#endif\n    pixColor = mix(pixColor, cinemaGlass(pixColor), cinemaCard);\n#endif\n\n");
+        source = std::regex_replace(source, std::regex(R"(\w+\.a <= discardAlphaValue)"), "cinemaOwn <= discardAlphaValue");
         // The frost is held where Hyprland composites it, for the window's
         // pixel and, when it mirrors, the mirror's.
         static const std::regex COMPOSITE(R"((pixColor|mirrorColor) \+= (blurred\w+) \* (\w+);)");
-        source = std::regex_replace(source, COMPOSITE, "$1 = cinemaHold($1, blurUV, $3);");
+        source = std::regex_replace(source, COMPOSITE, "$1 = cinemaHold($1, blurUV, $3 * cinemaCard);");
         return source;
     }
 

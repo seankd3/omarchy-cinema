@@ -339,8 +339,9 @@ const float CINEMA_GLASS = {min(max(glass, 0.0), 1.0):.4f};
 const vec3  CINEMA_BACKGROUND = {vec3(colors["background"])}, CINEMA_MUTED = {vec3(colors.get("muted", (0.5, 0.5, 0.5)))};
 """ + DITHER + (ROOT / "plugin/glass.glsl").read_text() + out, 1)
     read = "#if USE_DISCARD && !USE_BLUR"
-    source = source.replace(read, "#if USE_BLUR\n    pixColor = cinemaGlass(pixColor);\n#endif\n\n" + read, 1)
-    return re.sub(r"(pixColor|mirrorColor) \+= (blurred\w+) \* (\w+);", r"\1 = cinemaHold(\1, blurUV, \3);", source)
+    source = source.replace(read, "float cinemaOwn = pixColor.a, cinemaCard = 1.0;\n#if USE_BLUR\n#if USE_DISCARD\n    if (discardAlpha) cinemaCard = smoothstep(discardAlphaValue, 0.95, cinemaOwn);\n#endif\n    pixColor = mix(pixColor, cinemaGlass(pixColor), cinemaCard);\n#endif\n\n" + read, 1)
+    source = re.sub(r"\w+\.a <= discardAlphaValue", "cinemaOwn <= discardAlphaValue", source)
+    return re.sub(r"(pixColor|mirrorColor) \+= (blurred\w+) \* (\w+);", r"\1 = cinemaHold(\1, blurUV, \3 * cinemaCard);", source)
 
 
 WINDOW = """#version 300 es

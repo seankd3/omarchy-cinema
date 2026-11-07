@@ -105,13 +105,6 @@ hl.config({
   },
   render = { use_shader_blur_blend = true },
 })
--- The bar frosts the world behind it from the same frost as the windows,
--- the one the backdrop makes, not a blur of its own each frame. So do the
--- notifications: their layer stays on screen, empty, down the right edge, and
--- a live blur under it cost a blur and the world drawn again under it, every
--- frame (specs/smoothness.md, "Frame budget").
-hl.layer_rule({ match = { namespace = "^(omarchy-bar|omarchy-notifications)$" }, xray = true })
-
 -- A light frost: text on the glass is opaque, so nothing behind it competes,
 -- and the backdrop's lines should read through (the heavier 8 x 3 frost
 -- smeared Tron's grid to black). Omarchy's glass toggles load after the theme
@@ -125,5 +118,20 @@ local frost = { size = tonumber(colors.frost) or 3, passes = 2, brightness = col
 hl.on("config.reloaded", function()
   hl.config({ decoration = { blur = frost } })
   o.window("org\\.gnome\\.Nautilus", { opacity = "0.999 0.999" })
+  -- A shell surface's card is glass like a window's, frosted from the
+  -- windows' frost, the one the backdrop makes; its scrim stays a plain dim
+  -- over the screen. The shell draws its scrims 0.5 opaque and its cards 0.95
+  -- to 1, and a layer pixel's share of glass and frost rises smoothly with its
+  -- own alpha from a layer's ignore_alpha, here the scrim's, to 0.95, so a card
+  -- fading in passes through every look between (Omarchy's 0.3, set after the
+  -- theme, would frost the scrims). Without xray Hyprland blurs a layer live,
+  -- from the screen, every frame it draws: not the film's frost, and the world
+  -- drawn again under it (specs/smoothness.md, "Frame budget").
+  hl.layer_rule({ match = { namespace = ".*" }, xray = true, ignore_alpha = 0.5 })
+  -- Every surface of Omarchy's shell is glass, as every window is, also those
+  -- Glassy mode's list leaves out (the launcher). Its wallpaper is not: a
+  -- bottom or background layer always blurs live (#11).
+  hl.layer_rule({ match = { namespace = "^omarchy-.*" }, blur = true })
+  hl.layer_rule({ match = { namespace = "^omarchy-background$" }, blur = false })
 end)
 end
