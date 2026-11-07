@@ -159,10 +159,10 @@ fi
 # same name stays, and the install stops. Each time its link takes a path,
 # what was there (nothing, or a link elsewhere: another clone's film, one the
 # user put there since) is recorded, and comes back when that link goes.
-# This install's links point into its themes/, or at the applied theme's
-# folder icons.
-icons=$HOME/.local/state/omarchy/current/theme/icons
-mine() { [[ -L $1 && ( $(readlink "$1") == "$here/themes/"* || $(readlink "$1") == "$icons" ) ]]; }
+# This install's links point into its themes/, and Omarchy-Cinema at the
+# applied theme's folder icons.
+icons=$HOME/.local/state/omarchy/current/theme/icons cinema=$HOME/.local/share/icons/Omarchy-Cinema
+mine() { [[ -L $1 && ( $(readlink "$1") == "$here/themes/"* || ( $1 == "$cinema" && $(readlink "$1") == "$icons" ) ) ]]; }
 link() {
   if [[ -e $2 && ! -L $2 ]]; then
     echo "$2 exists and is not a link; move it aside first" >&2
@@ -180,7 +180,7 @@ declare -A linked
 if [[ -z $remove ]]; then
   dirs ~/.config/omarchy/themes
   dirs ~/.local/share/icons
-  link "$icons" ~/.local/share/icons/Omarchy-Cinema
+  link "$icons" "$cinema"
   for theme in "$here"/themes/*/; do
     theme=${theme%/}
     # A film still being built stays out of Omarchy's theme list until it has
