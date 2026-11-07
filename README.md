@@ -47,6 +47,12 @@ settings it changed; a film still applied gives way to Tokyo Night.
 
 ## Make your own
 
+The [playground](https://seankd3.github.io/omarchy-cinema/play/) draws a film
+in the browser around windows you drag, with nothing installed: pick one of
+the six or a film from the gallery, edit its `backdrop.frag` and watch it
+change. Load your own repo by its GitHub URL, and give it the topic
+`omarchy-cinema` to list it in the gallery.
+
 Copy a film's directory into `~/.config/omarchy/themes/<name>`, change
 `colors.toml`, and write `backdrop.frag`: one GLSL function, `backdrop(px)`,
 against [the contract](https://seankd3.github.io/omarchy-cinema/play/contract.html)
