@@ -78,8 +78,11 @@ the theme) and the backdrop draws nothing, so a theme switch after a contract
 change never draws a film against a contract it was not written for. A shader
 that does not compile is reported once and draws nothing.
 
-**Loaded once a session.** `~/.config/hypr/hyprland.lua` loads the plugin at
-login and nothing unloads it while Hyprland runs; a theme without
+**Loaded once a session.** `~/.config/hypr/hyprland.lua` runs the engine's
+`film.lua`, which loads the plugin beside it only while Hyprland starts (its
+first config loads come before it knows any screen) and keeps it loaded on
+every load after, so an install in a session takes effect at the next login
+and nothing unloads it while Hyprland runs; a theme without
 `backdrop.frag` leaves it idle (no draw, no frames asked for). Native code is never
 swapped in a running Hyprland: on 2026-10-28 an unload, load and theme switch
 hung the desktop and it took a forced power-off. A new build takes effect at
@@ -168,6 +171,7 @@ install        the developer's install: the engine into ~/.local/lib/omarchy-cin
                (a new file, then renamed: Hyprland maps the old one), link each
                theme into ~/.config/omarchy/themes/<slug> (never over a real
                directory), add film.lua's line to the Hyprland config
+               (in a session too: it takes effect at the next login)
 ```
 
 A Hyprland update needs `./install` again, or the package rebuilt for it: the

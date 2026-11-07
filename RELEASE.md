@@ -101,18 +101,18 @@ loads and unloads plugins to match it, so the switch is made logged out,
 from a TTY:
 
 1. Build and install the package (`makepkg -si` in a clone).
-2. In `~/.config/hypr/hyprland.lua`, load
-   `"/usr/lib/omarchy-cinema/backdrop.so"` and run
-   `dofile("/usr/lib/omarchy-cinema/film.lua")()` in place of the two
-   `~/.local/lib/omarchy-cinema` lines, and remove
+2. In `~/.config/hypr/hyprland.lua`, run
+   `dofile("/usr/lib/omarchy-cinema/film.lua")()` in place of the
+   `~/.local/lib/omarchy-cinema` line, and remove
    `~/.local/lib/omarchy-cinema`. Then log in.
 
 From then on `./install` leaves the package's engine alone and still links
 the themes and the rest; while `hyprland.lua` still loads the other engine,
-it stops without changing anything. On a fresh config `./install` adds both
-engine lines after Omarchy's defaults only while no Hyprland of the user's
-runs: a line added in a session would load the plugin at once, so there it
-stops and says so.
+it stops without changing anything. On a fresh config `./install` adds the
+engine's line after Omarchy's defaults, in a session too: `film.lua` loads
+the plugin only while Hyprland starts, so the engine starts at the next
+login. An install's earlier plugin line goes once the engine's `film.lua`
+loads the plugin itself.
 
 **The pin, without blocking `omarchy update`.** An exact `hyprland=`
 dependency makes pacman stop a whole `omarchy update` when Omarchy ships a

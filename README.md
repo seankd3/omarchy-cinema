@@ -14,19 +14,20 @@ film moves while your windows do.
 
 ## Install
 
-Needs Omarchy 4 with Hyprland 0.57. This is a beta, used on one aarch64
-laptop with an NVIDIA GPU; it builds on x86_64, untested there and on
-other GPUs. The backdrop is a Hyprland plugin, and a plugin loads only at
-login, so the install runs from a console:
+Needs Omarchy's edge channel, with Hyprland 0.57: Omarchy stable still
+ships Hyprland 0.56, which the engine does not build against. This is a
+beta, used on one aarch64 laptop with an NVIDIA GPU; CI builds it on
+x86_64 and aarch64 against each Omarchy channel's Hyprland every day, and
+it is untested on other GPUs. The backdrop is a Hyprland plugin, which
+starts only at a login:
 
 1. `git clone https://github.com/seankd3/omarchy-cinema ~/omarchy-cinema`
-2. Log out. At the login screen press Ctrl+Alt+F3 and log in there.
-3. `~/omarchy-cinema/install` (it builds the plugin, about a minute), then
-   `exit`, back to the login screen (Ctrl+Alt+F1 or F2), and log in.
+2. `~/omarchy-cinema/install` (it builds the plugin, about a minute).
+3. Log out and in.
 4. Pick a film in the theme menu (Super+Ctrl+T), or `omarchy theme set jarvis`.
 
-After a Hyprland update, run `~/omarchy-cinema/install` again and log in
-again: the plugin loads only into the Hyprland it was built for.
+After a Hyprland update, run `~/omarchy-cinema/install` again, then log out
+and in: the plugin loads only into the Hyprland it was built for.
 
 Omarchy's own toggles tune it: *Glassy windows* or *Opaque windows*, and
 *No animations*, which holds the backdrop still.
