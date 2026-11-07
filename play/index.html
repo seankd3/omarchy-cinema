@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Film Playground</title>
+<meta name="description" content="Write, preview and share an Omarchy Cinema film in the browser: its backdrop drawn around windows you drag, with the film's glass over them.">
+<link rel="stylesheet" href="site.css">
+</head>
+<body class="play">
+<header class="top">
+  <a class="brand" href="./">Omarchy Cinema</a>
+  <nav><a href="./" aria-current="page">Playground</a><a href="contract.html">Contract</a></nav>
+  <span id="status" class="status" role="status"></span>
+</header>
+<main class="stage">
+  <section class="desk" aria-label="A desktop with the film">
+    <canvas id="desk"></canvas>
+    <div class="tools">
+      <button id="open" title="Open a window (N)">New window</button>
+      <button id="speak" title="Hold to speak (V)">Hold to speak</button>
+      <button id="still" title="Download the empty desktop at screen size, for backgrounds/">Save wallpaper</button>
+    </div>
+  </section>
+  <aside class="side">
+    <form id="load" class="load">
+      <label for="url">Film</label>
+      <div class="row"><input id="url" name="url" placeholder="github.com/you/omarchy-name-theme" autocomplete="off" spellcheck="false"><button>Load</button></div>
+    </form>
+    <h2>Films</h2>
+    <ul id="films" class="films"></ul>
+    <h2>Gallery <a class="hint" href="https://github.com/topics/omarchy-cinema">topic: omarchy-cinema</a></h2>
+    <ul id="gallery" class="films"></ul>
+    <h2>backdrop.frag <span class="hint">edits draw as you type</span></h2>
+    <textarea id="source" spellcheck="false" aria-label="backdrop.frag"></textarea>
+    <pre id="log" class="log" aria-live="polite"></pre>
+    <div class="row"><button id="save">Download backdrop.frag</button><a id="share" href="#">Link to this film</a></div>
+  </aside>
+</main>
+<script src="scene.js"></script>
+<script type="module" src="play.js"></script>
+</body>
+</html>
