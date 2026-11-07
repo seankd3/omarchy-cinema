@@ -1,12 +1,22 @@
 #version 300 es
 // omarchy-cinema contract 15
-// The backdrop contract: everything a theme's backdrop.frag can know. The
-// plugin puts this in front of the theme's backdrop.frag, which defines
-// backdrop(): the colour of one point of the screen.
+// The backdrop contract: everything a film can know and must write. A film
+// is an Omarchy theme directory with a backdrop.frag. The engine puts this
+// file in front of it; it defines backdrop() and may define frame() (at the
+// end). Of its colors.toml, the engine reads accent and background for the
+// shader, background and its dark, darker and lighter shades as what turns to
+// glass, muted as the text the glass keeps at 4.5:1, mode = "light" to keep
+// the frost bright, and three quoted numbers:
+//   glass  how much of a window's background stays, 1 solid to 0 clear
+//          (0.85); text and the rest of the window keep their opacity
+//   frost  how far the glass blurs the world behind it, as Hyprland's blur
+//          size (3): fine lettering behind it needs less
+//   reach  how far its windows reach, in px (REACH, at window())
 //
-// The line above is the contract's version; a film's first line says the
-// version it is written for, and the plugin draws only a film written for
-// its own. A change to what a film is given or can call is a new version.
+// The line above is the contract's version, and a film's first line says the
+// version it is written for in the same words; an engine draws only a film
+// written for its own. Any change to this file's code, or to what it
+// promises, is a new version (tools/contract-check catches the code).
 //
 // Lengths are logical pixels from the screen's top left. The windows are the
 // ones Hyprland draws on this screen in this frame, where it draws them
@@ -20,11 +30,9 @@
 // `time` is the world's own clock, in seconds: it runs at the wall clock's
 // speed while windows move, open, close, take focus or slide between
 // workspaces, and eases to a stop about two seconds after they hold still,
-// when the plugin draws nothing. It wraps every hour (a float counting weeks
-// of seconds loses the precision to animate), so build motion from
-// cycle(seconds) with a period that divides 3600 (1, 2, 3, 4, 5, 6, 8, 9,
-// 10, 12, 15, 16, 18, 20, 24, 30, 36, 40, 45, 48, 60, ...). What happened
-// lately (below) has its own ages, on the wall's clock.
+// when the plugin draws nothing. It wraps every hour, so build motion from
+// cycle(seconds) with a period that divides 3600 (60, 30, 20, 12, 10, 8, 6,
+// ...). What happened lately (below) has its own ages, on the wall's clock.
 
 precision highp float;
 precision highp sampler2D;
@@ -39,9 +47,8 @@ uniform vec3 background;
 uniform vec4 focused;
 uniform vec4 reserved;
 // Three vec4s a window, at most 256 windows: (x, y, w, h), (alpha,
-// rounding, lift, depth) and (velocity x, y, windowFlare()'s sums). A
-// uniform block, which every pixel reads as one constant, not a texture each
-// pixel fetches. Read them through the window functions. Then, for 32 by 32 tiles of the screen,
+// rounding, lift, depth) and (velocity x, y, windowFlare()'s sums). Read
+// them through the window functions. Then, for 32 by 32 tiles of the screen,
 // which of windows 0 to 31 reach each (windowsAt()).
 layout(std140) uniform Windows {
     vec4 windowTexels[3 * 256];
@@ -93,8 +100,7 @@ const float TAU = 6.28318530718;
 const float FAR = 1e5;
 
 // The character `i` back from the newest (0 is the newest) as its code, 32 to
-// 126; any `i` from 0 up wraps round the characters there are. (GLSL leaves %
-// of a negative number undefined, so the ring position is wrapped by hand.)
+// 126; any `i` from 0 up wraps round the characters there are.
 int feedChar(int i) {
     int k = feedPos - 1 - i % max(feedCount, 1);
     k = k < 0 ? k + 16384 : k;
@@ -102,8 +108,6 @@ int feedChar(int i) {
 }
 
 // How much of glyph `code` covers `uv` (0 to 1 across its cell, y down).
-// The sample stays half a texel inside the cell, so the filter never reaches
-// the next character.
 float glyph(int code, vec2 uv) {
     int c = clamp(code - 32, 0, 95);
     vec2 cell = vec2(float(c % 16), float(c / 16));
@@ -174,8 +178,7 @@ uint windowsAt(vec2 px) {
 
 // The next window i (-1 before the first) of a set, taken out of `left`, the
 // windows left to meet: a bit for each of 0 to 31, as windowsAt() gives, and
-// every window from 32 on; false past the last. The lowest bit's index is its
-// float's exponent, exactly (GLSL ES 3.0 has no findLSB).
+// every window from 32 on; false past the last.
 bool next(inout uint left, inout int i) {
     i = left == 0u ? max(i + 1, 32) : int(floatBitsToUint(float(left & ~left + 1u)) >> 23) - 127;
     left &= left - 1u;
@@ -229,8 +232,7 @@ void see(inout Seen s, Window w) {
     }
 }
 
-// Helpers several films share (a helper enters the contract once two films
-// answer a fact the same way).
+// Helpers several films share.
 
 // How wide, in logical px, each pixel being drawn takes the mean of the
 // world over: 0 at the screen's own size, where a pixel shows its middle.
@@ -313,9 +315,7 @@ vec2 edgeNormal(vec2 px, vec4 rect, float radius) {
 // The shadow window w casts on the world, `offset` px along `away` (any
 // length) from its light and `soft` wide: 1 in full shadow. It fades out
 // over the window's edge, from 3 px outside it to 2 px inside, so the world
-// seen through its own glass stays lit. It is exactly 0 from 2 px inside the
-// window in, and further than `soft` from the shadow's rect, which is no
-// nearer than the window less the offset; only the points between pay.
+// seen through its own glass stays lit.
 float windowShadow(vec2 px, Window w, vec2 away, float offset, float soft) {
     float edge = edgeDistance(w);
     if (edge <= -2.0 || edge - offset >= soft) return 0.0;

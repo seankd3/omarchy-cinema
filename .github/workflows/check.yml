@@ -1,0 +1,15 @@
+# What every change must keep, on every pull request and every push to main.
+name: check
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The contract's version rule against what the change started from.
+      - run: tools/contract-check ${{ github.event.pull_request.base.sha || github.event.before }}

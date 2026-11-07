@@ -1,0 +1,28 @@
+#!/bin/bash
+# Holds plugin/contract.glsl to its version rule, the part of it a machine
+# can see: since <base> (a commit, origin/main if not given), its code (the
+# file without its // comments and with runs of space as one) changed while
+# its version line did not, or its version went down. Either exits 1. What a
+# comment promises is the version's too; review checks that.
+#
+#   tools/contract-check [base]
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+base=${1:-origin/main}
+code() { sed 's://.*$::' | tr '\t\n' '  ' | tr -s ' '; }
+version() { sed -n '2s:^// omarchy-cinema contract \([1-9][0-9]*\)$:\1:p'; }
+
+was=$(git show "$base:plugin/contract.glsl")
+now=$(cat plugin/contract.glsl)
+old=$(version <<<"$was") new=$(version <<<"$now")
+[[ -n $new ]] || { echo "plugin/contract.glsl: line 2 is not \"// omarchy-cinema contract N\"" >&2; exit 1; }
+if (( new < old )); then
+  echo "plugin/contract.glsl: contract $new is older than $base's $old" >&2
+  exit 1
+fi
+if (( new == old )) && [[ $(code <<<"$was") != "$(code <<<"$now")" ]]; then
+  echo "plugin/contract.glsl: its code changed since $base, and it is still contract $new: a film written for $new would get something else. Make it contract $((new + 1)), and every film's first line with it." >&2
+  exit 1
+fi
+echo "contract $new: holds against $base"
