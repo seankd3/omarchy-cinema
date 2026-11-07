@@ -108,6 +108,7 @@ void main() {
 // ---- The film
 
 let film = null;   // { base, name, source, colors text, glyphs image }
+let picked = 0;    // the newest load asked for; an older one that ends later is dropped
 let programs = null;
 let glyphTex = null, feedTex = null, feedCount = 0;
 
@@ -136,6 +137,7 @@ function texture(width, height, internal, format, type, data, filter = gl.LINEAR
 // A theme is a base URL: backdrop.frag, colors.toml and glyphs.png under it.
 async function loadFilm(base, name) {
   base = base.endsWith("/") ? base : base + "/";
+  const ticket = ++picked;
   $("status").textContent = `Loading ${name || base}…`;
   try {
     const [source, colors] = await Promise.all([text(base + "backdrop.frag"), text(base + "colors.toml")]);
@@ -146,13 +148,14 @@ async function loadFilm(base, name) {
       img.onerror = () => done(null);
       img.src = base + "glyphs.png";
     });
+    if (ticket !== picked) return;
     film = { base, name: name || base.replace(/\/$/, "").split("/").pop(), source, colors, glyphs };
     $("source").value = source;
     history.replaceState(null, "", "?film=" + encodeURIComponent(base));
     $("share").href = location.href;
     build();
   } catch (e) {
-    $("status").textContent = `Could not load ${base}: ${e.message}`;
+    if (ticket === picked) $("status").textContent = `Could not load ${base}: ${e.message}`;
   }
 }
 
@@ -314,11 +317,14 @@ function step(t, dt) {
   }
   clock.clocked = t;
   if (clock.speed < STIR_STILL && t - clock.stirred >= STIR_HOLD) clock.speed = 0;
-  return changed || clock.speed > 0 || impulses.length > 0 || voice > 0;
+  return changed || clock.speed > 0 || impulses.length > 0 || voice > 0 || speaking;
 }
 
-// The scene as the engine hands it to the film.
-function scene(t) {
+// The scene as the engine hands it to the film; `empty`, a desktop with no
+// window and nothing happening, for a wallpaper.
+function scene(t, empty) {
+  if (empty)
+    return { time: clock.time, size, reserved: [BAR, 0, 0, 0], focused: -1, focusAlpha: 0, voice: 0, windows: [], impulses: [] };
   const shown = order.map(byId);
   const index = new Map(shown.map((w, i) => [w.id, i]));
   const focused = index.has(focusedId) ? index.get(focusedId) : -1;
@@ -425,7 +431,7 @@ function filmProgram(prog, u, area, spread) {
 const draw = () => gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
 function render(t, target = { fb: null, width: canvas.width, height: canvas.height }, bare = false) {
-  const u = Scene.uniforms(scene(t), film.reach);
+  const u = Scene.uniforms(scene(t, bare), film.reach);
   const all = [0, 0, ...size];
   const c = targets(target);
   gl.bindBuffer(gl.UNIFORM_BUFFER, ubo);
@@ -510,7 +516,13 @@ let frameAsked = false, last = 0;
 function wake() { if (!frameAsked) { frameAsked = true; requestAnimationFrame(frame); } }
 function frame() {
   frameAsked = false;
-  if (!film || !programs) return;
+  if (!film) return;
+  if (!programs) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    return;
+  }
   const t = now(), dt = last ? t - last : 0;
   last = t;
   const going = step(t, dt);
@@ -566,10 +578,9 @@ $("save").onclick = () => {
 // The empty desktop at this screen's size, for the theme's backgrounds/:
 // the world with no windows, drawn into a framebuffer of the screen's pixels.
 $("still").onclick = async () => {
-  const kept = { order, size, scale, focusedId };
+  const kept = { size, scale };
   scale = window.devicePixelRatio || 1;
   size = [screen.width, screen.height];
-  order = []; focusedId = null;
   const width = Math.round(size[0] * scale), height = Math.round(size[1] * scale);
   const tex = texture8([width, height]), fb = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
@@ -579,7 +590,7 @@ $("still").onclick = async () => {
   gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
   gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
   gl.deleteFramebuffer(fb); gl.deleteTexture(tex);
-  ({ order, size, scale, focusedId } = kept);
+  ({ size, scale } = kept);
   // GL's rows run from the bottom up.
   const rows = new Uint8ClampedArray(pixels.length), line = width * 4;
   for (let y = 0; y < height; y++) rows.set(pixels.subarray((height - 1 - y) * line, (height - y) * line), y * line);
@@ -617,8 +628,14 @@ $("load").onsubmit = e => { e.preventDefault(); loadFilm(toBase($("url").value))
 
 async function lists() {
   try {
-    const r = await fetch(`https://api.github.com/repos/${REPO}/contents/themes?ref=main`);
-    const dirs = (await r.json()).filter(d => d.type === "dir");
+    // The commit the page is served from: GitHub Pages' newest deployment
+    // that went live.
+    const api = path => fetch(`https://api.github.com/repos/${REPO}/${path}`).then(r => r.json());
+    let ref = "main";
+    for (const d of await api("deployments?environment=github-pages&per_page=5")) {
+      if ((await api(`deployments/${d.id}/statuses?per_page=1`))[0]?.state === "success") { ref = d.sha; break; }
+    }
+    const dirs = (await api(`contents/themes?ref=${ref}`)).filter(d => d.type === "dir");
     for (const d of dirs) entry($("films"), d.name.replace(/-/g, " "), `../themes/${d.name}/`, `../themes/${d.name}/preview.png`);
   } catch { $("films").textContent = "GitHub did not answer; load a film by its URL."; }
   try {

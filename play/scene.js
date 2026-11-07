@@ -47,6 +47,24 @@ var Scene = (function () {
     return [[gap, top, left, full], [right, top, w - right - gap, half], [right, top + half + gap, w - right - gap, half]];
   }
 
+  // The four moments tools/preview.py --answers shows: at rest, a window
+  // dragged, a window just landed while you speak into the focused one, and a
+  // window opening, one closing and focus moving. Each is { name, windows,
+  // focused, velocity, voice, impulses: [[x, y, age, strength, kind, window]] }.
+  function storyboard(size, bar, gap) {
+    const windows = layout(size, bar, gap);
+    const [[lx, ly, lw, lh], [rx, ry, rw, rh]] = windows;
+    const moved = windows.slice();
+    moved[1] = [rx - 260, ry + 90, rw, rh];
+    return [
+      { name: "rest", windows, focused: 0 },
+      { name: "drag", windows: moved, focused: 1, velocity: [[0, 0], [-1800, 600], [0, 0]] },
+      { name: "land", windows, focused: 0, voice: 0.7, impulses: [[rx + rw / 2, ry + rh / 2, 0.25, 0.8, LAND, 1]] },
+      { name: "open", windows: windows.slice(0, 2), focused: 1, impulses: [[rx + rw / 2, ry + rh * 1.5 + gap, 0.3, 1.0, CLOSE, -1],
+        [lx + lw / 2, ly + lh / 2, 0.5, 1.0, OPEN, 0], [rx + rw / 2, ry + rh / 2, 0.15, 0.6, FOCUS, 1]] },
+    ];
+  }
+
   // Window i's swell and landing in the last second, windowFlare()'s sums.
   function flare(impulses, i) {
     let swell = 0, landing = 0;
@@ -116,5 +134,5 @@ var Scene = (function () {
     return source.replace(/[^!-~]+/g, " ").trim().slice(-RING);
   }
 
-  return { OPEN, CLOSE, LAND, FOCUS, palette, setting, reach, layout, flare, uniforms, coarse, words };
+  return { OPEN, CLOSE, LAND, FOCUS, palette, setting, reach, layout, storyboard, flare, uniforms, coarse, words };
 })();
