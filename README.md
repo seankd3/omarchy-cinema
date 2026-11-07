@@ -17,7 +17,7 @@ film moves while your windows do.
 Needs Omarchy's edge channel, with Hyprland 0.57: Omarchy stable still
 ships Hyprland 0.56, which the engine does not build against. This is a
 beta, used on one aarch64 laptop with an NVIDIA GPU; CI builds it on
-x86_64 and aarch64 against each Omarchy channel's Hyprland every day, and
+x86_64 and aarch64 against Omarchy edge's Hyprland every day, and
 it is untested on other GPUs. The backdrop is a Hyprland plugin, which
 starts only at a login:
 

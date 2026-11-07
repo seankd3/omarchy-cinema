@@ -5,7 +5,7 @@
 # ones that channel's users get. The source is this workspace at $SHA,
 # through the PKGBUILD's own OMARCHY_CINEMA_SOURCE.
 #
-#   docker run -v <workspace>:/src -e CHANNEL=stable|edge -e SHA=<commit> <image> /src/.github/package
+#   docker run -v <workspace>:/src -e CHANNEL=edge -e SHA=<commit> <image> /src/.github/package
 set -euxo pipefail
 
 arch=$(uname -m) dir="" keyring=archlinux
@@ -21,16 +21,6 @@ pacman-key --init
 pacman-key --populate "$keyring"
 pacman -Syu --noconfirm --needed base-devel git sudo
 
-# A channel whose Hyprland is older than the engine needs (the PKGBUILD's
-# makedepends) is said, not built: it builds for real once the channel moves.
-# Anything else that stops the build fails it.
-need=$(source /src/PKGBUILD && printf '%s\n' "${makedepends[@]}" | sed -n 's/^hyprland>=//p')
-have=$(pacman -Si hyprland | sed -n 's/^Version *: //p' | head -n 1)
-[[ -n $need && -n $have ]]
-if (( $(vercmp "$have" "$need") < 0 )); then
-  echo "::warning::not built: Omarchy $CHANNEL ships Hyprland $have on $arch, and the engine needs $need"
-  exit 0
-fi
 
 useradd -m builder
 echo 'builder ALL=(ALL) NOPASSWD: ALL' >/etc/sudoers.d/builder

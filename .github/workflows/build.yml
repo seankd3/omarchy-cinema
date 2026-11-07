@@ -1,6 +1,8 @@
 # Every film compiles against the contract, and the engine builds against the
-# Hyprland Omarchy ships, stable and edge, on x86_64 and aarch64: on every
-# change, and every day, so a new Hyprland in either repo fails here first.
+# Hyprland Omarchy edge ships, on x86_64 and aarch64: on every change, and
+# every day. Each Hyprland comes to edge before stable, so one that breaks the
+# engine fails here before a stable user gets it. (Stable's Hyprland, 0.56,
+# is older than the engine needs: the PKGBUILD's hyprland>=0.57 says so.)
 name: build
 on:
   pull_request:
@@ -21,7 +23,6 @@ jobs:
       fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
-        channel: [stable, edge]
     runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     steps:
       # The change's own head, not the merge GitHub makes of it.
@@ -43,4 +44,4 @@ jobs:
           docker import alarm.tar.gz arch
       - if: matrix.arch == 'x86_64'
         run: docker pull -q archlinux:base && docker tag archlinux:base arch
-      - run: docker run --rm -v "$PWD:/src" -e CHANNEL=${{ matrix.channel }} -e SHA=$(git rev-parse HEAD) arch /src/.github/package
+      - run: docker run --rm -v "$PWD:/src" -e CHANNEL=edge -e SHA=$(git rev-parse HEAD) arch /src/.github/package
