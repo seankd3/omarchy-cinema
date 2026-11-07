@@ -16,23 +16,30 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 slug=${1:?usage: tools/theme-repo <slug> <dir>} dir=${2:?usage: tools/theme-repo <slug> <dir>}
 src=themes/$slug
-[[ -f $here/$src/backdrop.frag ]] || { echo "$src is not a film" >&2; exit 1; }
-[[ -z $(git -C "$here" status --porcelain -- "$src" osd/FilmOsd.qml tools/folders.py) ]] || { echo "$src has changes not committed; commit them first" >&2; exit 1; }
 commit=$(git -C "$here" rev-parse HEAD)
+git -C "$here" cat-file -e "$commit:$src/backdrop.frag" 2>/dev/null || { echo "$src is not a film at $commit" >&2; exit 1; }
+# Everything comes from the commit; this tool's own README must be it too.
+[[ -z $(git -C "$here" status --porcelain -- tools/theme-repo) ]] || { echo "tools/theme-repo has changes not committed; commit them first" >&2; exit 1; }
+# The repo takes the new tree whole, so it holds nothing else worth keeping.
+if [[ -d $dir/.git ]]; then
+  [[ -z $(git -C "$dir" status --porcelain --ignored) ]] || { echo "$dir has changes or files of its own; it is built, not edited" >&2; exit 1; }
+elif [[ -e $dir && -n $(ls -A "$dir") ]]; then
+  echo "$dir is not empty and not a film repo" >&2; exit 1
+fi
 
-mkdir -p "$dir"
-[[ -d $dir/.git ]] || git -C "$dir" init -q -b main
-git -C "$dir" rm -rq --ignore-unmatch . >/dev/null
-git -C "$here" archive "$commit" "$src" | tar -x -C "$dir" --strip-components=2
-[[ -f $dir/voxtype-osd.toml ]] && git -C "$here" show "$commit:osd/FilmOsd.qml" >"$dir/FilmOsd.qml"
-python3 "$here/tools/folders.py" "$dir" "$slug" >/dev/null
-git -C "$here" show "$commit:LICENSE" >"$dir/LICENSE"
+# The tree, built apart.
+tree=$(mktemp -d)
+trap 'rm -rf "$tree"' EXIT
+git -C "$here" archive "$commit" "$src" | tar -x -C "$tree" --strip-components=2
+git -C "$here" cat-file -e "$commit:$src/voxtype-osd.toml" 2>/dev/null && git -C "$here" show "$commit:osd/FilmOsd.qml" >"$tree/FilmOsd.qml"
+git -C "$here" show "$commit:tools/folders.py" | python3 - "$tree" "$slug" >/dev/null
+git -C "$here" show "$commit:LICENSE" >"$tree/LICENSE"
 
-film=$(sed -n '2s:^// \([^:.]*\).*:\1:p' "$dir/backdrop.frag")
+film=$(sed -n '2s:^// \([^:.]*\).*:\1:p' "$tree/backdrop.frag")
 # The film's own header, less its name and its notes on this repo's specs.
-about=$(sed -n '2,/^$/{s:^// \{0,1\}::p}' "$dir/backdrop.frag" | tr '\n' ' ' | sed 's/^[^:]*: //; s/^./\U&/; s/ ([^)]*\.md[^)]*)//g; s/ *$//')
+about=$(sed -n '2,/^$/{s:^// \{0,1\}::p}' "$tree/backdrop.frag" | tr '\n' ' ' | sed 's/^[^:]*: //; s/^./\U&/; s/ ([^)]*\.md[^)]*)//g; s/ *$//')
 repo=https://github.com/seankd3/omarchy-cinema
-cat >"$dir/README.md" <<EOF
+cat >"$tree/README.md" <<EOF
 # ${film:-$slug}
 
 ![${film:-$slug}](preview.png)
@@ -67,10 +74,13 @@ not affiliated with or endorsed by them, and ships no film imagery: the
 wallpaper is this theme's own \`backdrop.frag\`, drawn. MIT licence (LICENSE).
 EOF
 
-git -C "$dir" add -A
+mkdir -p "$dir"
+[[ -d $dir/.git ]] || git -C "$dir" init -q -b main
+git --git-dir="$dir/.git" --work-tree="$tree" add -A
 if git -C "$dir" diff --cached --quiet; then
   echo "$dir: already $(git -C "$here" log -1 --format=%h "$commit")"
 else
   git -C "$dir" -c commit.gpgsign=false commit -q -m "From omarchy-cinema $(git -C "$here" log -1 --format='%h: %s' "$commit")"
   echo "$dir: $(git -C "$dir" log -1 --format='%h %s')"
 fi
+git -C "$dir" reset -q --hard

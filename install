@@ -159,21 +159,28 @@ fi
 # same name stays, and the install stops. Each time its link takes a path,
 # what was there (nothing, or a link elsewhere: another clone's film, one the
 # user put there since) is recorded, and comes back when that link goes.
+# This install's links point into its themes/, or at the applied theme's
+# folder icons.
+icons=$HOME/.local/state/omarchy/current/theme/icons
+mine() { [[ -L $1 && ( $(readlink "$1") == "$here/themes/"* || $(readlink "$1") == "$icons" ) ]]; }
 link() {
   if [[ -e $2 && ! -L $2 ]]; then
     echo "$2 exists and is not a link; move it aside first" >&2
     exit 1
   fi
-  [[ -L $2 && $(readlink "$2") == "$here/themes/"* ]] || record "link	$2	$(readlink "$2" 2>/dev/null || true)"
+  mine "$2" || record "link	$2	$(readlink "$2" 2>/dev/null || true)"
   ln -sfn "$1" "$2"
   linked[$2]=1
 }
 declare -A linked
 
-# Each theme's folder icons are an icon theme of their own, which the
-# folder-icons hook below turns on when the theme is applied.
+# Each film's folder icons are an icon theme of their own, in its icons/
+# (tools/folders.py; a film's repo carries them). GTK finds the applied
+# theme's as Omarchy-Cinema, and the icons hook below turns it on.
 if [[ -z $remove ]]; then
   dirs ~/.config/omarchy/themes
+  dirs ~/.local/share/icons
+  link "$icons" ~/.local/share/icons/Omarchy-Cinema
   for theme in "$here"/themes/*/; do
     theme=${theme%/}
     # A film still being built stays out of Omarchy's theme list until it has
@@ -194,23 +201,20 @@ if [[ -z $remove ]]; then
   done
 fi
 
-# A link into themes/ that this run did not make is a film that left the
-# checkout or is no longer whole, an icon theme an install before the
-# folder-icons hook linked, or, for the uninstall, any film: it goes, so
+# A link of this install's that this run did not make is a film that left
+# the checkout or is no longer whole, a film's icons as installs before
+# Omarchy-Cinema linked them, or, for the uninstall, any of them: it goes, so
 # Omarchy's theme list and GTK's icon themes show only the films, and what
-# the link took the place of comes back. The uninstall also takes away the
-# hook's own links, into ~/.config/omarchy/themes.
+# the link took the place of comes back.
 displaced() {
   if [[ -f $state/record ]]; then
     awk -F '\t' -v path="$1" '$1 == "link" && $2 == path { s = $3 } END { print s }' "$state/record"
   fi
 }
 for old in ~/.config/omarchy/themes/* ~/.local/share/icons/*; do
-  if [[ -L $old && -z ${linked[$old]:-} && $(readlink "$old") == "$here/themes/"* ]]; then
+  if [[ -z ${linked[$old]:-} ]] && mine "$old"; then
     was=$(displaced "$old")
     if [[ -n $was ]]; then ln -sfn "$was" "$old"; else rm "$old"; fi
-  elif [[ -n $remove && -L $old && $(readlink "$old") == "$HOME/.config/omarchy/themes/"*/icons ]]; then
-    rm "$old"
   fi
 done
 
@@ -302,30 +306,20 @@ else
   fi
 fi
 
-# A film's folder icons, in its theme's icons/ (tools/folders.py; a film's
-# repo carries them), go live when it is applied: Omarchy runs the hook after
-# every theme switch, once it has applied the theme's icons.theme (the Yaru
-# the folders inherit). This first run links the applied film's at once.
-icons=~/.config/omarchy/hooks/theme-set.d/omarchy-cinema-icons
-if [[ -z $remove ]]; then
-  made "$icons" 755 <<'EOF'
+# The applied film's folder icons go live: Omarchy runs the hook after every
+# theme switch, once it has applied the theme's icons.theme (the Yaru the
+# folders inherit), and it turns Omarchy-Cinema on when the theme has its own.
+# It holds the lock Omarchy's retints hold (omarchy-theme-set), so the theme
+# applied last decides, however hooks of quick switches interleave.
+hook=~/.config/omarchy/hooks/theme-set.d/omarchy-cinema-icons
+[[ -z $remove ]] && made "$hook" 755 <<'EOF'
 #!/bin/bash
-# The applied theme's own icon theme, when it has one (icons/index.theme),
-# where GTK finds icon themes, and in use. A name taken by anything other
-# than such a link stays as it is.
-theme=~/.config/omarchy/themes/$(<~/.local/state/omarchy/current/theme.name)
-name=$(sed -n 's/^Name=//p' "$theme/icons/index.theme" 2>/dev/null | head -n 1)
-[[ $name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || exit 0
-link=~/.local/share/icons/$name
-if [[ -e $link || -L $link ]] && [[ ! -L $link || $(readlink "$link") != "$HOME/.config/omarchy/themes/"*/icons ]]; then
-  exit 0
-fi
-mkdir -p ~/.local/share/icons
-ln -sfn "$theme/icons" "$link"
-gsettings set org.gnome.desktop.interface icon-theme "$name" 2>/dev/null || true
+# The applied theme's own folder icons in use, when it has them.
+exec 8>"${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set-retint.lock"
+flock 8
+[[ -f ~/.local/state/omarchy/current/theme/icons/index.theme ]] || exit 0
+gsettings set org.gnome.desktop.interface icon-theme Omarchy-Cinema 2>/dev/null || true
 EOF
-  "$icons" || true
-fi
 
 # Google Chrome's header follows the applied theme too (browser/chrome-theme):
 # Omarchy runs it after every theme switch, and Chrome takes the theme it

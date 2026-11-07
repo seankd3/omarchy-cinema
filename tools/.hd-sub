@@ -1,0 +1,260 @@
+#!/bin/bash
+# Runs a command on a Hyprland desktop that is never on screen: your desktop
+# with this checkout installed, logged in inside a sandbox.
+#
+#   tools/hidden-desktop [--fresh] [--size WxH] [--scale S] [--theme SLUG] [--plugin SO] [--out DIR] <command> [args...]
+#
+# The sandbox has your configuration (~/.config, ~/.local, ~/.cache) and
+# this checkout as copies whose changes are thrown away, and none of your other
+# files. With --fresh it has a new Omarchy user's instead: /etc/skel as
+# Omarchy's installer provisions it, logged in once for Omarchy's first-run
+# setup and out again, and copies of its ~/.config and ~/.local from before
+# and after ./install in $XDG_RUNTIME_DIR/fresh/{before,installed} for the
+# command to compare with. It has no route to your session: its own runtime
+# directory (no compositor, Hyprland socket or session bus of yours), nothing
+# of /run (no system bus, so no logind and no power), no network, and the
+# GPU's render nodes as its only hardware (NVIDIA's are /dev/nvidia0 and
+# nvidiactl too, never nvidia-modeset, its display engine), and no core
+# dumps. When the command ends, every process it started ends with it.
+#
+# In it, this checkout's ./install runs, --theme SLUG is applied as Omarchy
+# applies a theme before any session runs (--plugin SO, a build of the plugin
+# under this checkout's plugin/build, is installed in place of the
+# checkout's own), and Hyprland logs in with the user's own config through
+# tools/hidden-desktop.lua on tools/frameclock, a compositor with no screen
+# that asks for each next frame. The command then runs against that Hyprland
+# (WAYLAND_DISPLAY and HYPRLAND_INSTANCE_SIGNATURE are its) on a private
+# session bus. --out DIR is the one directory it can write that outlives it,
+# and gets one hypr.* directory per run (Hyprland's sockets and log),
+# desktop.log (what the desktop's own processes said) and frames.log (when
+# each frame was shown, on frameclock's 60 Hz vblanks, and the backdrop's time
+# in it; tools/smoothness reads it). The desktop is
+# 2880x1800 at 1.25, unless --size and --scale say otherwise.
+#
+# Each wait lasts as long as what it waits for is alive, however loaded the
+# machine is; the whole run's deadline is tools/yield's, which it runs in.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+
+if [[ ${1:-} == --inside ]]; then
+  # The desktop's own output goes to the log; the command's goes where it was
+  # going.
+  exec >&3 2>&4 3>&- 4>&-
+  size=$2 theme=$3 out=$4 plugin=$5 fresh=$6
+  shift 6
+  run=$XDG_RUNTIME_DIR
+
+  # With --out, frames.log has each frame shown and the backdrop's time in
+  # it: frameclock's vblanks and commits, and frametrace's reading of the
+  # time the plugin draws with.
+  frames=() trace=()
+  if [[ -n $out ]]; then
+    : >"$out/frames.log"
+    frames=("$out/frames.log")
+    trace=(LD_PRELOAD="$here/tools/build/frametrace.so" FRAMETRACE="$out/frames.log")
+  fi
+  "$here/tools/build/frameclock" frameclock "$size" "${frames[@]}" &
+  frameclock=$!
+  while [[ ! -S $run/frameclock ]] && kill -0 "$frameclock" 2>/dev/null; do sleep 0.1; done
+  # The processes alive at a login's start, and those alive since then and not
+  # yet ended (in `left`), read from /proc with builtins only, so the reading
+  # starts no process of its own.
+  declare -A session
+  since() {
+    local d stat
+    left=()
+    for d in /proc/[0-9]*; do
+      [[ -n ${session[${d#/proc/}]:-} ]] && continue
+      read -r stat 2>/dev/null <"$d/stat" || continue
+      [[ ${stat##*) } == Z* ]] || left+=("${d#/proc/}")
+    done
+  }
+  # A login: Hyprland on frameclock with the user's config, D-Bus given its
+  # environment, then Omarchy's shell.
+  login() {
+    local d
+    session=()
+    for d in /proc/[0-9]*; do session[${d#/proc/}]=1; done
+    # Hyprland's instance directory (its sockets and hyprland.log) is a new
+    # directory in --out, so this run's log is there however the desktop ends,
+    # and a run before it in the same --out is never taken for this one.
+    [[ -n $out ]] && ln -s "$(mktemp -d "$out/hypr.XXXXXX")" "$run/hypr"
+    env "${trace[@]}" WAYLAND_DISPLAY=frameclock Hyprland -c "$here/tools/hidden-desktop.lua" >"$run/hyprland.out" 2>&1 &
+    hyprland=$!
+
+    # Hyprland's socket comes first; its screen, once frameclock has sized it.
+    ready() {
+      HYPRLAND_INSTANCE_SIGNATURE=$(ls "$run/hypr" 2>/dev/null | head -1 || true)
+      export HYPRLAND_INSTANCE_SIGNATURE
+      hyprctl -j monitors 2>/dev/null | jq -e 'any(.name == "WAYLAND-1" and .width > 0)' >/dev/null 2>&1
+    }
+    until ready; do
+      if ! kill -0 "$hyprland" 2>/dev/null; then
+        echo "hidden-desktop: Hyprland did not start" >&2
+        cat "$run/hyprland.out" >&2
+        exit 1
+      fi
+      sleep 0.1
+    done
+    WAYLAND_DISPLAY=$(cd "$run" && ls wayland-* | grep -v '\.lock$' | head -1)
+    export WAYLAND_DISPLAY
+    # Services D-Bus starts (portals, Files' helpers) belong to this desktop,
+    # as Omarchy's first command at login makes them belong to the session. The
+    # update runs in Hyprland, with its environment, and hyprctl returns once
+    # it has finished (io.popen, as Omarchy's helpers read a command).
+    # Its exit status comes back on a line of its own, ahead of what it said.
+    activated=$(hyprctl repl 'local p = io.popen([[said=$(dbus-update-activation-environment --all 2>&1); echo "$?"; printf "%s" "$said"]]); local r = p:read("a"); p:close(); return r' || true)
+    if [[ ${activated%%$'\n'*} != 0 ]]; then
+      echo "hidden-desktop: D-Bus did not take the desktop's environment: ${activated#*$'\n'}" >&2
+      exit 1
+    fi
+    # Then the shell, as omarchy-launch-shell starts it without the journal
+    # the sandbox does not have. It is what first asks D-Bus for the portals,
+    # and a portal started before the update cannot open the desktop and stays
+    # down: Files then draws in GTK's defaults.
+    hyprctl eval 'hl.exec_cmd([[echo $$ >"$XDG_RUNTIME_DIR/shell.pid"; exec env OMARCHY_STARTUP_BACKGROUND=$(readlink -f ~/.local/state/omarchy/current/background) QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 quickshell -n -p "$OMARCHY_PATH/shell"]])' >/dev/null
+    # The desktop is the command's once the bar is up. A hidden bar stays
+    # mapped (parked past the screen's edge), and a top bar maps within two
+    # seconds whatever the screen.
+    bar() {
+      hyprctl -j layers 2>/dev/null | jq -e 'any(.. | objects; .namespace? == "omarchy-bar")' >/dev/null
+    }
+    until bar; do
+      shell=$(cat "$run/shell.pid" 2>/dev/null || true)
+      if ! kill -0 "$hyprland" 2>/dev/null || { [[ -n $shell ]] && ! kill -0 "$shell" 2>/dev/null; }; then
+        echo "hidden-desktop: the shell ended before its bar was up" >&2
+        exit 1
+      fi
+      sleep 0.1
+    done
+    # Hyprland's notices about how it was launched (no start-hyprland, options
+    # Omarchy's config still uses) are not part of the desktop. A config error
+    # is not a notice: its bar stays.
+    hyprctl dismissnotify >/dev/null
+  }
+  # A logout: Hyprland exits, and every process started since the login ends
+  # with it, as a real logout ends the session's: asked to, then, past five
+  # seconds, made to, again until none is left, since one may start another
+  # as it ends.
+  logout() {
+    hyprctl dispatch 'hl.dsp.exit()' >/dev/null 2>&1 || true
+    wait "$hyprland" || true
+    local signal=TERM start=$SECONDS left
+    while since; ((${#left[@]})); do
+      ((SECONDS - start < 5)) || signal=KILL
+      kill -s "$signal" "${left[@]}" 2>/dev/null || true
+      sleep 0.1
+    done
+    rm -f "$run/shell.pid"
+    if [[ -L $run/hypr ]]; then rm "$run/hypr"; fi
+  }
+
+  if [[ -n $fresh ]]; then
+    cp -rT /etc/skel ~
+    OMARCHY_SETUP_CONTEXT=iso-chroot omarchy-provision-user --first-install >/dev/null 2>&1 || true
+    login
+    # This login's run of the first-run setup, its log lines and its status,
+    # in $XDG_RUNTIME_DIR/fresh too.
+    mkdir -p "$run/fresh/before"
+    log=~/.local/state/omarchy/first-run.log
+    from=$(($({ wc -l <"$log"; } 2>/dev/null || echo 0) + 1)) status=0
+    omarchy-provision-first-run >/dev/null 2>&1 || status=$?
+    echo "$status" >"$run/fresh/first-run.status"
+    tail -n "+$from" "$log" >"$run/fresh/first-run.log" 2>/dev/null || true
+    logout
+    cp -a ~/.config ~/.local "$run/fresh/before/"
+  fi
+
+  # What a login finds: this checkout installed, and the theme applied the
+  # way Omarchy's installer applies one (with the GNOME step it leaves to the
+  # session).
+  if ! said=$("$here/install" 2>&1); then
+    printf '%s\nhidden-desktop: ./install failed\n' "$said" >&2
+    exit 1
+  fi
+  [[ -n $fresh ]] && mkdir "$run/fresh/installed" && cp -a ~/.config ~/.local "$run/fresh/installed/"
+  [[ -n $plugin ]] && install -m 755 "$plugin" ~/.local/lib/omarchy-cinema/backdrop.so
+  if [[ -n $theme ]]; then
+    OMARCHY_THEME_HEADLESS=1 omarchy-theme-set "$theme"
+    omarchy-theme-set-gnome
+  fi
+  login
+  "$@"
+  exit
+fi
+
+args=("$@") size=2880x1800 scale=1.25 theme="" out="" plugin="" fresh=""
+while [[ ${1:-} == --* ]]; do
+  case $1 in
+    --fresh) fresh=1; shift; continue ;;
+    --size) size=$2 ;;
+    --scale) scale=$2 ;;
+    --theme) theme=$2 ;;
+    --plugin) plugin=$(realpath "$2") ;;
+    --out) out=$(cd "$2" && pwd) ;;
+    *) echo "hidden-desktop: unknown option $1" >&2; exit 2 ;;
+  esac
+  shift 2
+done
+(($#)) || { echo "usage: tools/hidden-desktop [--fresh] [--size WxH] [--scale S] [--theme SLUG] [--plugin SO] [--out DIR] <command> [args...]" >&2; exit 2; }
+"$here/tools/yield" --within "$size" || { (($? == 1)) && exec "$here/tools/yield" "$0" "${args[@]}"; exit 75; }
+
+build=$here/tools/build
+frameclock=$build/frameclock
+if [[ ! $frameclock -nt $here/tools/frameclock.c ]]; then
+  mkdir -p "$build"
+  for xml in stable/xdg-shell/xdg-shell stable/linux-dmabuf/linux-dmabuf-v1; do
+    name=${xml##*/}
+    wayland-scanner server-header "/usr/share/wayland-protocols/$xml.xml" "$build/$name-server-protocol.h"
+    wayland-scanner private-code "/usr/share/wayland-protocols/$xml.xml" "$build/$name-protocol.c"
+  done
+  gcc -O2 -I"$build" -o "$frameclock" "$here/tools/frameclock.c" "$build/xdg-shell-protocol.c" \
+    "$build/linux-dmabuf-v1-protocol.c" $(pkg-config --cflags --libs wayland-server egl gbm)
+fi
+if [[ ! $build/frametrace.so -nt $here/tools/frametrace.c ]]; then
+  gcc -O2 -shared -fPIC -o "$build/frametrace.so" "$here/tools/frametrace.c" -ldl
+fi
+
+sandbox=(
+  --die-with-parent --unshare-all
+  --ro-bind / / --tmpfs /run --tmpfs /tmp --proc /proc --dev /dev
+)
+for device in /dev/dri/renderD* /dev/nvidia[0-9]* /dev/nvidiactl; do
+  [[ -c $device ]] && sandbox+=(--dev-bind "$device" "$device")
+done
+sandbox+=(--tmpfs "$HOME")
+mine=("$HOME/.config" "$HOME/.cache")
+# Scratch copy: ~/.local child by child, leaving out mount points under it,
+# which overlayfs cannot take as a lower dir (~/.local/share/footage).
+for dir in "$HOME"/.local/* "$HOME"/.local/share/*; do
+  [[ $dir == "$HOME/.local/share" ]] && continue
+  [[ -d $dir ]] && ! mountpoint -q "$dir" && mine+=("$dir")
+done
+[[ -n $fresh ]] && mine=()
+for dir in "${mine[@]}" "$here"; do
+  [[ -d $dir ]] && sandbox+=(--overlay-src "$dir" --tmp-overlay "$dir")
+done
+for file in .bashrc .bash_profile; do
+  [[ -z $fresh && -f $HOME/$file ]] && sandbox+=(--ro-bind "$HOME/$file" "$HOME/$file")
+done
+[[ -n $out ]] && sandbox+=(--bind "$out" "$out")
+sandbox+=(
+  --dir "/run/user/$UID" --chmod 700 "/run/user/$UID"
+  --clearenv
+  --setenv HOME "$HOME" --setenv USER "$USER" --setenv LOGNAME "$USER"
+  --setenv PATH "${OMARCHY_PATH:-/usr/share/omarchy}/bin:/usr/local/bin:/usr/bin"
+  --setenv OMARCHY_PATH "${OMARCHY_PATH:-/usr/share/omarchy}"
+  --setenv LANG "${LANG:-C.UTF-8}"
+  --setenv XDG_RUNTIME_DIR "/run/user/$UID"
+  --setenv HIDDEN_DESKTOP_SCALE "$scale"
+)
+log=/dev/null
+[[ -n $out ]] && log=$out/desktop.log
+cd "$here"
+# Nothing in it dumps core: the kernel pipes a core to the host's
+# systemd-coredump, whose journal entry Omarchy's crash watcher turns into a
+# toast on your screen, and a limit of one byte is the kernel's own "never
+# pipe this core".
+exec prlimit --core=1 bwrap "${sandbox[@]}" -- dbus-run-session -- "$here/tools/hidden-desktop" --inside "$size" "$theme" "$out" "$plugin" "$fresh" "$@" \
+  3>&1 4>&2 >"$log" 2>&1
