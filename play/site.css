@@ -49,7 +49,7 @@ button:hover { border-color: var(--accent); }
 .films { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; color: var(--muted); font-size: 13px; }
 .films button { width: 100%; padding: 0; overflow: hidden; display: flex; flex-direction: column; text-align: left; }
 .films img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; background: #000; }
-.films span { padding: 4px 8px; text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.films span { padding: 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 textarea { min-height: 260px; resize: vertical; padding: 8px; font: 12px/1.45 ui-monospace, "JetBrains Mono", Menlo, monospace; white-space: pre; tab-size: 4; }
 .log { margin: 0; color: var(--bad); font-size: 12px; white-space: pre-wrap; }
 .log:empty { display: none; }

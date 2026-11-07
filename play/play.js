@@ -627,17 +627,12 @@ function entry(list, name, base, image, href) {
 $("load").onsubmit = e => { e.preventDefault(); loadFilm(toBase($("url").value)); };
 
 async function lists() {
-  try {
-    // The commit the page is served from: GitHub Pages' newest deployment
-    // that went live.
-    const api = path => fetch(`https://api.github.com/repos/${REPO}/${path}`).then(r => r.json());
-    let ref = "main";
-    for (const d of await api("deployments?environment=github-pages&per_page=5")) {
-      if ((await api(`deployments/${d.id}/statuses?per_page=1`))[0]?.state === "success") { ref = d.sha; break; }
-    }
-    const dirs = (await api(`contents/themes?ref=${ref}`)).filter(d => d.type === "dir");
-    for (const d of dirs) entry($("films"), d.name.replace(/-/g, " "), `../themes/${d.name}/`, `../themes/${d.name}/preview.png`);
-  } catch { $("films").textContent = "GitHub did not answer; load a film by its URL."; }
+  // This repo's films, as the README's table shows them, from the same
+  // commit and origin as the page and its contract.
+  const readme = await text("../README.md").catch(() => "");
+  for (const [, name, slug] of readme.matchAll(/!\[([^\]]+)\]\(themes\/([\w-]+)\/preview\.png\)/g))
+    entry($("films"), name, `../themes/${slug}/`, `../themes/${slug}/preview.png`);
+  if (!$("films").children.length) $("films").textContent = "Load a film by its URL.";
   try {
     const r = await fetch("https://api.github.com/search/repositories?q=topic:omarchy-cinema&sort=updated&per_page=30");
     const found = (await r.json()).items || [];
@@ -652,4 +647,4 @@ async function lists() {
 arrange();
 lists();
 const asked = new URLSearchParams(location.search).get("film");
-loadFilm(asked || "../themes/tron-legacy/", asked ? undefined : "tron legacy");
+loadFilm(asked || "../themes/tron-legacy/", asked ? undefined : "Tron Legacy");
