@@ -38,13 +38,12 @@ adds a settings file, a menu or a knob that Omarchy does not already have.
    Finer values are Hyprland keys (the gaps):
    `film.lua` sets defaults, the user's `~/.config/hypr` and the toggles load
    after it and win.
-4. **Anyone can make one.** Copy a cinema theme directory (Omarchy's
-   documented way to make a theme), change `colors.toml`, write one GLSL
-   function `backdrop(px)` against `plugin/contract.glsl`. Planned: one
-   command for the rest, `omarchy-cinema new <name> [--from <theme>]`,
-   `omarchy-cinema preview <theme>` (backdrop and popup stills, off screen)
-   and `omarchy-cinema check <theme>` (the shader compiles against the
-   contract, `gtk.css` parses, the manifests are complete).
+4. **Anyone can make one.** Each film is its own theme repo
+   (`omarchy-<slug>-theme`, built from `themes/<slug>` by `tools/theme-repo`)
+   and a GitHub template: *Use this template*, change `colors.toml`, write
+   one GLSL function `backdrop(px)` against `plugin/contract.glsl`, and watch
+   it in the playground. Giving a repo the topic `omarchy-cinema` lists it
+   in the playground's gallery.
 
 ## Glass
 
@@ -91,9 +90,10 @@ plugin: every shader edit would need a rebuild and a login, and Omarchy's
 same-name overlay of a shipped film's `backdrop.frag` or `colors.toml` would
 be ignored.
 
-Still open: a cloned film's popup base (a fixed engine path its QML imports)
-and folder icons have no staging point yet, so the package ships the plugin
-and `film.lua` only, and `./install`'s popup and icon steps stay.
+A film's repo carries its popup's base (`FilmOsd.qml`, beside its QML) and
+its folder icons, so a film installed with `omarchy theme install` is whole;
+the package ships the plugin and `film.lua`, and the per-user steps
+(`./install`) stay.
 
 **From the developer's install to the package.** Hyprland reads
 `hyprland.lua` again at every config reload, a theme switch included, and

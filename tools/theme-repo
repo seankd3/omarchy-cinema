@@ -1,0 +1,86 @@
+#!/bin/bash
+# Builds a film's own theme repo, the one `omarchy theme install <url>`
+# clones, from this checkout's themes/<slug>: the theme's tracked files,
+# FilmOsd.qml beside its dictation popup, its folder icons (tools/folders.py)
+# and a README, as one commit that names the commit they came from. A repo
+# already there gets the change as its next commit (none when nothing
+# changed); what it holds is always exactly what this writes. This checkout
+# stays the films' source.
+#
+#   tools/theme-repo <slug> <dir>
+#
+# Name the repo omarchy-<slug>-theme: Omarchy names a theme after its repo,
+# less the omarchy- and -theme, so it installs as <slug>.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+slug=${1:?usage: tools/theme-repo <slug> <dir>} dir=${2:?usage: tools/theme-repo <slug> <dir>}
+src=themes/$slug
+commit=$(git -C "$here" rev-parse HEAD)
+git -C "$here" cat-file -e "$commit:$src/backdrop.frag" 2>/dev/null || { echo "$src is not a film at $commit" >&2; exit 1; }
+# Everything comes from the commit; this tool's own README must be it too.
+[[ -z $(git -C "$here" status --porcelain -- tools/theme-repo) ]] || { echo "tools/theme-repo has changes not committed; commit them first" >&2; exit 1; }
+# The repo takes the new tree whole, so it holds nothing else worth keeping.
+if [[ -d $dir/.git ]]; then
+  [[ -z $(git -C "$dir" status --porcelain --ignored) ]] || { echo "$dir has changes or files of its own; it is built, not edited" >&2; exit 1; }
+elif [[ -e $dir && -n $(ls -A "$dir") ]]; then
+  echo "$dir is not empty and not a film repo" >&2; exit 1
+fi
+
+# The tree, built apart.
+tree=$(mktemp -d)
+trap 'rm -rf "$tree"' EXIT
+git -C "$here" archive "$commit" "$src" | tar -x -C "$tree" --strip-components=2
+git -C "$here" cat-file -e "$commit:$src/voxtype-osd.toml" 2>/dev/null && git -C "$here" show "$commit:osd/FilmOsd.qml" >"$tree/FilmOsd.qml"
+git -C "$here" show "$commit:tools/folders.py" | python3 - "$tree" "$slug" >/dev/null
+git -C "$here" show "$commit:LICENSE" >"$tree/LICENSE"
+
+film=$(sed -n '2s:^// \([^:.]*\).*:\1:p' "$tree/backdrop.frag")
+# The film's own header, less its name and its notes on this repo's specs.
+about=$(sed -n '2,/^$/{s:^// \{0,1\}::p}' "$tree/backdrop.frag" | tr '\n' ' ' | sed 's/^[^:]*: //; s/^./\U&/; s/ ([^)]*\.md[^)]*)//g; s/ *$//')
+repo=https://github.com/seankd3/omarchy-cinema
+cat >"$tree/README.md" <<EOF
+# ${film:-$slug}
+
+![${film:-$slug}](preview.png)
+
+$about
+
+An [Omarchy](https://omarchy.org) theme from [Omarchy Cinema]($repo). On its
+own it is a whole Omarchy theme with its film as the wallpaper. With the
+Omarchy Cinema engine installed, the film comes alive: it is drawn around your
+windows in the same frame as them, windows turn to glass with their text kept
+solid, and Files, its folders and the dictation popup take its look.
+
+    omarchy theme install https://github.com/seankd3/omarchy-$slug-theme
+
+[Try it in the browser](https://seankd3.github.io/omarchy-cinema/play/?film=https://raw.githubusercontent.com/seankd3/omarchy-$slug-theme/HEAD/) before you install it.
+
+## Make your own
+
+Press *Use this template* to start a film from this one. Change
+\`colors.toml\`, write \`backdrop.frag\` against [the contract](https://seankd3.github.io/omarchy-cinema/play/contract.html),
+watch it in the [playground](https://seankd3.github.io/omarchy-cinema/play/),
+name your repo \`omarchy-<name>-theme\`, and give it the topic
+\`omarchy-cinema\` to list it in the gallery.
+
+This repo is built from \`$src\` of [omarchy-cinema]($repo) by
+\`tools/theme-repo\`; changes go there.
+
+## Credits
+
+A fan homage. The film and its marks belong to their owners; this theme is
+not affiliated with or endorsed by them, and ships no film imagery: the
+wallpaper is this theme's own \`backdrop.frag\`, drawn. MIT licence (LICENSE).
+EOF
+
+mkdir -p "$dir"
+[[ -d $dir/.git ]] || git -C "$dir" init -q -b main
+git --git-dir="$dir/.git" --work-tree="$tree" add -A
+if git -C "$dir" diff --cached --quiet; then
+  echo "$dir: already $(git -C "$here" log -1 --format=%h "$commit")"
+else
+  git -C "$dir" -c commit.gpgsign=false commit -q -m "From omarchy-cinema $(git -C "$here" log -1 --format='%h: %s' "$commit")"
+  echo "$dir: $(git -C "$dir" log -1 --format='%h %s')"
+fi
+git -C "$dir" reset -q --hard

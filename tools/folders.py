@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Writes a film theme's folder icons: an icon theme named Cinema-<Film> that
-overlays Yaru, with every folder Files shows (plain, the special folders, home,
-desktop) drawn in the film's style.
+"""Writes a film theme's folder icons: an icon theme named Cinema-<Film> in
+its icons/, which overlays Yaru, with every folder Files shows (plain, the
+special folders, home, desktop) drawn in the film's style, and its
+icons.theme, which names that Yaru.
 
 GTK looks for all of an icon's names in this theme before it reads the parent,
 so a theme that drew only `folder` would turn Documents, Downloads and the rest
 into plain folders too: every name Files uses is drawn here.
 
-    tools/folders.py <theme-dir>
+    tools/folders.py <theme-dir> [slug]
+
+The film's slug (its directory's name if not given) names the icon theme.
 
 A theme's folders.json is its style: "outline", the folder's silhouette as an
 SVG path in a 64 by 64 box (tab top left, body below); "stroke" and "glow" for
@@ -69,9 +72,9 @@ def svg(style, glyph):
 """
 
 
-def main(theme_dir):
+def main(theme_dir, slug=None):
     theme_dir = Path(theme_dir)
-    slug = theme_dir.name
+    slug = slug or theme_dir.name
     style = json.loads((theme_dir / "folders.json").read_text())
     name = "Cinema-" + slug.title()
     places = theme_dir / "icons" / "scalable" / "places"
@@ -93,9 +96,12 @@ MaxSize=512
 Type=Scalable
 """
     )
-    (theme_dir / "icons.theme").write_text(name + "\n")
+    # What Omarchy applies: the Yaru its folders inherit, so the film has
+    # proper icons without the engine. The engine's theme-set hook (install)
+    # turns its own icons on.
+    (theme_dir / "icons.theme").write_text(style["inherits"].split(",")[0] + "\n")
     print(name)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(*sys.argv[1:3])
