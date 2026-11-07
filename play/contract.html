@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Film Contract</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="./">Omarchy Cinema</a>
+  <nav><a href="./">Playground</a><a href="contract.html" aria-current="page">Contract</a></nav>
+</header>
+<main class="spec">
+  <p class="lede">What a film is, every value and helper it can read, and what it writes. This page is <a id="source" href="../plugin/contract.glsl">plugin/contract.glsl</a> itself, the file every engine compiles in front of a film: its comments are the prose, and its code is the code.</p>
+  <div id="spec">Loading the contract…</div>
+</main>
+<script type="module">
+import { literate } from "./spec.js";
+const text = await (await fetch("../plugin/contract.glsl")).text();
+const { version, html } = literate(text);
+document.title = `Film Contract ${version}`;
+document.getElementById("spec").innerHTML = html;
+if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView();
+</script>
+</body>
+</html>

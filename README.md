@@ -49,7 +49,9 @@ settings it changed; a film still applied gives way to Tokyo Night.
 
 Copy a film's directory into `~/.config/omarchy/themes/<name>`, change
 `colors.toml`, and write `backdrop.frag`: one GLSL function, `backdrop(px)`,
-against [`plugin/contract.glsl`](plugin/contract.glsl).
+against [the contract](https://seankd3.github.io/omarchy-cinema/play/contract.html)
+(`plugin/contract.glsl`, which says everything a film can read and what its
+`colors.toml` sets).
 `uv run tools/preview.py <theme-dir>` draws it off screen, once you lock
 the screen or it sleeps: benches yield to the person at the screen
 (`tools/yield`). SPEC.md is the design.

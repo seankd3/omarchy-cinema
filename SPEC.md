@@ -70,9 +70,9 @@ Hyprland. The plugin reads `backdrop.frag` and `colors.toml` from
 at the next draw, so the theme directory is the one home of a film's shader
 and glass: editing `backdrop.frag` and switching theme shows the edit, and
 Omarchy's same-name overlay of a shipped film is drawn as overlaid. The
-contract carries a version (`// omarchy-cinema contract N`, its first comment
-line) and each `backdrop.frag` says the version it was written for on the same
-line; a shader written for another contract, or for none, is not compiled. One
+contract carries a version, and each `backdrop.frag` says the one it was
+written for (contract.glsl's header has the rule); a shader written for
+another contract, or for none, is not compiled. One
 notice names the fix (log in again to run the engine installed now, or update
 the theme) and the backdrop draws nothing, so a theme switch after a contract
 change never draws a film against a contract it was not written for. A shader
