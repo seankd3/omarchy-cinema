@@ -1,5 +1,5 @@
 # /// script
-# dependencies = ["moderngl", "numpy", "pillow"]
+# dependencies = ["moderngl", "numpy", "pillow", "quickjs"]
 # ///
 """Renders a film theme's backdrop off screen, so a backdrop can be designed and
 checked without a live session: an empty workspace, and workspace 1's layout
@@ -17,6 +17,7 @@ landed while you speak into the focused one, and a window opening, one
 closing and focus moving.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -25,6 +26,7 @@ from pathlib import Path
 
 import moderngl
 import numpy as np
+import quickjs
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -88,60 +90,41 @@ def checked(make):
 moderngl.Context.framebuffer = checked(moderngl.Context.framebuffer)
 
 
+# The scene model is play/scene.js, which the playground runs too: what the
+# engine gives a film, worked out from a scene. Called with JSON both ways.
+JS = quickjs.Context()
+JS.eval((ROOT / "play/scene.js").read_text() + """
+function given(scene, colors) {
+  const g = Scene.uniforms(JSON.parse(scene), Scene.reach(colors));
+  return JSON.stringify(g, (k, v) => ArrayBuffer.isView(v) ? Array.from(v) : v);
+}
+function call(name, args) {
+  return JSON.stringify(Scene[name](...JSON.parse(args)), (k, v) => ArrayBuffer.isView(v) ? Array.from(v) : v);
+}""")
+
+
+def model(name, *args):
+    return json.loads(JS.get("call")(name, json.dumps(args)))
+
+
+def colors_toml(theme):
+    return (theme / "colors.toml").read_text()
+
+
 def palette(theme):
-    colors = {}
-    for line in (theme / "colors.toml").read_text().splitlines():
-        m = re.match(r'\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})"', line)
-        if m:
-            colors[m[1]] = tuple(int(m[2][i:i + 2], 16) / 255 for i in (0, 2, 4))
-    return colors
-
-
-def amount(theme, name, default):
-    """A reach as main.cpp's amountOf() reads it: the last
-    line's, up to five ASCII digits and three after a point, else `default`."""
-    found = re.findall(rf'^\s*{name}\s*=\s*"\s*([^"\s]*)\s*"', (theme / "colors.toml").read_text(), re.M)
-    return float(found[-1]) if found and re.fullmatch(r"[0-9]{1,5}(\.[0-9]{0,3})?", found[-1]) else default
+    return {k: tuple(v) for k, v in model("palette", colors_toml(theme)).items()}
 
 
 def setting(theme, name, default):
-    """A number colors.toml gives as a string (glass, frost), else `default`."""
-    m = re.search(rf'^\s*{name}\s*=\s*"\s*([^"\s]*)\s*"', (theme / "colors.toml").read_text(), re.M)
-    try:
-        return float(m[1]) if m else default
-    except ValueError:
-        return default
+    return model("setting", colors_toml(theme), name, default)
 
 
 def layout():
-    w, h = LOGICAL
-    top = BAR + GAP
-    left_w = round((w - 3 * GAP) * 0.62)
-    right_x = GAP + left_w + GAP
-    right_w = w - right_x - GAP
-    full_h = h - top - GAP
-    half_h = (full_h - GAP) / 2
-    return [
-        (GAP, top, left_w, full_h),
-        (right_x, top, right_w, half_h),
-        (right_x, top + half_h + GAP, right_w, half_h),
-    ]
+    return [tuple(r) for r in model("layout", LOGICAL, BAR, GAP)]
 
 
 # Impulse kinds, as contract.glsl names them.
 OPEN, CLOSE, LAND, FOCUS = range(1, 5)
-
-
-def flare(impulses, i):
-    """Window i's swell and landing in the last second, as main.cpp's
-    uploadShapes() sums them for windowFlare()."""
-    swell = landing = 0.0
-    for _, _, age, strength, kind, owner in impulses:
-        rise = min(max(age / 0.12, 0.0), 1.0)
-        if owner != i or age > 1.0: continue
-        if kind == LAND: landing += strength * np.exp(-age * 4.0)
-        elif kind in (FOCUS, OPEN): swell += 0.6 * rise * rise * (3.0 - 2.0 * rise) * np.exp(-age * 3.5) * (1.0 if kind == OPEN else strength)
-    return swell, landing
 
 
 def framed(theme):
@@ -169,45 +152,23 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
     for name in ("accent", "background"):
         if name in program:
             program[name].value = colors.get(name, (1, 1, 1))
-    values = {
-        "time": float(t),
-        "resolution": LOGICAL,
-        "reserved": (BAR, 0.0, 0.0, 0.0),
-        "windowCount": len(windows),
-        "focusedIndex": focused if windows else -1,
-        "focused": windows[focused] if windows else (LOGICAL[0] * 0.3, LOGICAL[1] * 0.3, LOGICAL[0] * 0.4, LOGICAL[1] * 0.4),
-        "focusAlpha": 1.0 if windows else 0.0,
-    }
-    for name, value in values.items():
-        if name in program:
-            program[name].value = value
-    if "voice" in program:
-        program["voice"].value = voice
-    if "impulseCount" in program:
-        program["impulseCount"].value = len(impulses)
-        rows = [tuple(i[:4]) for i in impulses] + [(0.0, 0.0, 0.0, 0.0)] * (32 - len(impulses))
-        program["impulses"].write(np.array(rows, dtype="f4").tobytes())
-        kinds = [int(i[4]) for i in impulses] + [0] * (32 - len(impulses))
-        program["impulseKinds"].write(np.array(kinds, dtype="i4").tobytes())
-        owners = [int(i[5]) for i in impulses] + [-1] * (32 - len(impulses))
-        program["impulseWindows"].write(np.array(owners, dtype="i4").tobytes())
-
-    # The Windows block: each window's three vec4s, then the tiles the first
-    # 32 reach (main.cpp, uploadShapes()).
-    data = np.zeros((3 * 256, 4), dtype="f4")
-    tiles = np.zeros((32, 32), dtype="u4")
-    reach = amount(theme, "reach", np.inf)
-    for i, rect in enumerate(windows):
-        v = velocity[i] if velocity else (0.0, 0.0)
-        data[3 * i] = rect
-        data[3 * i + 1] = (1.0, 0.0, 1.0 if i == focused else 0.0, float(len(windows) - 1 - i))
-        data[3 * i + 2] = (*v, *flare(impulses, i))
-        r = reach + 0.3 * float(np.hypot(*v))
-        x, y, w, h = rect
-        tile = lambda a, across: int(np.clip(np.floor(a / across * 32), 0, 31))
-        if i < 32:
-            tiles[tile(y - r, LOGICAL[1]):tile(y + h + r, LOGICAL[1]) + 1, tile(x - r, LOGICAL[0]):tile(x + w + r, LOGICAL[0]) + 1] |= np.uint32(1 << i)
-    window_data = ctx.buffer(data.tobytes() + tiles.tobytes())
+    # Each window whole and still unless dragged, the first focused, on top
+    # of the ones after it.
+    shapes = [dict(rect=rect, alpha=1.0, rounding=0.0, lift=1.0 if i == focused else 0.0, depth=float(len(windows) - 1 - i),
+                   velocity=velocity[i] if velocity else (0.0, 0.0)) for i, rect in enumerate(windows)]
+    told = dict(time=float(t), size=LOGICAL, reserved=(BAR, 0.0, 0.0, 0.0), windows=shapes, focused=focused if windows else -1,
+                focusAlpha=1.0 if windows else 0.0, voice=voice,
+                impulses=[dict(at=(x, y), age=age, strength=strength, kind=kind, window=owner) for x, y, age, strength, kind, owner in impulses])
+    given = JS.get("given")(json.dumps(told), colors_toml(theme))
+    given = json.loads(given)
+    for name, value in given["values"].items():
+        if name not in program:
+            continue
+        if name in ("impulses", "impulseKinds", "impulseWindows"):
+            program[name].write(np.array(value, dtype="f4" if name == "impulses" else "i4").tobytes())
+        else:
+            program[name].value = tuple(value) if isinstance(value, list) else value
+    window_data = ctx.buffer(np.array(given["windows"]["texels"], dtype="f4").tobytes() + np.array(given["windows"]["tiles"], dtype="u4").tobytes())
     if "Windows" in program:
         program["Windows"].binding = 0
     textures = []
@@ -220,7 +181,7 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
         atlas = Image.open(glyphs_png).convert("RGBA").getchannel("A")
         glyphs = ctx.texture(atlas.size, 1, atlas.tobytes())
         glyphs.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        text = " ".join("".join(c if " " < c <= "~" else " " for c in (theme / "backdrop.frag").read_text()).split())[-16384:]
+        text = model("words", (theme / "backdrop.frag").read_text())
         count = len(text)
         letters = ctx.texture((128, 128), 1, text.ljust(16384).encode("ascii"))
         letters.filter = (moderngl.NEAREST, moderngl.NEAREST)
@@ -257,9 +218,8 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
 def coarse(theme):
     """The coarse world's size and levels, and its frost's level at the
     screen's size, as main.cpp's coarse() works them out."""
-    frost = min(max(int(np.floor(np.log2(max(2 * setting(theme, "frost", 3) * PIXELS[0] / LOGICAL[0], 1)) + 0.5)), 1), 6)
-    k = min(frost - 1, 1)
-    return tuple(-(-p >> (frost - k)) for p in PIXELS), k + 1, frost
+    c = model("coarse", setting(theme, "frost", 3), PIXELS, PIXELS[0] / LOGICAL[0])
+    return tuple(c["size"]), c["levels"], c["frost"]
 
 
 def coarse_world(ctx, theme, t, windows, focused, **answers):
@@ -407,22 +367,11 @@ def glass(theme, image, t, windows, focused, border=True, **answers):
 
 
 def storyboard():
-    """The four moments --answers shows, as (name, windows, focused, answers):
-    at rest, a window dragged, a window just landed
-    while you speak into the focused one, and a window opening, one closing
-    and focus moving."""
-    windows = layout()
-    (lx, ly, lw, lh), (rx, ry, rw, rh) = windows[0], windows[1]
-    moved = list(windows)
-    moved[1] = (rx - 260, ry + 90, rw, rh)  # mid-drag, down and to the left
-    return [
-        ("rest", windows, 0, {}),
-        ("drag", moved, 1, dict(velocity=[(0, 0), (-1800, 600), (0, 0)])),
-        ("land", windows, 0, dict(voice=0.7,
-                                  impulses=[(rx + rw / 2, ry + rh / 2, 0.25, 0.8, LAND, 1)])),
-        ("open", windows[:2], 1, dict(impulses=[(rx + rw / 2, ry + rh * 1.5 + GAP, 0.3, 1.0, CLOSE, -1), (lx + lw / 2, ly + lh / 2, 0.5, 1.0, OPEN, 0),
-                                                (rx + rw / 2, ry + rh / 2, 0.15, 0.6, FOCUS, 1)])),
-    ]
+    """The four moments --answers shows, as (name, windows, focused, answers),
+    from scene.js."""
+    return [(m["name"], [tuple(r) for r in m["windows"]], m["focused"],
+             {k: [tuple(v) for v in m[k]] if k != "voice" else m[k] for k in ("velocity", "voice", "impulses") if k in m})
+            for m in model("storyboard", LOGICAL, BAR, GAP)]
 
 
 def answers(theme, t, out):
