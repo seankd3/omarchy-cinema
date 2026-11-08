@@ -3,8 +3,8 @@
 Six film themes for [Omarchy](https://omarchy.org) whose background is alive
 and drawn around your windows, in the same frame as the windows. Windows turn
 to glass with their text kept solid, and Files, its folders, the bar and the
-dictation popup take the film's look. A still desktop costs nothing; the
-film moves while your windows do.
+dictation popup take the film's look. The film keeps moving while you can
+see it, and holds still with *No animations*.
 
 | | |
 |---|---|

@@ -1,4 +1,4 @@
-// omarchy-cinema contract 15
+// omarchy-cinema contract 16
 // Jarvis: a holographic globe in a gyroscope of rings, turning behind the
 // focused window and sized to it. It glows through the glass and past the
 // window's edges; light pools in the seams between windows and wakes the hex

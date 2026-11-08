@@ -52,11 +52,12 @@ if [[ ${1:-} == --inside ]]; then
   open org.gnome.Nautilus "nautilus --new-window '$HOME'"
   focus cinema-nvim
 
-  # Long enough for btop to graph a few seconds and the world to come to
-  # rest, then until Files has drawn its folders: its window the same in two
-  # captures a second apart (a desktop at rest draws nothing; Files' loading
-  # spinner turns).
+  # Long enough for btop to graph a few seconds, then until Files has drawn
+  # its folders: its window the same in two captures a second apart (Files'
+  # loading spinner turns). The world holds still behind its glass with
+  # animations off, its time standing still.
   sleep 6
+  hyprctl eval 'hl.config({ animations = { enabled = false } })' >/dev/null
   # A new user's first login greets them (Omarchy's first-run notices), and
   # with no network in the sandbox nvim's plugins keep saying they cannot
   # download (noice's message split): neither is the theme, and the notices

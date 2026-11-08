@@ -1,5 +1,5 @@
 #version 300 es
-// omarchy-cinema contract 15
+// omarchy-cinema contract 16
 // The backdrop contract: everything a film can know and must write. A film
 // is an Omarchy theme directory with a backdrop.frag. The engine puts this
 // file in front of it; it defines backdrop() and may define frame() (at the
@@ -29,9 +29,9 @@
 // along each edge (top, right, bottom, left).
 //
 // `time` is the world's own clock, in seconds: it runs at the wall clock's
-// speed while windows move, open, close, take focus or slide between
-// workspaces, and eases to a stop about two seconds after they hold still,
-// when the plugin draws nothing. It wraps every hour, so build motion from
+// speed wherever the world is seen, and the plugin draws the world every
+// frame there; it stands still with animations off, the session locked, or
+// every screen asleep or fullscreen. It wraps every hour, so build motion from
 // cycle(seconds) with a period that divides 3600 (60, 30, 20, 12, 10, 8, 6,
 // ...). What happened lately (below) has its own ages, on the wall's clock.
 

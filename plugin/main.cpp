@@ -133,10 +133,6 @@ void main() {
         ;
     // How far outside a window its frame may draw, in logical px.
     constexpr double FRAME_BAND = 48.0;
-    // The world's clock (contract.glsl, `time`) runs at a speed that eases
-    // toward 1 over STIR_RISE while the scene changed within STIR_HOLD, and
-    // back toward 0 over STIR_FALL after; below STIR_STILL it stops.
-    constexpr double STIR_RISE = 0.15, STIR_FALL = 0.5, STIR_HOLD = 0.05, STIR_STILL = 0.005; // seconds, and a speed
 
     using Rect = std::array<float, 4>;
 
@@ -215,9 +211,6 @@ void main() {
         float                                 alphaFrom = 0;
         Clock::time_point focusMoved;
         bool                                  seen = false;
-        // Whether the frame being drawn changes the world, which keeps
-        // easing after it: the next frame is drawn too.
-        bool                                  changed = false;
         // Whether the world changed since its coarse world was drawn here.
         bool                                  stale = true;
     };
@@ -240,7 +233,8 @@ void main() {
     // monitor in it, for the frames that read it (worldAt()). With it, the
     // agents' text it was drawn with
     // (the feed change, its count and next position), so a part of the
-    // screen drawn again at rest shows the text the kept world does.
+    // screen drawn again while the world stands still shows the text the
+    // kept world does.
     struct SCoarse {
         GLuint                texture = 0, feed = 0;
         std::array<GLuint, 2> fbo{}; // drawing it, and the frost
@@ -333,11 +327,10 @@ void main() {
         std::string                             glassShader; // the surface shader in use, empty for Hyprland's own
         wl_event_source*                        settling = nullptr; // a settle() waiting for the loop
         // The world's clock (advance()): seconds of its own motion, wrapping
-        // hourly; the speed it runs at; when it last ran on (none once the
-        // world stood still everywhere); and when the scene last changed.
+        // hourly, and when it last ran on (none once the world stood still
+        // everywhere).
         float                                   time = 0;
-        double                                  speed = 0;
-        Clock::time_point   clocked, stirred;
+        Clock::time_point                       clocked;
         std::unordered_map<MONITORID, SMonitor> monitors;
         std::unordered_map<uint64_t, SMotion>   motion; // each window's, by stable id
         std::deque<SImpulse>                    impulses;
@@ -1685,44 +1678,16 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
     // when it last ran, and the next frame the world moves in starts it
     // again from where it stood.
     void standStill() {
-        if (!answering()) {
+        if (!answering())
             g->clocked = {};
-            g->speed   = 0;
-        }
     }
 
-    // The world's clock run on to `now` (contract.glsl, `time`): its speed
-    // eases toward 1 until STIR_HOLD after the scene last changed and
-    // toward 0 after that, and time runs on at that speed, worked out exactly
-    // from those moments alone, whatever frames came between. A change seen
-    // in this frame (`stirred`) starts the next rise; a speed fallen below
-    // STIR_STILL stops.
-    void advance(bool stirred, Clock::time_point now) {
-        const auto run = [](double target, double ease, double dt) {
-            if (dt <= 0)
-                return;
-            const double k = std::exp(-dt / ease);
-            g->time        = float(std::fmod(g->time + target * dt + (g->speed - target) * ease * (1.0 - k), 3600.0));
-            g->speed       = target + (g->speed - target) * k;
-        };
-        if (g->clocked != Clock::time_point{}) {
-            const auto rose = g->stirred + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(STIR_HOLD));
-            const auto turn = std::clamp(rose, g->clocked, now);
-            run(1.0, STIR_RISE, seconds(turn - g->clocked));
-            run(0.0, STIR_FALL, seconds(now - turn));
-        }
+    // The world's clock run on to `now` at the wall clock's speed
+    // (contract.glsl, `time`).
+    void advance(Clock::time_point now) {
+        if (g->clocked != Clock::time_point{})
+            g->time = float(std::fmod(g->time + seconds(now - g->clocked), 3600.0));
         g->clocked = now;
-        if (stirred)
-            g->stirred = now;
-        else if (g->speed < STIR_STILL && seconds(now - g->stirred) >= STIR_HOLD)
-            g->speed = 0;
-    }
-
-    // The world drawn again, whole, on every monitor it moves on.
-    void wake() {
-        for (const auto& monitor : State::monitorState()->monitors())
-            if (moves(monitor))
-                redraw(monitor);
     }
 
     // Once Hyprland has finished a change that may move the glass or start
@@ -1739,7 +1704,9 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         applyGlass();
         if (!answering())
             letGo();
-        wake();
+        for (const auto& monitor : State::monitorState()->monitors())
+            if (moves(monitor))
+                redraw(monitor);
         standStill();
     }
 
@@ -1748,16 +1715,15 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             g->settling = wl_event_loop_add_idle(g_pCompositor->m_wlEventLoop, settled, nullptr);
     }
 
-    // A frame shown asks for the next while the world goes on changing on
-    // its own there: easing after a change, an answer alive, or its clock
-    // running down. Otherwise nothing asks.
+    // A frame shown asks for the next wherever the world moves. Otherwise
+    // nothing asks.
     void onPresented(const PHLMONITOR& monitor) {
         if (!g || g->source.empty())
             return;
-        if (!moves(monitor))
-            return standStill();
-        if (g->monitors[monitor->m_id].changed || g->speed > 0)
+        if (moves(monitor))
             redraw(monitor);
+        else
+            standStill();
     }
 
     void onPre(PHLMONITOR monitor) {
@@ -1767,17 +1733,12 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         state.pending = readScene(monitor, state);
         // The world's clock runs on while it moves here, each frame at its
         // render.pre, just after the vblank before the one it is shown at.
-        const float before = g->time;
         if (moves(monitor))
-            advance(state.pending != state.drawn, Clock::now());
-        // The clock is every monitor's: when it runs, each is drawn again.
-        if (g->time != before)
-            wake();
+            advance(Clock::now());
         state.answer = readAnswer();
         // A change of the world changes it everywhere: all of it, the frost
         // too, is drawn again in this frame.
-        state.changed = state.pending != state.drawn || state.answer != state.answered || !g->impulses.empty();
-        if (state.changed)
+        if (state.pending != state.drawn || state.answer != state.answered)
             redraw(monitor);
     }
 

@@ -9,7 +9,6 @@ const ENGINE = "../plugin/";
 const REPO = "seankd3/omarchy-cinema";
 const BAR = 26, BORDER = 2, BAND = 48;
 const FOCUS_EASE = 0.32, VELOCITY_EASE = 0.08, IMPULSE_LIFE = 3, FADE = 0.2;
-const STIR_RISE = 0.15, STIR_FALL = 0.5, STIR_HOLD = 0.05, STIR_STILL = 0.005;
 
 const text = async url => { const r = await fetch(url); if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.text(); };
 const engine = Object.fromEntries(await Promise.all(["contract", "dither", "glass", "main-backdrop", "main-frame"].map(async n => [n, await text(ENGINE + n + ".glsl")])));
@@ -215,7 +214,7 @@ function build() {
   if (feedTex) gl.deleteTexture(feedTex);
   feedTex = texture(128, 128, gl.R8, gl.RED, gl.UNSIGNED_BYTE, chars, gl.NEAREST);
   apps.clear();
-  stir();
+  wake();
 }
 
 // ---- The desktop: windows as Hyprland moves them
@@ -225,11 +224,10 @@ let windows = [];     // { id, rect, alpha, rounding, lift, velocity, moving, at
 let order = [];       // ids, bottom to top
 let focusedId = null, focus = { from: null, moved: -1e9, alphaFrom: 0, source: null };
 let impulses = [];    // { at, start, strength, kind, id }
-let clock = { time: 12, speed: 0, clocked: 0, stirred: -1e9 };
+let clock = { time: 12, clocked: 0 };
 let voice = 0, speaking = false, nextId = 1;
 const now = () => performance.now() / 1000;
 
-function stir() { clock.stirred = now(); wake(); }
 function impulse(w, kind, strength) {
   const [x, y, ww, hh] = w.rect;
   impulses.push({ at: [x + ww / 2, y + hh / 2], start: now(), strength, kind, id: w.id });
@@ -242,7 +240,7 @@ function open(rect, title) {
   order.push(w.id);
   impulse(w, Scene.OPEN, 1);
   focusOn(w);
-  stir();
+  wake();
 }
 function close(w) {
   if (w.closed) return;
@@ -251,14 +249,14 @@ function close(w) {
   const rest = order.filter(id => id !== w.id && !byId(id).closed);
   focusedId = null;
   if (rest.length) focusOn(byId(rest[rest.length - 1]));
-  stir();
+  wake();
 }
 function focusOn(w) {
   if (focusedId === w.id) return;
   focusedId = w.id;
   order = order.filter(id => id !== w.id).concat(w.id);
   impulse(w, Scene.FOCUS, 0.6);
-  stir();
+  wake();
 }
 const byId = id => windows.find(w => w.id === id);
 
@@ -276,17 +274,14 @@ function arrange() {
     focusOn(windows[0]);
     impulses = [];
   }
-  stir();
+  wake();
 }
 
 // One frame of motion: velocities ease toward the move, lift toward focus,
 // fades run, a window that stops after moving lands; the clock runs on.
 function step(t, dt) {
-  let changed = false;
   for (const w of windows) {
-    const alpha = w.closed ? Math.max(0, 1 - (t - w.closed) / FADE) : Math.min(1, (t - w.opened) / FADE);
-    if (alpha !== w.alpha) changed = true;
-    w.alpha = alpha;
+    w.alpha = w.closed ? Math.max(0, 1 - (t - w.closed) / FADE) : Math.min(1, (t - w.opened) / FADE);
     const moving = w.rect[0] !== w.at[0] || w.rect[1] !== w.at[1];
     if (dt > 0 && dt < 0.25) {
       const k = 1 - Math.exp(-dt / VELOCITY_EASE);
@@ -295,10 +290,8 @@ function step(t, dt) {
       const target = w.id === focusedId ? 1 : 0;
       w.lift += (target - w.lift) * (1 - Math.exp(-dt / (FOCUS_EASE / 3)));
       if (Math.abs(target - w.lift) < 0.002) w.lift = target;
-      else changed = true;
     }
     if (w.moving && !moving) impulse(w, Scene.LAND, Math.min(Math.max(Math.hypot(...w.velocity) / 3000, 0.25), 1));
-    if (moving || Math.hypot(...w.velocity) > 0) changed = true;
     w.moving = moving;
     w.at = w.rect.slice(0, 2);
   }
@@ -307,22 +300,9 @@ function step(t, dt) {
   impulses = impulses.filter(e => t - e.start <= IMPULSE_LIFE);
   voice += ((speaking ? 0.55 + 0.35 * Math.sin(t * 9) * Math.sin(t * 2.3) : 0) - voice) * Math.min(1, dt * 12);
   if (voice < 0.002) voice = 0;
-  if (changed) clock.stirred = t;
   // The world's clock, as main.cpp's advance().
-  const run = (target, ease, span) => {
-    if (span <= 0) return;
-    const k = Math.exp(-span / ease);
-    clock.time = (clock.time + target * span + (clock.speed - target) * ease * (1 - k)) % 3600;
-    clock.speed = target + (clock.speed - target) * k;
-  };
-  if (clock.clocked) {
-    const turn = Math.min(Math.max(clock.stirred + STIR_HOLD, clock.clocked), t);
-    run(1, STIR_RISE, turn - clock.clocked);
-    run(0, STIR_FALL, t - turn);
-  }
+  if (clock.clocked) clock.time = (clock.time + t - clock.clocked) % 3600;
   clock.clocked = t;
-  if (clock.speed < STIR_STILL && t - clock.stirred >= STIR_HOLD) clock.speed = 0;
-  return changed || clock.speed > 0 || impulses.length > 0 || voice > 0 || speaking;
 }
 
 // The scene as the engine hands it to the film; `empty`, a desktop with no
@@ -516,7 +496,7 @@ function glassBox(tex, box, alpha) {
   draw();
 }
 
-// Frames only while something moves, as the engine asks for them.
+// A frame asks for the next while a film is drawn, as the engine's do.
 let frameAsked = false, last = 0;
 function wake() { if (!frameAsked) { frameAsked = true; requestAnimationFrame(frame); } }
 function frame() {
@@ -530,9 +510,9 @@ function frame() {
   }
   const t = now(), dt = last ? t - last : 0;
   last = t;
-  const going = step(t, dt);
+  step(t, dt);
   render(t);
-  if (going) wake(); else last = 0;
+  wake();
 }
 
 // ---- Hands on the desktop

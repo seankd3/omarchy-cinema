@@ -2,7 +2,7 @@
 
 **Sentence:** the backdrop moves once per frame the display shows, by that
 frame's own time, and each frame draws only what its look needs, so motion is
-smooth at the display's rate and a still desktop costs nothing.
+smooth at the display's rate at the least cost that keeps the look.
 
 The aim is a backdrop as light as it can be while it looks as good as it
 can, even on a very slow GPU. The design point is a GPU at about 754 MHz
@@ -97,29 +97,28 @@ per cell (a pass and a texture for one film, and the cell's answer
 is not constant over a cell, since the held honeycomb shifts per pixel; up
 to 209 levels on a drag).
 
-## Still at rest
+## The world keeps moving
 
-**Sentence:** the world's own motion runs on the desktop's clock, so a still
-desktop draws nothing.
+**Sentence:** the world's own motion runs on the wall clock wherever it is
+seen, so it never stops and starts.
 
-`time` (contract.glsl) runs at a speed that eases toward 1 over 0.15 s while
-the scene (the windows, the focus, the panels' room) changed in the last
-0.05 s on some monitor, and toward 0 over 0.5 s after; below 0.005 it stops,
-about 2.6 s after the last change, inside the 3 s an answer lives anyway. The
-rise ends at a fixed time after the last stir, so a late frame never jumps
-it. Any change of the scene or the answers draws the world whole, glass and
-frost included; otherwise the half-size world and the frost are kept, a
-client's damage gets the full-size world as it was, and nothing asks for a
-frame. The agents' text joins the world only when it is drawn whole. Time
-stands still with animations off, the session locked, or every monitor
-asleep or fullscreen.
+`time` (contract.glsl) runs at the wall clock's speed, read at each frame's
+render.pre, on every monitor where the world moves; each frame shown there
+asks for the next, and draws the world whole. With animations off, the
+session locked, or every monitor asleep or fullscreen, time stands still and
+nothing asks: the world is drawn again only when the scene or the answers
+change, the half-size world and its frost are kept, and a client's damage
+gets the full-size world as it was. When the world is seen again, time goes
+on from where it stood. The agents' text joins the world only when it is
+drawn whole.
 
-It replaced a pace per 32 px tile (contract 6): five films change all over
-the screen every frame, so tiles drew most of it anyway (45 to 54 frames a
-second at rest). At 1440x900 at rest, frames a second and GPU ms a second,
-tiles against this: Jarvis 43.4 and 91.4 against 1.1 and 0.4, Evangelion
-50.2 and 114.0 against 1.0 and 0.2, the rest alike; a stock theme with the
-plugin idle 1.0 and 0.6, with no plugin 2.0 frames.
+It replaced a clock that ran only while the desktop changed and eased to a
+stop 2.6 s after (contract 7 to 15): a window streaming text made the film
+move, stop and move again. A film rate below the display's at rest was
+weighed and not built: every film moves something at 190 to 1200 logical px
+a second (Tron's runner round the focused window the fastest), which at 60
+frames on a 120 Hz screen steps 3 to 20 px a shown frame, and a rate below
+the display's needs a timer held to its vblanks.
 
 ## Measuring
 
