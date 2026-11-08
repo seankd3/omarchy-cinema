@@ -50,6 +50,7 @@ void main() {
 DITHER = (ROOT / "plugin/dither.glsl").read_text()
 BACKDROP_MAIN = DITHER + (ROOT / "plugin/main-backdrop.glsl").read_text()
 FRAME_MAIN = (ROOT / "plugin/main-frame.glsl").read_text()
+FROST = (ROOT / "plugin/frost.glsl").read_text().replace("#version 300 es", "#version 330 core")
 # Hyprland's own window shader, from the installed build's headers, as the
 # plugin takes it from the running build (main.cpp, glassShaderSource()).
 SHADERS = Path("/usr/include/hyprland/src/render/shaders")
@@ -216,10 +217,11 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
 
 
 def coarse(theme):
-    """The coarse world's size and levels, and its frost's level at the
-    screen's size, as main.cpp's coarse() works them out."""
+    """The coarse world's size and levels, and the level the glass reads its
+    frost at, at the screen's size, as main.cpp's coarse() and frost() work
+    them out."""
     c = model("coarse", setting(theme, "frost", 3), PIXELS, PIXELS[0] / LOGICAL[0])
-    return tuple(c["size"]), c["levels"], c["frost"]
+    return tuple(c["size"]), c["levels"], c["read"]
 
 
 def coarse_world(ctx, theme, t, windows, focused, **answers):
@@ -232,6 +234,21 @@ def coarse_world(ctx, theme, t, windows, focused, **answers):
     world.build_mipmaps(0, levels - 1)
     world.filter = (moderngl.LINEAR_MIPMAP_NEAREST, moderngl.LINEAR)
     return world
+
+
+def frosted(ctx, theme, world):
+    """The frost the glass reads, as main.cpp's frost() draws it (frost.glsl):
+    the coarse world's last level over the level read, in 8 bits."""
+    _, levels, read = coarse(theme)
+    size = (PIXELS[0] >> read, PIXELS[1] >> read)
+    frost = ctx.texture(size, 4)
+    program = ctx.program(vertex_shader=VERTEX, fragment_shader=FROST)
+    program["resolution"].value, program["drawnWorld"].value, program["frostLevel"].value = size, 0, levels - 1
+    world.use(0)
+    ctx.framebuffer([frost]).use()
+    quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
+    ctx.vertex_array(program, [(quad, "2f", "pos")]).render(moderngl.TRIANGLE_STRIP)
+    return frost
 
 
 def render(theme, t, windows, focused, frame=None, **answers):
@@ -319,8 +336,7 @@ void main() {
 
 def glass(theme, image, t, windows, focused, border=True, **answers):
     """`image` with the windows over it as the film's glass shows them: the
-    plugin's frost (the coarse world softened through its mipmap as far as
-    the film's frost, that level read in 8 bits, frost() in main.cpp),
+    plugin's frost (frosted()),
     then each window, 0.999 opaque, drawn by Hyprland's window shader with
     the glass in it: its background the theme's, a block of text lines in
     the foreground and muted colours, and a lit border on the focused one
@@ -331,9 +347,7 @@ def glass(theme, image, t, windows, focused, border=True, **answers):
     scale = PIXELS[0] / LOGICAL[0]
     ctx = moderngl.create_standalone_context(backend="egl", require=330)
     quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
-    _, levels, level = coarse(theme)
-    world = coarse_world(ctx, theme, t, windows, focused, **answers)
-    frost = ctx.texture((PIXELS[0] >> level, PIXELS[1] >> level), 4, world.read(level=levels - 1))
+    frost = frosted(ctx, theme, coarse_world(ctx, theme, t, windows, focused, **answers))
 
     shown = ctx.texture(PIXELS, 4, image.convert("RGBA").transpose(Image.FLIP_TOP_BOTTOM).tobytes())
     ctx.framebuffer([shown]).use()

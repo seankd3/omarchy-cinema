@@ -120,12 +120,13 @@ var Scene = (function () {
   }
 
   // How the coarse world is drawn for a film's frost (Hyprland's blur size)
-  // on a screen `pixels` wide at `scale`: its size, its levels, and the level
-  // that is the frost, as main.cpp's coarse() works them out.
+  // on a screen `pixels` wide at `scale`: its size, its levels, the level
+  // that is the frost, and the level the glass reads it at, as main.cpp's
+  // coarse() and frost() work them out.
   function coarse(frost, pixels, scale) {
     const level = Math.min(Math.max(Math.floor(Math.log2(Math.max(2 * frost * scale, 1)) + 0.5), 1), 6);
     const k = Math.min(level - 1, 1);
-    return { size: pixels.map(p => -Math.floor(-p / 2 ** (level - k))), levels: k + 1, frost: level };
+    return { size: pixels.map(p => -Math.floor(-p / 2 ** (level - k))), levels: k + 1, frost: level, read: Math.max(level - 1, 1) };
   }
 
   // The text a film draws with no agent's turned on: its own backdrop.frag as

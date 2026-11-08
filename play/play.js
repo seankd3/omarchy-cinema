@@ -11,7 +11,7 @@ const BAR = 26, BORDER = 2, BAND = 48;
 const FOCUS_EASE = 0.32, VELOCITY_EASE = 0.08, IMPULSE_LIFE = 3, FADE = 0.2;
 
 const text = async url => { const r = await fetch(url); if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.text(); };
-const engine = Object.fromEntries(await Promise.all(["contract", "dither", "glass", "main-backdrop", "main-frame"].map(async n => [n, await text(ENGINE + n + ".glsl")])));
+const engine = Object.fromEntries(await Promise.all(["contract", "dither", "glass", "main-backdrop", "main-frame", "frost"].map(async n => [n, await text(ENGINE + n + ".glsl")])));
 const version = /^\/\/ omarchy-cinema contract (\d+)/m.exec(engine.contract)[1];
 
 const canvas = $("desk");
@@ -120,6 +120,7 @@ gl.enableVertexAttribArray(0);
 gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 const ubo = gl.createBuffer();
 const ring = compile(RING);
+const frost = compile(engine.frost);
 
 function texture(width, height, internal, format, type, data, filter = gl.LINEAR) {
   const t = gl.createTexture();
@@ -331,14 +332,16 @@ function scene(t, empty) {
 
 // ---- Drawing
 
-let coarse = null;    // { texture, fb, size, levels, frost, frostTex, frostFb, frostSize }
+let coarse = null;    // { texture, fb, size, levels, frost, read, frostTex, frostFb, frostSize }
 const apps = new Map();
 
 function targets(target) {
   const c = Scene.coarse(film.frost, [target.width, target.height], scale);
-  const key = `${c.size} ${c.levels} ${c.frost}`;
+  // The frost the glass reads, in 8 bits as Hyprland keeps it.
+  const frostSize = [target.width, target.height].map(p => Math.max(1, p >> c.read));
+  const key = `${c.size} ${c.levels} ${frostSize}`;
   if (coarse && coarse.key === key) return coarse;
-  if (coarse) { gl.deleteTexture(coarse.texture); gl.deleteTexture(coarse.frostTex); gl.deleteFramebuffer(coarse.fb); gl.deleteFramebuffer(coarse.read); gl.deleteFramebuffer(coarse.frostFb); }
+  if (coarse) { gl.deleteTexture(coarse.texture); gl.deleteTexture(coarse.frostTex); gl.deleteFramebuffer(coarse.fb); gl.deleteFramebuffer(coarse.frostFb); }
   const world = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, world);
   gl.texStorage2D(gl.TEXTURE_2D, c.levels, gl.RGB10_A2, ...c.size);
@@ -349,16 +352,11 @@ function targets(target) {
   const fb = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, world, 0);
-  // The frost: the coarse world's last level, in 8 bits as Hyprland keeps it.
-  const frostSize = c.size.map(p => Math.max(1, p >> (c.levels - 1)));
-  const read = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, read);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, world, c.levels - 1);
   const frostTex = texture8(frostSize);
   const frostFb = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, frostFb);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, frostTex, 0);
-  coarse = { key, texture: world, fb, read, frostTex, frostFb, frostSize, ...c };
+  coarse = { key, texture: world, fb, frostTex, frostFb, frostSize, ...c };
   return coarse;
 }
 const texture8 = ([w, h]) => texture(w, h, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, null);
@@ -426,7 +424,8 @@ function render(t, target = { fb: null, width: canvas.width, height: canvas.heig
   gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, ubo);
   gl.disable(gl.BLEND);
 
-  // The coarse world, its mipmap down to the frost, and the frost in 8 bits.
+  // The coarse world, its mipmap down to the frost, and the frost the glass
+  // reads (frost.glsl), in 8 bits.
   gl.bindTexture(gl.TEXTURE_2D, null);
   gl.bindFramebuffer(gl.FRAMEBUFFER, c.fb);
   gl.viewport(0, 0, ...c.size);
@@ -435,9 +434,11 @@ function render(t, target = { fb: null, width: canvas.width, height: canvas.heig
   draw();
   gl.bindTexture(gl.TEXTURE_2D, c.texture);
   gl.generateMipmap(gl.TEXTURE_2D);
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, c.read);
-  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, c.frostFb);
-  gl.blitFramebuffer(0, 0, ...c.frostSize, 0, 0, ...c.frostSize, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, c.frostFb);
+  gl.viewport(0, 0, ...c.frostSize);
+  gl.useProgram(frost.p);
+  set(frost, { resolution: c.frostSize, area: [0, 0, ...c.frostSize], drawnWorld: 2, frostLevel: c.levels - 1 });
+  draw();
 
   // The world at the screen's size.
   gl.bindFramebuffer(gl.FRAMEBUFFER, target.fb);

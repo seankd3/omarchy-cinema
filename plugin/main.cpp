@@ -131,6 +131,9 @@ void main() {
     const char* GLASS =
 #include "glass.inc"
         ;
+    const char* FROST =
+#include "frost.inc"
+        ;
     // How far outside a window its frame may draw, in logical px.
     constexpr double FRAME_BAND = 48.0;
 
@@ -215,13 +218,13 @@ void main() {
         bool                                  stale = true;
     };
 
-    // One of the plugin's programs (the film's backdrop and frame) and where
+    // One of the plugin's programs (the film's backdrop and frame, the frost) and where
     // its uniforms are, each named as its shader names it; one a program
     // lacks is -1, which GL ignores.
 #define UNIFORMS(X)                                                                                                                                               \
     X(proj) X(area) X(resolution) X(time) X(accent) X(background) X(focused) X(reserved) X(windowCount) X(focusedIndex) X(focusAlpha) X(feed)     \
         X(feedCount) X(feedPos) X(glyphs) X(impulses) X(impulseKinds) X(impulseWindows) X(impulseCount) X(voice) X(frameWindow) X(frameAlpha) X(frameBorder) \
-            X(drawnWorld) X(worldProj) X(spread)
+            X(drawnWorld) X(worldProj) X(spread) X(frostLevel)
     struct SProgram {
         GLuint id = 0;
 #define DECLARE(name) GLint name = -1;
@@ -238,7 +241,8 @@ void main() {
     struct SCoarse {
         GLuint                texture = 0, feed = 0;
         std::array<GLuint, 2> fbo{}; // drawing it, and the frost
-        // Its last level is the frost, level `frost` at the monitor's size.
+        // Its last level is the frost, level `frost` at the monitor's size;
+        // the glass reads it a level finer (frost()).
         int      width = 0, height = 0, levels = 0, frost = 0;
         Mat3x3   proj;
         uint64_t feedUploaded = 0;
@@ -303,7 +307,7 @@ void main() {
     struct SGpu {
         GLuint   vao = 0, vbo = 0, windows = 0, glyphs = 0;
         bool     glyphsUploaded = false;
-        SProgram backdrop, frame;
+        SProgram backdrop, frame, frost;
         std::unordered_map<MONITORID, SCoarse> coarse;
     };
 
@@ -579,7 +583,7 @@ void main() {
 
     void deleteProgram() {
         auto& gpu = g->gpu;
-        for (const auto program : {gpu.backdrop.id, gpu.frame.id})
+        for (const auto program : {gpu.backdrop.id, gpu.frame.id, gpu.frost.id})
             if (program)
                 glDeleteProgram(program);
         for (const auto buffer : {gpu.vbo, gpu.windows})
@@ -640,7 +644,7 @@ void main() {
             return g->gpu.backdrop.id != 0;
         g->compiled = g->generation;
         deleteProgram();
-        if (g->source.empty() || !link(g->gpu.backdrop, g->source + BACKDROP_MAIN, "the theme's backdrop.frag"))
+        if (g->source.empty() || !link(g->gpu.backdrop, g->source + BACKDROP_MAIN, "the theme's backdrop.frag") || !link(g->gpu.frost, FROST, "the frost"))
             return false;
         if (g->framed)
             link(g->gpu.frame, g->source + FRAME_MAIN, "the theme's frame()");
@@ -1356,35 +1360,42 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         return blur->getTexture() == coarse.frosted.lock() && coarse.frostedAs == std::tuple{blur->m_size, blur->m_drmFormat, coarse.frost};
     }
 
-    // The glass's frost: the coarse world's last level, copied into the level
-    // of its size of Hyprland's blur texture, which every read of it is held
-    // to, so each reader samples it by its own coordinates and nothing is
-    // copied screen-sized. Level 0 stays Hyprland's (forget()). It leaves the
-    // coarse world's framebuffer bound.
+    // The glass's frost: the coarse world's last level, drawn (frost.glsl)
+    // into the level a finer of Hyprland's blur texture, level 1 at most,
+    // which every read of it is held to, so each reader samples it by its own
+    // coordinates and nothing is drawn screen-sized. Level 0 stays Hyprland's
+    // (forget()). It leaves the viewport and the draw framebuffer its own.
     void frost(SCoarse& coarse, const SP<Render::IFramebuffer>& blur) {
         const auto glass = blur->getTexture();
-        const int  last  = coarse.levels - 1;
+        const int  read  = std::max(coarse.frost - 1, 1);
         glActiveTexture(GL_TEXTURE4);
-        glBindTexture(GL_TEXTURE_2D, coarse.texture);
-        glGenerateMipmap(GL_TEXTURE_2D);
-        glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.texture, last);
         if (!frosts(coarse, blur)) {
-            // Its levels down to the frost's, made from level 0 as it is.
+            // Its levels down to the one read, made from level 0 as it is.
             glBindTexture(GL_TEXTURE_2D, glass->m_texID);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, coarse.frost);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, read);
             glGenerateMipmap(GL_TEXTURE_2D);
-            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, coarse.frost);
-            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, coarse.frost);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, read);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, read);
             glass->minFilter = GL_LINEAR_MIPMAP_NEAREST;
             glass->setTexParameter(GL_TEXTURE_MIN_FILTER, glass->minFilter);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.fbo[1]);
-            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glass->m_texID, coarse.frost);
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glass->m_texID, read);
             coarse.frosted   = glass;
             coarse.frostedAs = {blur->m_size, blur->m_drmFormat, coarse.frost};
         }
+        glBindTexture(GL_TEXTURE_2D, coarse.texture);
+        glGenerateMipmap(GL_TEXTURE_2D);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.fbo[1]);
-        glBlitFramebuffer(0, 0, std::max(coarse.width >> last, 1), std::max(coarse.height >> last, 1), 0, 0, std::max(int(blur->m_size.x) >> coarse.frost, 1),
-                          std::max(int(blur->m_size.y) >> coarse.frost, 1), GL_COLOR_BUFFER_BIT, GL_LINEAR);
+        const int width = std::max(int(blur->m_size.x) >> read, 1), height = std::max(int(blur->m_size.y) >> read, 1);
+        glViewport(0, 0, width, height);
+        const auto& p = g->gpu.frost;
+        glUseProgram(p.id);
+        glUniformMatrix3fv(p.proj, 1, GL_TRUE, std::array<float, 9>{2, 0, -1, 0, 2, -1, 0, 0, 1}.data());
+        glUniform4f(p.area, 0, 0, 1, 1);
+        glUniform2f(p.resolution, width, height);
+        glUniform1i(p.drawnWorld, 4);
+        glUniform1i(p.frostLevel, coarse.levels - 1);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
 
     // What the plugin's passes share: they read no blur of Hyprland's, and

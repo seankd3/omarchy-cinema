@@ -39,9 +39,16 @@ Hyprland only composites.
 - **The plugin makes the frost.** The backdrop draws the world at twice
   the size of the level as soft as the film's `frost` (Tron's grid takes
   the mean over each pixel's width, contract.glsl's `spread`, or it floods
-  the frost), and makes that level, at its own size, the one level of Hyprland's blur texture that is read:
-  every reader samples it where it reads the screen, so Hyprland queues no
-  blur and nothing is copied screen-sized (0.35 to 0.45 ms). The bar and the
+  the frost), and draws that level into the level a finer of Hyprland's
+  blur texture, the one level that is read: every reader samples it where it
+  reads the screen, so Hyprland queues no blur and nothing is copied
+  screen-sized (0.35 to 0.45 ms). It is drawn by a cubic B-spline
+  (plugin/frost.glsl): read bilinear at its own level, 8 px texels at
+  2880x1800, the frost showed each texel's corners as steps along a line and
+  beads on it, and so did the exact frost read that way; a level finer, a
+  reader's bilinear adds no crease. A B-spline is wider than bilinear: the
+  frost's spread goes from 4.0 to 5.4 px. The Matrix's frost, level 1, is
+  drawn as it is. The bar and the
   notifications read the same frost (film.lua's xray rule): their layers
   cover the screen or stay mapped empty down its edge, and a live blur under
   them cost 0.8 ms every frame. A notification over a window shows the
