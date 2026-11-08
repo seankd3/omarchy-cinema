@@ -48,11 +48,18 @@ Hyprland only composites.
   beads on it, and so did the exact frost read that way; a level finer, a
   reader's bilinear adds no crease. A B-spline is wider than bilinear: the
   frost's spread goes from 4.0 to 5.4 px. The Matrix's frost, level 1, is
-  drawn as it is. The bar and the
+  drawn as it is. The bar, the dock and the
   notifications read the same frost (film.lua's xray rule): their layers
-  cover the screen or stay mapped empty down its edge, and a live blur under
-  them cost 0.8 ms every frame. A notification over a window shows the
-  world's frost through its card.
+  cover the screen or stay mapped empty down its edges, and a live blur under
+  them runs every frame (0.8 ms under the bar; +0.30 ms a frame at rest
+  under the notifications' empty strip, Tron at 2880x1800, GPU about
+  2400 MHz). A notification over a window shows the world's frost through
+  its card (#37). Every other surface of Omarchy's shell is mapped only
+  while it shows, over the windows, and blurs what is under it live, the
+  windows too: a menu, a picker or the OSD costs a blur of the screen every
+  frame it is open. Its scrim stays a plain dim: every layer's line between
+  scrim and card (ignore_alpha) is 0.8, above the shell's deepest scrim
+  (0.78) and under its cards (0.95 to 1).
 - **The glass is opaque, and says so.** In a film session a frosted window's
   pixels all come out opaque (frosted() in main.cpp), so each adds, under its
   surface, an element whose opaque region is its glass. Hyprland's own
