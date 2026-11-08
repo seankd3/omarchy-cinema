@@ -225,6 +225,9 @@ let order = [];       // ids, bottom to top
 let focusedId = null, focus = { from: null, moved: -1e9, alphaFrom: 0, source: null };
 let impulses = [];    // { at, start, strength, kind, id }
 let clock = { time: 12, clocked: 0 };
+// Time stands still while the page is not seen, as the engine's does while no
+// screen shows the world.
+document.addEventListener("visibilitychange", () => { clock.clocked = 0; });
 let voice = 0, speaking = false, nextId = 1;
 const now = () => performance.now() / 1000;
 
@@ -240,7 +243,6 @@ function open(rect, title) {
   order.push(w.id);
   impulse(w, Scene.OPEN, 1);
   focusOn(w);
-  wake();
 }
 function close(w) {
   if (w.closed) return;
@@ -249,14 +251,12 @@ function close(w) {
   const rest = order.filter(id => id !== w.id && !byId(id).closed);
   focusedId = null;
   if (rest.length) focusOn(byId(rest[rest.length - 1]));
-  wake();
 }
 function focusOn(w) {
   if (focusedId === w.id) return;
   focusedId = w.id;
   order = order.filter(id => id !== w.id).concat(w.id);
   impulse(w, Scene.FOCUS, 0.6);
-  wake();
 }
 const byId = id => windows.find(w => w.id === id);
 
@@ -274,7 +274,6 @@ function arrange() {
     focusOn(windows[0]);
     impulses = [];
   }
-  wake();
 }
 
 // One frame of motion: velocities ease toward the move, lift toward focus,
@@ -532,14 +531,13 @@ canvas.addEventListener("pointermove", e => {
   if (!drag) return;
   const p = at(e);
   drag.w.rect = [drag.rect[0] + p[0] - drag.from[0], drag.rect[1] + p[1] - drag.from[1], drag.rect[2], drag.rect[3]];
-  wake();
 });
-canvas.addEventListener("pointerup", () => { drag = null; wake(); });
+canvas.addEventListener("pointerup", () => { drag = null; });
 $("open").onclick = () => {
   const w = Math.round(size[0] * 0.36), h = Math.round(size[1] * 0.42), n = windows.length;
   open([size[0] * 0.2 + (n * 37) % (size[0] * 0.4), BAR + 40 + (n * 29) % (size[1] * 0.3), w, h], "Window " + nextId);
 };
-const hold = on => { speaking = on; wake(); };
+const hold = on => { speaking = on; };
 $("speak").onpointerdown = () => hold(true);
 $("speak").onpointerup = $("speak").onpointerleave = () => hold(false);
 addEventListener("keydown", e => {
@@ -584,7 +582,6 @@ $("still").onclick = async () => {
   c.getContext("2d").putImageData(new ImageData(rows, width, height), 0, 0);
   const blob = await c.convertToBlob({ type: "image/png" });
   Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `0-${nameOf(film.source).replace(/ /g, "-")}.png` }).click();
-  wake();
 };
 
 // ---- Films: this repo's, the others with the topic, or any by URL

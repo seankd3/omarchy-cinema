@@ -329,7 +329,7 @@ void main() {
         // The world's clock (advance()): seconds of its own motion, wrapping
         // hourly, and when it last ran on (none once the world stood still
         // everywhere).
-        float                                   time = 0;
+        double                                  time = 0;
         Clock::time_point                       clocked;
         std::unordered_map<MONITORID, SMonitor> monitors;
         std::unordered_map<uint64_t, SMotion>   motion; // each window's, by stable id
@@ -967,7 +967,7 @@ void main() {
         if (!answering())
             letGo();
         const float voice = now - g->voiceReceived <= VOICE_STALE ? g->voice : 0.F;
-        return {g->impulseGeneration, voice, g->agents, g->time};
+        return {g->impulseGeneration, voice, g->agents, float(g->time)};
     }
 
     bool covered(PHLMONITOR monitor) {
@@ -1686,7 +1686,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
     // (contract.glsl, `time`).
     void advance(Clock::time_point now) {
         if (g->clocked != Clock::time_point{})
-            g->time = float(std::fmod(g->time + seconds(now - g->clocked), 3600.0));
+            g->time = std::fmod(g->time + seconds(now - g->clocked), 3600.0);
         g->clocked = now;
     }
 
