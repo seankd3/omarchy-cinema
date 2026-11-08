@@ -52,17 +52,14 @@ very frame redraws the backdrop and the glass. Windows reach the shader as a
 uniform block, up to 256 on a monitor (specs/smoothness.md), and each pixel
 reads and measures once each window that reaches it (contract.glsl's `window()` and `REACH`).
 
-**Still at rest.** The world's own motion runs on a clock of the desktop's
-(contract.glsl, `time`): while windows move, open, close, take focus or slide
-between workspaces it runs at the wall clock's speed, and once they hold still
-it eases to a stop in about two seconds. A desktop holding still therefore
-draws nothing and asks for no frames: what clients redraw (a cursor, a clock)
-gets the world as it was, and the world at half size and the frost made from
-it are kept until the world changes. While a window, the focus,
-voice, an answer or the agents' text coming or going changes, or the clock
-runs, the whole world is drawn every frame. Time stands still with
-animations off, the session locked, or every monitor asleep or fullscreen
-(specs/smoothness.md, "Still at rest").
+**The world keeps moving.** The world's own motion runs on the wall clock
+(contract.glsl, `time`) wherever it is seen, and each frame there draws it
+whole, glass and frost included, and asks for the next. Time stands still with
+animations off, the session locked, or every monitor asleep or fullscreen;
+then the world is drawn again only when a window, the focus, voice, an
+answer or the agents' text changes, and what clients redraw (a cursor, a
+clock) gets the world as it was, the world at half size and its frost kept
+(specs/smoothness.md, "The world keeps moving").
 
 **Theme switch.** `omarchy-theme-set` swaps `current/theme` and reloads
 Hyprland. The plugin reads `backdrop.frag` and `colors.toml` from

@@ -83,7 +83,8 @@ this frame, at half size (`worldAt()`).
   monitor in this frame, and leave the glass to the next frame the world
   moves in.
 
-At rest the plugin draws nothing (specs/smoothness.md, "Still at rest").
+While the world moves it is drawn whole every frame anyway; while time
+stands still, only on these (specs/smoothness.md, "The world keeps moving").
 
 ## Not built
 
