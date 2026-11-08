@@ -358,7 +358,9 @@ const apps = new Map();
 
 function targets(target) {
   const c = Scene.coarse(film.frost, [target.width, target.height], scale);
-  const key = `${c.size} ${c.levels} ${c.frost}`;
+  // The frost the glass reads, in 8 bits as Hyprland keeps it.
+  const frostSize = [target.width, target.height].map(p => Math.max(1, p >> c.read));
+  const key = `${c.size} ${c.levels} ${frostSize}`;
   if (coarse && coarse.key === key) return coarse;
   if (coarse) { gl.deleteTexture(coarse.texture); gl.deleteTexture(coarse.frostTex); gl.deleteFramebuffer(coarse.fb); gl.deleteFramebuffer(coarse.frostFb); }
   const world = gl.createTexture();
@@ -371,8 +373,6 @@ function targets(target) {
   const fb = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, world, 0);
-  // The frost the glass reads, in 8 bits as Hyprland keeps it.
-  const frostSize = [target.width, target.height].map(p => Math.max(1, p >> c.read));
   const frostTex = texture8(frostSize);
   const frostFb = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, frostFb);
