@@ -18,6 +18,16 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get install -y -qq glslang-tools
       - run: tools/check-film themes/*/
+      - run: glslangValidator -S frag plugin/frost.glsl
+  # The frost keeps a moving light's glow with it (tools/frost-check), drawn
+  # by Mesa's software renderer.
+  frost:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y -qq libegl1 libegl-mesa0 libgl1-mesa-dri
+      - uses: astral-sh/setup-uv@v6
+      - run: tools/frost-check
   package:
     strategy:
       fail-fast: false
