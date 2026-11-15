@@ -1,0 +1,125 @@
+#!/usr/bin/env -S uv run -q --script
+# /// script
+# dependencies = ["moderngl", "numpy", "quickjs"]
+# ///
+"""Holds the glass's frost to what it is for: light behind the glass, moving,
+shows through it as a glow that moves with it. The frost once moved a glow up
+to 1.9 px from its light and pulsed it 32% as the light crossed its texels,
+which read as low resolution and lag. This makes the frost as the plugin
+does (plugin/frost.glsl, by play/scene.js's plan), and reads it as the glass
+does (plugin/glass.glsl), from a small light swept
+across the world in quarter pixels, and fails when, for any of Hyprland's
+blur sizes 1 to 8 (film.lua's frost), the glow leaves its light by more than
+half a pixel, pulses by more than 3%, or is more than 5% off the width
+Hyprland's own blur of that size has (scene.js, frostWidth()).
+
+    tools/frost-check
+
+It draws on the GPU, so outside CI it runs in tools/yield. In CI it draws on
+Mesa's software renderer.
+"""
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import moderngl
+import numpy as np
+import quickjs
+
+ROOT = Path(__file__).resolve().parent.parent
+if not os.environ.get("CI"):
+    door = str(ROOT / "tools/yield")
+    if subprocess.run([door, "--within"], stdout=subprocess.DEVNULL).returncode:
+        os.execv(door, [door, sys.executable, *sys.orig_argv[1:]])
+
+PIXELS = (1024, 256)  # a strip of screen, which every plan works on
+JS = quickjs.Context()
+JS.eval((ROOT / "play/scene.js").read_text() + "\nfunction call(n, a) { return JSON.stringify(Scene[n](...JSON.parse(a))); }")
+model = lambda name, *args: json.loads(JS.get("call")(name, json.dumps(args)))
+
+VERTEX = """#version 330 core
+in vec2 pos;
+void main() { gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0); }
+"""
+ctx = moderngl.create_standalone_context(backend="egl", require=330)
+program = ctx.program(vertex_shader=VERTEX, fragment_shader=(ROOT / "plugin/frost.glsl").read_text().replace("#version 300 es", "#version 330 core"))
+quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
+vao = ctx.vertex_array(program, [(quad, "2f", "pos")])
+
+
+def frost(plan, world):
+    """The frost the glass reads, made from `world` (float RGBA rows, at the
+    plan's world size) by the plan's steps."""
+    sizes = {"world": plan["sizes"][0], "temp": plan["sizes"][-1], "read": [PIXELS[0] >> plan["read"], PIXELS[1] >> plan["read"]]}
+    sizes.update({k: s for k, s in enumerate(plan["sizes"][1:], 1)})
+    textures = {str(k): ctx.texture(tuple(s), 4, dtype="f4") for k, s in sizes.items()}
+    textures["world"].write(world.astype("f4").tobytes())
+    for texture in textures.values():
+        texture.repeat_x = texture.repeat_y = False
+    for step in plan["steps"]:
+        target = textures[str(step["to"])]
+        ctx.framebuffer([target]).use()
+        textures[str(step["from"])].use(0)
+        program["source"].value, program["resolution"].value, program["kernel"].value = 0, target.size, step["kernel"]
+        if step["kernel"] == 1:
+            program["sigma"].value, program["along"].value = step["sigma"], tuple(step["along"])
+        vao.render(moderngl.TRIANGLE_STRIP)
+    out = np.frombuffer(textures["read"].read(), dtype="f4").reshape(sizes["read"][1], sizes["read"][0], 4)[..., 0]
+    for texture in textures.values():
+        texture.release()
+    return out
+
+
+def shown(read):
+    """The frost as the glass shows it at the screen's pixels: read by a
+    cubic B-spline (plugin/glass.glsl, cinemaFrost()), clamped at the edges."""
+    def spline(n, size):
+        t = (np.arange(size) + 0.5) * n / size - 0.5
+        m = np.zeros((size, n))
+        for k in range(-1, 3):
+            i = np.floor(t) + k
+            d = np.abs(t - i)
+            w = np.where(d < 1, 2 / 3 - d * d + d ** 3 / 2, np.where(d < 2, (2 - d) ** 3 / 6, 0))
+            np.add.at(m, (np.arange(size), np.clip(i, 0, n - 1).astype(int)), w)
+        return m
+    h, w = read.shape
+    return spline(h, PIXELS[1]) @ read @ spline(w, PIXELS[0]).T
+
+
+def light(x, y, size):
+    """A light 1 px wide at (x, y) screen px, drawn into a world `size`
+    texels, each texel the light over its own area."""
+    w, h = size
+    tx, ty = PIXELS[0] / w, PIXELS[1] / h
+    gx = (np.arange(w) + 0.5) * tx
+    gy = (np.arange(h) + 0.5) * ty
+    g = np.exp(-0.5 * ((gx[None, :] - x) ** 2 / (1 + tx * tx / 12) + (gy[:, None] - y) ** 2 / (1 + ty * ty / 12)))
+    world = np.zeros((h, w, 4))
+    world[..., 0] = g / g.sum()
+    world[..., 3] = 1
+    return world
+
+
+failed = False
+for size in range(1, 9):
+    plan = model("frost", size, 2, PIXELS)
+    want = model("frostWidth", size, 2)
+    off, peaks, widths = [], [], []
+    for k in range(32):
+        x = 500 + k / 4
+        out = shown(frost(plan, light(x, 128, plan["sizes"][0])))
+        gx = np.arange(PIXELS[0]) + 0.5
+        row = out.sum(axis=0)
+        c = (row * gx).sum() / row.sum()
+        off.append(c - x)
+        peaks.append(out.max())
+        widths.append(np.sqrt((row * (gx - c) ** 2).sum() / row.sum()))
+    off = (max(off) - min(off)) / 2
+    pulse = max(peaks) / min(peaks) - 1
+    width = float(np.mean(widths))
+    ok = off <= 0.5 and pulse <= 0.03 and abs(width / want - 1) <= 0.05
+    failed |= not ok
+    print(f"size {size}: glow off its light ±{off:.2f} px, pulses {100 * pulse:.1f}%, {width:.2f} px wide for {want:.2f}{'' if ok else '  FAILS'}")
+sys.exit(1 if failed else 0)

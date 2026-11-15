@@ -224,32 +224,62 @@ void main() {
 #define UNIFORMS(X)                                                                                                                                               \
     X(proj) X(area) X(resolution) X(time) X(accent) X(background) X(focused) X(reserved) X(windowCount) X(focusedIndex) X(focusAlpha) X(feed)     \
         X(feedCount) X(feedPos) X(glyphs) X(impulses) X(impulseKinds) X(impulseWindows) X(impulseCount) X(voice) X(frameWindow) X(frameAlpha) X(frameBorder) \
-            X(drawnWorld) X(worldProj) X(spread) X(frostLevel)
+            X(drawnWorld) X(worldProj) X(spread) X(source) X(kernel) X(along) X(sigma)
     struct SProgram {
         GLuint id = 0;
 #define DECLARE(name) GLint name = -1;
         UNIFORMS(DECLARE)
     };
 
+    // How a monitor's frost is made (frost(), plugin/frost.glsl, and
+    // play/scene.js's frost(), which it follows): the level of Hyprland's
+    // blur texture the glass reads it at, the sizes of the world drawn for
+    // it and of the levels that is halved to, and the steps. A step reads
+    // level `from` into level `to` by its kernel (0 halves, 1 is a Gaussian
+    // `sigma` texels wide along `along`, 2 doubles); level 0 is the world,
+    // TEMP the last level's size and READ the level the glass reads.
+    constexpr int TEMP = -1, READ = -2;
+    struct SFrostStep {
+        int                  kernel = 0, from = 0, to = 0;
+        float                sigma  = 0;
+        std::array<float, 2> along{};
+        bool                 operator==(const SFrostStep&) const = default;
+    };
+    struct SFrostPlan {
+        int                             read = 1;
+        std::vector<std::array<int, 2>> sizes;
+        std::vector<SFrostStep>         steps;
+        bool                            operator==(const SFrostPlan&) const = default;
+    };
+
     // A monitor's world as it was last drawn whole, kept until the world
-    // changes, with its mipmap down to the glass's frost; `proj` places the
+    // changes, with the levels its frost is made through; `proj` places the
     // monitor in it, for the frames that read it (worldAt()). With it, the
     // agents' text it was drawn with
     // (the feed change, its count and next position), so a part of the
     // screen drawn again while the world stands still shows the text the
     // kept world does.
     struct SCoarse {
-        GLuint                texture = 0, feed = 0;
-        std::array<GLuint, 2> fbo{}; // drawing it, and the frost
-        // Its last level is the frost, level `frost` at the monitor's size;
-        // the glass reads it a level finer (frost()).
-        int      width = 0, height = 0, levels = 0, frost = 0;
-        Mat3x3   proj;
-        uint64_t feedUploaded = 0;
-        uint32_t feedCount = 0, feedPos = 0;
+        SFrostPlan plan;
+        // A texture and its framebuffer for each of the plan's sizes (the
+        // world first), then for TEMP; and the framebuffer of the level the
+        // glass reads.
+        std::vector<GLuint> textures, fbos;
+        GLuint              feed = 0, frostFbo = 0;
+        Mat3x3              proj;
+        uint64_t            feedUploaded = 0;
+        uint32_t            feedCount = 0, feedPos = 0;
         // The glass's texture holding the frost, as its levels were made.
         WP<Render::ITexture>                 frosted;
         std::tuple<Vector2D, DRMFormat, int> frostedAs;
+
+        GLuint world() const {
+            return textures.empty() ? 0 : textures[0];
+        }
+        // Where a level is kept: its texture's index (TEMP after the levels).
+        size_t at(int level) const {
+            return level == TEMP ? plan.sizes.size() : size_t(level);
+        }
     };
 
     // A pass is a guest in Hyprland's GL context. Hyprland skips binding a
@@ -285,14 +315,25 @@ void main() {
         }
     };
 
+    // Its world and levels deleted, for a new plan's.
+    void forgetLevels(SCoarse& coarse) {
+        glDeleteTextures(coarse.textures.size(), coarse.textures.data());
+        glDeleteFramebuffers(coarse.fbos.size(), coarse.fbos.data());
+        glDeleteFramebuffers(1, &coarse.frostFbo);
+        coarse.textures.clear();
+        coarse.fbos.clear();
+        coarse.frostFbo = 0;
+        coarse.frosted.reset();
+    }
+
     // Its GL objects deleted, and the glass's texture given back to Hyprland:
     // its level 0 read again.
-    void forget(const SCoarse& coarse) {
-        glDeleteFramebuffers(2, coarse.fbo.data());
-        for (const auto texture : {coarse.texture, coarse.feed})
-            if (texture)
-                glDeleteTextures(1, &texture);
-        if (const auto frosted = coarse.frosted.lock()) {
+    void forget(SCoarse coarse) {
+        const auto frosted = coarse.frosted.lock();
+        forgetLevels(coarse);
+        if (coarse.feed)
+            glDeleteTextures(1, &coarse.feed);
+        if (frosted) {
             const SGuest guest;
             glActiveTexture(GL_TEXTURE4);
             glBindTexture(GL_TEXTURE_2D, frosted->m_texID);
@@ -992,17 +1033,53 @@ void main() {
             g->monitors[monitor->m_id].stale = true;
     }
 
-    // How a monitor's coarse world is drawn: its frost as soft as the
-    // glass's (Hyprland's blur size, from the film's frost: two passes spread
-    // a point over about twice its size), each texel from 4 points of the
-    // world, or the half-size world's 1 when that is the frost; its pixels'
-    // width is contract.glsl's spread.
-    SCoarse coarse(const PHLMONITOR& monitor) {
-        static auto SIZE  = CConfigValue<Config::INTEGER>("decoration:blur:size");
-        const int   frost = std::clamp(int(std::round(std::log2(std::max(2.0 * *SIZE * monitor->m_scale, 1.0)))), 1, 6);
-        const int   k     = std::min(frost - 1, 1);
-        const auto  side  = [&](double px) { return (int(px) + (1 << (frost - k)) - 1) >> (frost - k); };
-        return {.width = side(monitor->m_transformedSize.x), .height = side(monitor->m_transformedSize.y), .levels = k + 1, .frost = frost};
+    // How wide Hyprland's blur of `size` and `passes` spreads a point: a
+    // Gaussian's sigma in the screen's pixels (play/scene.js's frostWidth(),
+    // which says how it was found).
+    double frostWidth(int64_t size, int64_t passes) {
+        return passes > 0 ? std::exp2(double(std::min<int64_t>(passes, 8))) * (0.66 * std::max<int64_t>(size, 0) + 0.2) : 0;
+    }
+
+    // The level of Hyprland's blur texture the glass reads the frost at, the
+    // same on every monitor (Hyprland's blur is as wide in each one's
+    // pixels): the world is drawn at its size, at most a quarter of the
+    // screen's, so the frost is at least two of its texels wide.
+    int frostLevel() {
+        static auto SIZE   = CConfigValue<Config::INTEGER>("decoration:blur:size");
+        static auto PASSES = CConfigValue<Config::INTEGER>("decoration:blur:passes");
+        return std::clamp(int(std::floor(std::log2(std::max(frostWidth(*SIZE, *PASSES) / 2, 1.0)))), 1, 2);
+    }
+
+    // A monitor's frost as Hyprland's blur is set (film.lua sets its size
+    // from the film's frost), worked out as play/scene.js's frost() works it.
+    SFrostPlan frostPlan(const PHLMONITOR& monitor) {
+        static auto SIZE   = CConfigValue<Config::INTEGER>("decoration:blur:size");
+        static auto PASSES = CConfigValue<Config::INTEGER>("decoration:blur:passes");
+        const double sigma  = frostWidth(*SIZE, *PASSES);
+        const auto   pixels = monitor->m_transformedSize;
+        SFrostPlan   plan;
+        plan.read          = frostLevel();
+        const auto halve   = [](std::array<int, 2> size, int by) { return std::array{(size[0] + (1 << by) - 1) >> by, (size[1] + (1 << by) - 1) >> by}; };
+        plan.sizes.push_back(halve({int(pixels.x), int(pixels.y)}, plan.read));
+        const auto texel = [&](std::array<int, 2> size) { return pixels.x / size[0]; };
+        double     spent = texel(plan.sizes[0]) * texel(plan.sizes[0]) * 5 / 12;
+        for (;;) {
+            const auto last = plan.sizes.back(), next = halve(last, 1);
+            const auto cost = 1.75 * texel(last) * texel(last) + 0.6875 * texel(next) * texel(next);
+            if (std::min(next[0], next[1]) < 2 || spent + cost > sigma * sigma)
+                break;
+            plan.sizes.push_back(next);
+            spent += cost;
+        }
+        const int   depth = plan.sizes.size() - 1;
+        const float g     = std::max(std::sqrt(std::max(sigma * sigma - spent, 0.0)) / texel(plan.sizes[depth]), 0.25);
+        for (int k = 1; k <= depth; k++)
+            plan.steps.push_back({.kernel = 0, .from = k - 1, .to = k});
+        plan.steps.push_back({.kernel = 1, .from = depth, .to = TEMP, .sigma = g, .along = {1, 0}});
+        plan.steps.push_back({.kernel = 1, .from = TEMP, .to = depth == 0 ? READ : depth, .sigma = g, .along = {0, 1}});
+        for (int k = depth; k >= 1; k--)
+            plan.steps.push_back({.kernel = 2, .from = k, .to = k == 1 ? READ : k - 1});
+        return plan;
     }
 
     // Fills the texture bound on the active unit from `data`, with the
@@ -1269,9 +1346,10 @@ void main() {
         source.insert(at, std::format(R"(// omarchy-cinema glass: see the backdrop plugin.
 const vec3  CINEMA_BACKGROUNDS[{}] = vec3[]({});
 const float CINEMA_GLASS = {:.4f};
+const int   CINEMA_FROST_LEVEL = {};
 const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
 )",
-                                      g->backgrounds.size(), keys, glass, vec3(g->background), vec3(g->muted)) +
+                                      g->backgrounds.size(), keys, glass, frostLevel(), vec3(g->background), vec3(g->muted)) +
                               DITHER + GLASS);
         source.insert(source.find(read), "float cinemaOwn = pixColor.a, cinemaCard = 1.0;\n#if USE_BLUR\n#if USE_DISCARD\n    if (discardAlpha) cinemaCard = smoothstep(discardAlphaValue, 0.95, cinemaOwn);\n#endif\n    pixColor = mix(pixColor, cinemaGlass(pixColor), cinemaCard);\n#endif\n\n");
         source = std::regex_replace(source, std::regex(R"(\w+\.a <= discardAlphaValue)"), "cinemaOwn <= discardAlphaValue");
@@ -1337,7 +1415,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         auto& gpu = g->gpu;
         for (int unit = 0; unit < 3; unit++) {
             glActiveTexture(GL_TEXTURE4 + unit);
-            glBindTexture(GL_TEXTURE_2D, std::array{drawing ? 0 : kept.texture, gpu.glyphs, kept.feed}[unit]);
+            glBindTexture(GL_TEXTURE_2D, std::array{drawing ? 0 : kept.world(), gpu.glyphs, kept.feed}[unit]);
         }
         glBindBufferBase(GL_UNIFORM_BUFFER, 0, gpu.windows);
         set();
@@ -1357,45 +1435,49 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
     // Whether `blur`'s texture holds the frost's levels as they were made:
     // Hyprland makes its level 0 again for a new size or format.
     bool frosts(const SCoarse& coarse, const SP<Render::IFramebuffer>& blur) {
-        return blur->getTexture() == coarse.frosted.lock() && coarse.frostedAs == std::tuple{blur->m_size, blur->m_drmFormat, coarse.frost};
+        return blur->getTexture() == coarse.frosted.lock() && coarse.frostedAs == std::tuple{blur->m_size, blur->m_drmFormat, coarse.plan.read};
     }
 
-    // The glass's frost: the coarse world's last level, drawn (frost.glsl)
-    // into the level a finer of Hyprland's blur texture, level 1 at most,
-    // which every read of it is held to, so each reader samples it by its own
-    // coordinates and nothing is drawn screen-sized. Level 0 stays Hyprland's
-    // (forget()). It leaves the viewport and the draw framebuffer its own.
+    // The glass's frost: the world drawn for it, through the plan's steps
+    // (frost.glsl), into level `read` of Hyprland's blur texture, which every
+    // read of it is held to, so each reader samples it by its own coordinates
+    // and nothing is drawn screen-sized. Level 0 stays Hyprland's (forget()).
+    // It leaves the viewport and the draw framebuffer its own.
     void frost(SCoarse& coarse, const SP<Render::IFramebuffer>& blur) {
-        const auto glass = blur->getTexture();
-        const int  read  = std::max(coarse.frost - 1, 1);
+        const auto  glass = blur->getTexture();
+        const auto& plan  = coarse.plan;
         glActiveTexture(GL_TEXTURE4);
         if (!frosts(coarse, blur)) {
             // Its levels down to the one read, made from level 0 as it is.
             glBindTexture(GL_TEXTURE_2D, glass->m_texID);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, read);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, plan.read);
             glGenerateMipmap(GL_TEXTURE_2D);
-            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, read);
-            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, read);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, plan.read);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, plan.read);
             glass->minFilter = GL_LINEAR_MIPMAP_NEAREST;
             glass->setTexParameter(GL_TEXTURE_MIN_FILTER, glass->minFilter);
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.fbo[1]);
-            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glass->m_texID, read);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.frostFbo);
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glass->m_texID, plan.read);
             coarse.frosted   = glass;
-            coarse.frostedAs = {blur->m_size, blur->m_drmFormat, coarse.frost};
+            coarse.frostedAs = {blur->m_size, blur->m_drmFormat, plan.read};
         }
-        glBindTexture(GL_TEXTURE_2D, coarse.texture);
-        glGenerateMipmap(GL_TEXTURE_2D);
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.fbo[1]);
-        const int width = std::max(int(blur->m_size.x) >> read, 1), height = std::max(int(blur->m_size.y) >> read, 1);
-        glViewport(0, 0, width, height);
         const auto& p = g->gpu.frost;
         glUseProgram(p.id);
         glUniformMatrix3fv(p.proj, 1, GL_TRUE, std::array<float, 9>{2, 0, -1, 0, 2, -1, 0, 0, 1}.data());
         glUniform4f(p.area, 0, 0, 1, 1);
-        glUniform2f(p.resolution, width, height);
-        glUniform1i(p.drawnWorld, 4);
-        glUniform1i(p.frostLevel, coarse.levels - 1);
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        glUniform1i(p.source, 4);
+        const std::array<int, 2> frost{std::max(int(blur->m_size.x) >> plan.read, 1), std::max(int(blur->m_size.y) >> plan.read, 1)};
+        for (const auto& step : plan.steps) {
+            const auto size = step.to == READ ? frost : plan.sizes[step.to == TEMP ? plan.sizes.size() - 1 : step.to];
+            glBindTexture(GL_TEXTURE_2D, coarse.textures[coarse.at(step.from)]);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, step.to == READ ? coarse.frostFbo : coarse.fbos[coarse.at(step.to)]);
+            glViewport(0, 0, size[0], size[1]);
+            glUniform2f(p.resolution, size[0], size[1]);
+            glUniform1i(p.kernel, step.kernel);
+            glUniform1f(p.sigma, step.sigma);
+            glUniform2f(p.along, step.along[0], step.along[1]);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        }
     }
 
     // What the plugin's passes share: they read no blur of Hyprland's, and
@@ -1432,15 +1514,14 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             glBindBuffer(GL_UNIFORM_BUFFER, gpu.windows);
             auto&        state = g->monitors[monitor->m_id];
             uploadShapes(monitor, state.drawn.shapes);
-            // The coarse world and the frost are kept, and drawn again only
-            // when the world changed, or for a new size or frost target.
-            const auto shape     = coarse(monitor);
+            // The world drawn for the frost and the frost are kept, and drawn
+            // again only when the world changed, or for a new plan or frost
+            // target.
+            const auto plan      = frostPlan(monitor);
             auto&      coarse    = gpu.coarse[monitor->m_id];
-            const int  width = shape.width, height = shape.height, levels = shape.levels;
             const auto resources = monitor->resources();
             const auto blur      = resources && resources->m_blurFB && resources->m_blurFB->isAllocated() ? resources->m_blurFB : nullptr;
-            const bool resized   = coarse.width != width || coarse.height != height || coarse.levels != levels || coarse.frost != shape.frost;
-            const bool whole     = resized || state.stale || !blur || !frosts(coarse, blur);
+            const bool whole     = coarse.plan != plan || state.stale || !blur || !frosts(coarse, blur);
             state.stale          = false;
             if (!g->glyphPixels.empty()) {
                 glActiveTexture(GL_TEXTURE5);
@@ -1462,40 +1543,44 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             }
             const auto proj = g_pHyprRenderer->projectBoxToTarget(ctx, CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y});
             const auto set  = [&] { setUniforms(gpu.backdrop, monitor, state.drawn, state.answered, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}); };
-            if (resized) {
-                if (coarse.texture) {
-                    glDeleteTextures(1, &coarse.texture);
-                    glDeleteFramebuffers(2, coarse.fbo.data());
-                }
-                glGenTextures(1, &coarse.texture);
-                glGenFramebuffers(2, coarse.fbo.data());
-                glActiveTexture(GL_TEXTURE4);
-                glBindTexture(GL_TEXTURE_2D, coarse.texture);
-                glTexStorage2D(GL_TEXTURE_2D, levels, GL_RGB10_A2, width, height);
-                // Its levels for the frost, level 0 for the frames (worldAt()).
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-                coarse.width  = width;
-                coarse.height = height;
-                coarse.levels = levels;
-                coarse.frost  = shape.frost;
-            }
-            // The coarse world over all of the monitor, on the same
-            // projection, softened into the glass's frost (frost()).
+            // The world over all of the monitor, on the same projection, at
+            // the size of the level the glass reads, made into the glass's
+            // frost (frost()); Hyprland's framebuffers and viewport put back.
             if (whole) {
                 GLint draw = 0, read = 0;
                 glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
                 glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
                 std::array<GLint, 4> viewport{};
                 glGetIntegerv(GL_VIEWPORT, viewport.data());
-                glBindFramebuffer(GL_FRAMEBUFFER, coarse.fbo[0]);
-                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.texture, 0);
-                glViewport(0, 0, width, height);
+                if (coarse.plan.sizes != plan.sizes) {
+                    // The world (which the frames read too, worldAt()), each
+                    // level it is halved to, and the last's size again (TEMP).
+                    forgetLevels(coarse);
+                    auto sizes = plan.sizes;
+                    sizes.push_back(sizes.back());
+                    coarse.textures.resize(sizes.size());
+                    coarse.fbos.resize(sizes.size());
+                    glGenTextures(sizes.size(), coarse.textures.data());
+                    glGenFramebuffers(sizes.size(), coarse.fbos.data());
+                    glGenFramebuffers(1, &coarse.frostFbo);
+                    glActiveTexture(GL_TEXTURE4);
+                    for (size_t k = 0; k < sizes.size(); k++) {
+                        glBindTexture(GL_TEXTURE_2D, coarse.textures[k]);
+                        glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGB10_A2, sizes[k][0], sizes[k][1]);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                        glBindFramebuffer(GL_FRAMEBUFFER, coarse.fbos[k]);
+                        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.textures[k], 0);
+                    }
+                }
+                coarse.plan = plan;
+                glBindFramebuffer(GL_FRAMEBUFFER, coarse.fbos[0]);
+                glViewport(0, 0, plan.sizes[0][0], plan.sizes[0][1]);
                 coarse.proj = proj;
                 prepare(coarse, true, set);
-                glUniform1f(gpu.backdrop.spread, (1 << (shape.frost - levels + 1)) / monitor->m_scale);
+                glUniform1f(gpu.backdrop.spread, (1 << plan.read) / monitor->m_scale);
                 g_pHyprOpenGL->disableScissor();
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
                 if (blur)

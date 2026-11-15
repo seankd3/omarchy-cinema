@@ -216,39 +216,47 @@ def scene(ctx, theme, t, windows, focused, velocity=None, impulses=(), frame=Non
     return draw
 
 
-def coarse(theme):
-    """The coarse world's size and levels, and the level the glass reads its
-    frost at, at the screen's size, as main.cpp's coarse() and frost() work
-    them out."""
-    c = model("coarse", setting(theme, "frost", 3), PIXELS, PIXELS[0] / LOGICAL[0])
-    return tuple(c["size"]), c["levels"], c["read"]
+def plan(theme):
+    """The frost's plan at the screen's size, as main.cpp's frost() works it
+    out (play/scene.js), for Hyprland's blur as film.lua sets it: the film's
+    frost as its size, with 2 passes."""
+    return model("frost", setting(theme, "frost", 3), 2, PIXELS)
 
 
 def coarse_world(ctx, theme, t, windows, focused, **answers):
-    """The coarse world as the plugin keeps it (RGB10_A2), with its mipmap."""
-    size, levels, _ = coarse(theme)
-    world = ctx.texture(size, 4, internal_format=0x8059)
+    """The world drawn for the frost, as the plugin keeps it (RGB10_A2)."""
+    world = ctx.texture(tuple(plan(theme)["sizes"][0]), 4, internal_format=0x8059)
     world.repeat_x = world.repeat_y = False
     ctx.framebuffer([world]).use()
     scene(ctx, theme, t, windows, focused, **answers)()
-    world.build_mipmaps(0, levels - 1)
-    world.filter = (moderngl.LINEAR_MIPMAP_NEAREST, moderngl.LINEAR)
     return world
 
 
 def frosted(ctx, theme, world):
-    """The frost the glass reads, as main.cpp's frost() draws it (frost.glsl):
-    the coarse world's last level over the level read, in 8 bits."""
-    _, levels, read = coarse(theme)
-    size = (PIXELS[0] >> read, PIXELS[1] >> read)
-    frost = ctx.texture(size, 4)
+    """The frost the glass reads, as main.cpp's frost() makes it from the
+    world (frost.glsl), into the level read, in 8 bits."""
+    p = plan(theme)
+    textures = {"world": world, "read": ctx.texture((PIXELS[0] >> p["read"], PIXELS[1] >> p["read"]), 4)}
+    textures["temp"] = ctx.texture(tuple(p["sizes"][-1]), 4, internal_format=0x8059)
+    for k, size in enumerate(p["sizes"][1:], 1):
+        textures[k] = ctx.texture(tuple(size), 4, internal_format=0x8059)
+    for texture in textures.values():
+        texture.repeat_x = texture.repeat_y = False
     program = ctx.program(vertex_shader=VERTEX, fragment_shader=FROST)
-    program["resolution"].value, program["drawnWorld"].value, program["frostLevel"].value = size, 0, levels - 1
-    world.use(0)
-    ctx.framebuffer([frost]).use()
     quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
-    ctx.vertex_array(program, [(quad, "2f", "pos")]).render(moderngl.TRIANGLE_STRIP)
-    return frost
+    vao = ctx.vertex_array(program, [(quad, "2f", "pos")])
+    program["source"].value = 0
+    for step in p["steps"]:
+        target = textures[step["to"]]
+        ctx.framebuffer([target]).use()
+        textures[step["from"]].use(0)
+        program["resolution"].value = target.size
+        program["kernel"].value = step["kernel"]
+        if step["kernel"] == 1:
+            program["sigma"].value = step["sigma"]
+            program["along"].value = tuple(step["along"])
+        vao.render(moderngl.TRIANGLE_STRIP)
+    return textures["read"]
 
 
 def render(theme, t, windows, focused, frame=None, **answers):
@@ -313,6 +321,7 @@ def surface(theme, colors):
     out = "layout(location = 0) out vec4 fragColor;"
     source = source.replace(out, f"""const vec3  CINEMA_BACKGROUNDS[{len(shades)}] = vec3[]({", ".join(map(vec3, shades))});
 const float CINEMA_GLASS = {min(max(glass, 0.0), 1.0):.4f};
+const int   CINEMA_FROST_LEVEL = 0;
 const vec3  CINEMA_BACKGROUND = {vec3(colors["background"])}, CINEMA_MUTED = {vec3(colors.get("muted", (0.5, 0.5, 0.5)))};
 """ + DITHER + (ROOT / "plugin/glass.glsl").read_text() + out, 1)
     read = "#if USE_DISCARD && !USE_BLUR"

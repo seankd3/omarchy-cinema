@@ -119,14 +119,49 @@ var Scene = (function () {
     };
   }
 
-  // How the coarse world is drawn for a film's frost (Hyprland's blur size)
-  // on a screen `pixels` wide at `scale`: its size, its levels, the level
-  // that is the frost, and the level the glass reads it at, as main.cpp's
-  // coarse() and frost() work them out.
-  function coarse(frost, pixels, scale) {
-    const level = Math.min(Math.max(Math.floor(Math.log2(Math.max(2 * frost * scale, 1)) + 0.5), 1), 6);
-    const k = Math.min(level - 1, 1);
-    return { size: pixels.map(p => -Math.floor(-p / 2 ** (level - k))), levels: k + 1, frost: level, read: Math.max(level - 1, 1) };
+  // How wide Hyprland's blur of `size` and `passes` (film.lua sets the
+  // film's frost as its size, with 2 passes) spreads a point: a Gaussian's
+  // sigma, in the screen's pixels, within 5% for 2 and 3 passes (its dual
+  // Kawase measured).
+  function frostWidth(size, passes) {
+    return passes > 0 ? 2 ** passes * (0.66 * Math.max(size, 0) + 0.2) : 0;
+  }
+
+  // The glass's frost for Hyprland's blur of `size` and `passes` on a screen
+  // `pixels` in size, as main.cpp's frost() makes it (plugin/frost.glsl): as
+  // wide as Hyprland's own (frostWidth()), without its steps. `read` is the
+  // level of Hyprland's blur texture the glass reads it at, which the world
+  // is drawn at the size of, at most a quarter, so the frost is at least two
+  // of its texels wide; `sizes` are the world's and those of the levels it
+  // is halved to; and `steps` are in order, { kernel, from, to, sigma,
+  // along } between "world", a level 1, 2, ..., "temp" (the size of the
+  // last) and "read" (the level the glass reads). Each step spreads the
+  // light by a variance (px²) of its source's texel squared times its own:
+  // a halving 1.75, a doubling 0.6875, a Gaussian its width squared, and the
+  // world drawn a point a texel (1/12) and the glass's B-spline read (1/3)
+  // five twelfths. The world is halved while that leaves room under the
+  // frost, and a Gaussian takes the rest.
+  function frost(size, passes, pixels) {
+    const sigma = frostWidth(size, passes);
+    const read = Math.min(Math.max(Math.floor(Math.log2(Math.max(sigma / 2, 1))), 1), 2);
+    const sizes = [pixels.map(p => Math.ceil(p / 2 ** read))];
+    const texel = size => pixels[0] / size[0];
+    let spent = texel(sizes[0]) ** 2 * 5 / 12;
+    for (;;) {
+      const last = sizes[sizes.length - 1], next = last.map(p => Math.ceil(p / 2));
+      const cost = 1.75 * texel(last) ** 2 + 0.6875 * texel(next) ** 2;
+      if (Math.min(...next) < 2 || spent + cost > sigma * sigma) break;
+      sizes.push(next);
+      spent += cost;
+    }
+    const depth = sizes.length - 1, level = k => (k === 0 ? "world" : k);
+    const g = Math.max(Math.sqrt(Math.max(sigma * sigma - spent, 0)) / texel(sizes[depth]), 0.25);
+    const steps = [];
+    for (let k = 1; k <= depth; k++) steps.push({ kernel: 0, from: level(k - 1), to: k });
+    steps.push({ kernel: 1, from: level(depth), to: "temp", sigma: g, along: [1, 0] });
+    steps.push({ kernel: 1, from: "temp", to: depth === 0 ? "read" : depth, sigma: g, along: [0, 1] });
+    for (let k = depth; k >= 1; k--) steps.push({ kernel: 2, from: k, to: k === 1 ? "read" : k - 1 });
+    return { read, sizes, steps };
   }
 
   // The text a film draws with no agent's turned on: its own backdrop.frag as
@@ -135,5 +170,5 @@ var Scene = (function () {
     return source.replace(/[^!-~]+/g, " ").trim().slice(-RING);
   }
 
-  return { OPEN, CLOSE, LAND, FOCUS, palette, setting, reach, layout, storyboard, flare, uniforms, coarse, words };
+  return { OPEN, CLOSE, LAND, FOCUS, palette, setting, reach, layout, storyboard, flare, uniforms, frostWidth, frost, words };
 })();
