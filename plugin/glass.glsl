@@ -26,13 +26,25 @@ vec4 cinemaShade(vec3 rgb) {
 // 4.5:1, it goes as far as the shade: the glass never reads worse than the
 // theme drawn solid.
 #if USE_BLUR
+// The frost under a pixel, read at its level of blurredBG
+// (CINEMA_FROST_LEVEL) by a cubic B-spline as four bilinear reads: read
+// bilinear, a glow pulses by up to 4% as the light under it crosses the
+// frost's texels; read this way, by 0.1% (tools/frost-check).
+vec4 cinemaFrost(vec2 uv) {
+    vec2 size = vec2(textureSize(blurredBG, CINEMA_FROST_LEVEL)), t = uv * size - 0.5, i = floor(t), f = t - i, g = 1.0 - f;
+    vec2 w0 = g * g * g / 6.0, w1 = 2.0 / 3.0 - f * f * (1.0 - 0.5 * f), w3 = f * f * f / 6.0;
+    vec2 a = w0 + w1, b = 1.0 - a;
+    vec2 p = (i - 0.5 + w1 / a) / size, q = (i + 1.5 + w3 / b) / size;
+    return a.y * (a.x * texture(blurredBG, p) + b.x * texture(blurredBG, vec2(q.x, p.y))) +
+        b.y * (a.x * texture(blurredBG, vec2(p.x, q.y)) + b.x * texture(blurredBG, q));
+}
 vec4 cinemaHold(vec4 pix, vec2 uv, float k) {
     // No frost and nothing of the app's: not drawn (the bar's layer is screen-sized).
     if (k <= 0.0 && pix == vec4(0.0)) discard;
     // Where the frost cannot move a pixel a level (k to 1/255: an opaque
     // pixel of a 0.999 window) it is the app's, so text keeps its exact
     // level; dithered in full from two levels.
-    vec4  c     = pix + texture(blurredBG, uv) * k;
+    vec4  c     = pix + cinemaFrost(uv) * k;
     if (k * 255.0 <= 1.0) return c;
     c          += vec4(vec3(cinemaDither() * min(k * 255.0 - 1.0, 1.0)), 0.0);
     float m     = cinemaLuminance(CINEMA_MUTED), side = sign(m - cinemaLuminance(CINEMA_BACKGROUND));

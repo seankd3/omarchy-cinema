@@ -36,19 +36,27 @@ this 2.9 ms and 1.0%. The rest is CPU starvation of the nice 19 sandbox.
 small, as the glass's frost; what a frosted window covers is never drawn;
 Hyprland only composites.
 
-- **The plugin makes the frost.** The backdrop draws the world at twice
-  the size of the level as soft as the film's `frost` (Tron's grid takes
-  the mean over each pixel's width, contract.glsl's `spread`, or it floods
-  the frost), and draws that level into the level a finer of Hyprland's
-  blur texture, the one level that is read: every reader samples it where it
+- **The plugin makes the frost.** The backdrop draws the world at the size
+  of the one level of Hyprland's blur texture the glass reads (a quarter of
+  the screen; half for a frost under 6 px), Tron's grid taking the mean over
+  each pixel's width (contract.glsl's `spread`) or it floods the frost. Then
+  plugin/frost.glsl, by a plan as data (play/scene.js's frost(), main.cpp's
+  frostPlan()): 13-tap halvings while the frost has room, a separable
+  Gaussian for the rest, and tent doublings back into that level. Each step
+  spreads light by a known variance and they add, so the frost is as wide
+  as Hyprland's own blur of the film's `frost` (2 passes: sigma 8.7 px at 3)
+  within 4%; Hyprland's dual Kawase itself moves a glow 5 to 29 px off its
+  light as it crosses its texels. Every reader samples the level where it
   reads the screen, so Hyprland queues no blur and nothing is copied
-  screen-sized (0.35 to 0.45 ms). It is drawn by a cubic B-spline
-  (plugin/frost.glsl): read bilinear at its own level, 8 px texels at
-  2880x1800, the frost showed each texel's corners as steps along a line and
-  beads on it, and so did the exact frost read that way; a level finer, a
-  reader's bilinear adds no crease. A B-spline is wider than bilinear: the
-  frost's spread goes from 4.0 to 5.4 px. The Matrix's frost, level 1, is
-  drawn as it is. The bar, the dock and the
+  screen-sized; the glass reads it by a cubic B-spline (glass.glsl's
+  cinemaFrost()). Until 2026-11-15 the frost was the world at a quarter
+  size, averaged 2x2 and drawn back by a B-spline: 5 px of blur on 8 px
+  texels, which kept each line and dot as a soft blob, moved a glow up to
+  1.9 px off its light and pulsed it 32% (#39). Now a glow stays within
+  0.41 px, the quarter-size world's own floor, and pulses at most 2.1%
+  (tools/frost-check). At 2880x1800, GPU at 2340 MHz: the frost 0.05 to
+  0.07 ms (was 0.01 to 0.03), the B-spline read 0.22 ms over a whole screen
+  of glass (0.06 bilinear). The bar, the dock and the
   notifications read the same frost (film.lua's xray rule): their layers
   cover the screen or stay mapped empty down its edges, and a live blur under
   them runs every frame (0.8 ms under the bar; +0.30 ms a frame at rest

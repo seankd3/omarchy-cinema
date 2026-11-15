@@ -79,6 +79,7 @@ uniform float alpha;
 layout(location = 0) out vec4 fragColor;
 ` + (held ? `const vec3 CINEMA_BACKGROUNDS[${shades.length}] = vec3[](${shades.map(vec3).join(", ")});
 const float CINEMA_GLASS = ${Math.min(Math.max(glass, 0), 1).toFixed(4)};
+const int CINEMA_FROST_LEVEL = 0;
 const vec3 CINEMA_BACKGROUND = ${vec3(colors.background)}, CINEMA_MUTED = ${vec3(colors.muted || [0.5, 0.5, 0.5])};
 ${engine.dither}${engine.glass}` : "") + `
 void main() {
@@ -332,31 +333,33 @@ function scene(t, empty) {
 
 // ---- Drawing
 
-let coarse = null;    // { texture, fb, size, levels, frost, read, frostTex, frostFb, frostSize }
+let coarse = null;    // { key, plan, textures: { world, 1, 2, ..., temp, read }, fbs: likewise, frostSize }
 const apps = new Map();
 
 function targets(target) {
-  const c = Scene.coarse(film.frost, [target.width, target.height], scale);
+  // film.lua sets the film's frost as Hyprland's blur size, with 2 passes.
+  const plan = Scene.frost(film.frost, 2, [target.width, target.height]);
   // The frost the glass reads, in 8 bits as Hyprland keeps it.
-  const frostSize = [target.width, target.height].map(p => Math.max(1, p >> c.read));
-  const key = `${c.size} ${c.levels} ${frostSize}`;
+  const frostSize = [target.width, target.height].map(p => Math.max(1, p >> plan.read));
+  const key = JSON.stringify([plan, frostSize]);
   if (coarse && coarse.key === key) return coarse;
-  if (coarse) { gl.deleteTexture(coarse.texture); gl.deleteTexture(coarse.frostTex); gl.deleteFramebuffer(coarse.fb); gl.deleteFramebuffer(coarse.frostFb); }
-  const world = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, world);
-  gl.texStorage2D(gl.TEXTURE_2D, c.levels, gl.RGB10_A2, ...c.size);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  const fb = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, world, 0);
-  const frostTex = texture8(frostSize);
-  const frostFb = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, frostFb);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, frostTex, 0);
-  coarse = { key, texture: world, fb, frostTex, frostFb, frostSize, ...c };
+  if (coarse) {
+    Object.values(coarse.textures).forEach(t => gl.deleteTexture(t));
+    Object.values(coarse.fbs).forEach(f => gl.deleteFramebuffer(f));
+  }
+  // The world drawn for the frost (which the frames read too), each level
+  // it is halved to, the last's size again, and the frost.
+  const sizes = { world: plan.sizes[0], temp: plan.sizes[plan.sizes.length - 1] };
+  plan.sizes.slice(1).forEach((s, k) => { sizes[k + 1] = s; });
+  const textures = {}, fbs = {};
+  for (const [name, [w, h]] of Object.entries(sizes)) textures[name] = texture(w, h, gl.RGB10_A2, gl.RGBA, gl.UNSIGNED_INT_2_10_10_10_REV, null);
+  textures.read = texture8(frostSize);
+  for (const [name, t] of Object.entries(textures)) {
+    fbs[name] = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbs[name]);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  }
+  coarse = { key, plan, sizes: { ...sizes, read: frostSize }, textures, fbs, texture: textures.world, frostTex: textures.read };
   return coarse;
 }
 const texture8 = ([w, h]) => texture(w, h, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, null);
@@ -424,21 +427,22 @@ function render(t, target = { fb: null, width: canvas.width, height: canvas.heig
   gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, ubo);
   gl.disable(gl.BLEND);
 
-  // The coarse world, its mipmap down to the frost, and the frost the glass
-  // reads (frost.glsl), in 8 bits.
+  // The world drawn for the frost, and the frost the glass reads made from
+  // it by the plan's steps (frost.glsl), in 8 bits.
   gl.bindTexture(gl.TEXTURE_2D, null);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, c.fb);
-  gl.viewport(0, 0, ...c.size);
-  filmProgram(programs.backdrop, u, all, size[0] / c.size[0]);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, c.fbs.world);
+  gl.viewport(0, 0, ...c.sizes.world);
+  filmProgram(programs.backdrop, u, all, size[0] / c.sizes.world[0]);
   gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, null);
   draw();
-  gl.bindTexture(gl.TEXTURE_2D, c.texture);
-  gl.generateMipmap(gl.TEXTURE_2D);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, c.frostFb);
-  gl.viewport(0, 0, ...c.frostSize);
   gl.useProgram(frost.p);
-  set(frost, { resolution: c.frostSize, area: [0, 0, ...c.frostSize], drawnWorld: 2, frostLevel: c.levels - 1 });
-  draw();
+  for (const step of c.plan.steps) {
+    gl.bindTexture(gl.TEXTURE_2D, c.textures[step.from]);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, c.fbs[step.to]);
+    gl.viewport(0, 0, ...c.sizes[step.to]);
+    set(frost, { resolution: c.sizes[step.to], area: [0, 0, ...c.sizes[step.to]], source: 2, kernel: step.kernel, sigma: step.sigma || 0, along: step.along || [0, 0] });
+    draw();
+  }
 
   // The world at the screen's size.
   gl.bindFramebuffer(gl.FRAMEBUFFER, target.fb);

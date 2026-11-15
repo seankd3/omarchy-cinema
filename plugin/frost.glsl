@@ -1,26 +1,54 @@
 #version 300 es
-// The frost the glass reads (main.cpp, frost()): the coarse world's level
-// `frostLevel` over a `resolution`-sized level of the glass's texture, by a
-// cubic B-spline where that is finer, so a reader's bilinear shows no crease
-// on the frost's texels.
+// One step of the frost the glass reads (main.cpp, frost(); play/scene.js,
+// frost()): `source` read into a target `resolution` pixels in size by one of
+// three kernels. The frost is the world under a Gaussian as wide as
+// Hyprland's blur of the film's `frost` (play/scene.js, frostWidth()): the
+// world halved down to a level as coarse as that allows,
+// a Gaussian there for the rest, and doubled back up. Each step spreads the
+// light by a known amount and the amounts add (as variances), so the plan
+// lands on the frost asked for; every kernel weighs its taps by where they
+// fall, so a light moving across the world moves its glow with it, by any
+// fraction of a pixel, without it stepping or pulsing.
 precision highp float;
-uniform sampler2D drawnWorld;
-uniform int frostLevel;
+uniform sampler2D source;
 uniform vec2 resolution;
+uniform int kernel; // 0 halves, 1 is a Gaussian along `along`, 2 doubles
+uniform vec2 along;
+uniform float sigma; // the Gaussian's width, in source texels
 layout(location = 0) out vec4 fragColor;
 
+// The source, read bilinear, `p` in its texels (whole numbers are its edges).
+vec4 at(vec2 p) {
+    return texture(source, p / vec2(textureSize(source, 0)));
+}
+
 void main() {
-    vec2  size = vec2(textureSize(drawnWorld, frostLevel)), at = gl_FragCoord.xy / resolution;
-    float lod  = float(frostLevel);
-    if (size.x >= resolution.x) {
-        fragColor = textureLod(drawnWorld, at, lod);
-        return;
+    vec2 size = vec2(textureSize(source, 0)), p = gl_FragCoord.xy / resolution * size;
+    if (kernel == 0) {
+        // Halving: 13 taps over the 4x4 texels round each target pixel
+        // (Jimenez 2014, Next Generation Post Processing in Call of Duty:
+        // Advanced Warfare), which every source texel reaches by the same
+        // total weight, so nothing it covers flickers as it moves.
+        fragColor = at(p) * 0.125 +
+            (at(p + vec2(-1.0, -1.0)) + at(p + vec2(1.0, -1.0)) + at(p + vec2(-1.0, 1.0)) + at(p + vec2(1.0, 1.0))) * 0.125 +
+            (at(p + vec2(-2.0, 0.0)) + at(p + vec2(2.0, 0.0)) + at(p + vec2(0.0, -2.0)) + at(p + vec2(0.0, 2.0))) * 0.0625 +
+            (at(p + vec2(-2.0, -2.0)) + at(p + vec2(2.0, -2.0)) + at(p + vec2(-2.0, 2.0)) + at(p + vec2(2.0, 2.0))) * 0.03125;
+    } else if (kernel == 2) {
+        // Doubling: a 3x3 tent over the coarser level.
+        fragColor = (at(p) * 4.0 + (at(p + vec2(-1.0, 0.0)) + at(p + vec2(1.0, 0.0)) + at(p + vec2(0.0, -1.0)) + at(p + vec2(0.0, 1.0))) * 2.0 +
+                     at(p + vec2(-1.0, -1.0)) + at(p + vec2(1.0, -1.0)) + at(p + vec2(-1.0, 1.0)) + at(p + vec2(1.0, 1.0))) / 16.0;
+    } else {
+        // A Gaussian along one axis, the target the source's size: each
+        // texel within three widths, weighed exactly.
+        ivec2 c = ivec2(p), last = ivec2(size) - 1, step = ivec2(along);
+        int   r = int(ceil(3.0 * sigma));
+        vec4  sum = vec4(0.0);
+        float total = 0.0;
+        for (int k = -r; k <= r; k++) {
+            float w = exp(-0.5 * float(k * k) / (sigma * sigma));
+            sum += w * texelFetch(source, clamp(c + step * k, ivec2(0), last), 0);
+            total += w;
+        }
+        fragColor = sum / total;
     }
-    // Four texels a side, as two bilinear reads each between its pair.
-    vec2 t = at * size - 0.5, i = floor(t), f = t - i, g = 1.0 - f;
-    vec2 w0 = g * g * g / 6.0, w1 = 2.0 / 3.0 - f * f * (1.0 - 0.5 * f), w3 = f * f * f / 6.0;
-    vec2 a = w0 + w1, b = 1.0 - a;
-    vec2 p = (i - 0.5 + w1 / a) / size, q = (i + 1.5 + w3 / b) / size;
-    fragColor = a.y * (a.x * textureLod(drawnWorld, p, lod) + b.x * textureLod(drawnWorld, vec2(q.x, p.y), lod)) +
-                b.y * (a.x * textureLod(drawnWorld, vec2(p.x, q.y), lod) + b.x * textureLod(drawnWorld, q, lod));
 }
