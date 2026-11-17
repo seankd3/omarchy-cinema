@@ -2,16 +2,21 @@
 // Hyprland): it names the GPU's render node and the formats it renders to
 // through linux-dmabuf feedback, takes each frame and asks for the next on a
 // fixed 60 Hz vblank, as a display does: a frame committed between two vblanks
-// is shown from the second. Nothing is shown and nothing is read back; the
-// nested compositor's own screencopy (grim) is how its output is seen.
+// is shown from the second. Nothing is shown, but each frame is read: what
+// the nested compositor put in the buffer it hands over, which is what a
+// display would scan out. Its own screencopy (grim) is drawn in a pass of its
+// own, so it can be right while the frames are not (issue 43).
 //
 //   frameclock <socket-name> <width>x<height> [log]
 //
 // With a log, it writes the vblank grid ("p <period ns> <epoch ns>"), the
 // vblanks passed so far at each wakeup on it ("v <count>"), and each commit of
-// a buffer ("c <ns>"), on CLOCK_MONOTONIC, appending a line at a time so other
-// writers can share the file (tools/smoothness reads it; a vblank past the
-// last count means the log stopped, not that a frame was missed).
+// a buffer ("c <ns> <digest>": the digest is a hash of the frame read back at
+// a sixteenth of its size each way, so two frames with the same digest look
+// the same), on CLOCK_MONOTONIC, appending a line at a time so other writers
+// can share the file (tools/smoothness and tools/screen-check read it; a
+// vblank past the last count means the log stopped, not that a frame was
+// missed).
 //
 // Every object a client makes is accepted through one dispatcher that reads
 // the protocol's own message tables: a request creates the objects its
@@ -23,6 +28,8 @@
 #define _GNU_SOURCE
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h> // after gl3.h, which it needs
 #include <fcntl.h>
 #include <gbm.h>
 #include <glob.h>
@@ -54,12 +61,32 @@ static struct {
     struct wl_event_source *beat;
     int log;                  // -1 without a log
     uint64_t vblanks;         // passed since the grid's epoch
+    EGLDisplay egl;           // the render node's, current with a context, for reading frames
+    GLuint read, small, texture; // the frame's framebuffer, the small copy's, and the frame's texture
+    PFNEGLCREATEIMAGEKHRPROC create_image;
+    PFNEGLDESTROYIMAGEKHRPROC destroy_image;
+    PFNGLEGLIMAGETARGETTEXTURE2DOESPROC image_texture;
 } fc;
 
 // A surface's state between commits: its frame callbacks and attached buffer.
 struct surface {
     struct wl_list frames, attached;
 };
+
+// A dmabuf as its params gather it, and as its wl_buffer keeps it, imported.
+#define PLANES 4
+struct params {
+    int fds[PLANES];
+    uint32_t offsets[PLANES], strides[PLANES];
+    uint64_t modifier;
+};
+struct frame {
+    EGLImageKHR image;
+    int width, height;
+};
+
+// The frame read back at a sixteenth of its size each way.
+#define SHRINK 16
 
 static void detach(struct wl_resource *r) {
     wl_list_remove(wl_resource_get_link(r));
@@ -78,6 +105,21 @@ static void destroyed(struct wl_resource *r) {
         // Its window is configured through it, so no longer.
         struct wl_resource *t, *next;
         wl_resource_for_each_safe(t, next, &fc.toplevels) if (wl_resource_get_user_data(t) == r) detach(t);
+        return;
+    }
+    if (!strcmp(class, "zwp_linux_buffer_params_v1")) {
+        struct params *p = wl_resource_get_user_data(r);
+        for (int i = 0; p && i < PLANES; i++)
+            if (p->fds[i] >= 0)
+                close(p->fds[i]);
+        free(p);
+        return;
+    }
+    if (!strcmp(class, "wl_buffer")) {
+        struct frame *f = wl_resource_get_user_data(r);
+        if (f && f->image != EGL_NO_IMAGE_KHR)
+            fc.destroy_image(fc.egl, f->image);
+        free(f);
         return;
     }
     struct surface *s = wl_resource_get_user_data(r);
@@ -180,6 +222,83 @@ static void feedback(struct wl_resource *f) {
     zwp_linux_dmabuf_feedback_v1_send_done(f);
 }
 
+// A params object's planes, gathered as they are added.
+static struct params *planes(struct wl_resource *r) {
+    struct params *p = wl_resource_get_user_data(r);
+    if (!p && (p = calloc(1, sizeof *p))) {
+        for (int i = 0; i < PLANES; i++)
+            p->fds[i] = -1;
+        wl_resource_set_user_data(r, p);
+    }
+    return p;
+}
+
+// The buffer made from params `r`, imported for reading when a log wants
+// its frames.
+static struct frame *import(struct wl_resource *r, int32_t width, int32_t height, uint32_t format) {
+    struct params *p = wl_resource_get_user_data(r);
+    struct frame *f = calloc(1, sizeof *f);
+    if (!f)
+        return NULL;
+    *f = (struct frame){EGL_NO_IMAGE_KHR, width, height};
+    if (!p || fc.egl == EGL_NO_DISPLAY)
+        return f;
+    static const EGLint keys[PLANES][5] = {
+        {EGL_DMA_BUF_PLANE0_FD_EXT, EGL_DMA_BUF_PLANE0_OFFSET_EXT, EGL_DMA_BUF_PLANE0_PITCH_EXT, EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT},
+        {EGL_DMA_BUF_PLANE1_FD_EXT, EGL_DMA_BUF_PLANE1_OFFSET_EXT, EGL_DMA_BUF_PLANE1_PITCH_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT},
+        {EGL_DMA_BUF_PLANE2_FD_EXT, EGL_DMA_BUF_PLANE2_OFFSET_EXT, EGL_DMA_BUF_PLANE2_PITCH_EXT, EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT},
+        {EGL_DMA_BUF_PLANE3_FD_EXT, EGL_DMA_BUF_PLANE3_OFFSET_EXT, EGL_DMA_BUF_PLANE3_PITCH_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT},
+    };
+    EGLint attribs[7 + PLANES * 10] = {EGL_WIDTH, width, EGL_HEIGHT, height, EGL_LINUX_DRM_FOURCC_EXT, (EGLint)format};
+    int n = 6;
+    for (int i = 0; i < PLANES && p->fds[i] >= 0; i++) {
+        const EGLint values[5] = {p->fds[i], (EGLint)p->offsets[i], (EGLint)p->strides[i], (EGLint)(p->modifier & 0xffffffff), (EGLint)(p->modifier >> 32)};
+        for (int k = 0; k < 5; k++) {
+            attribs[n++] = keys[i][k];
+            attribs[n++] = values[k];
+        }
+    }
+    attribs[n] = EGL_NONE;
+    f->image = fc.create_image(fc.egl, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attribs);
+    return f;
+}
+
+// A frame's digest: FNV-1a over the frame drawn at a sixteenth of its size
+// each way (linear filtering, so every pixel of it counts a little), as
+// RGBA8. 0 is a frame that could not be read.
+static uint64_t digest(const struct frame *f) {
+    if (!f || f->image == EGL_NO_IMAGE_KHR)
+        return 0;
+    const int w = f->width / SHRINK > 0 ? f->width / SHRINK : 1, h = f->height / SHRINK > 0 ? f->height / SHRINK : 1;
+    static int shrunk[2];
+    static uint8_t *pixels;
+    if (shrunk[0] != w || shrunk[1] != h) {
+        GLuint rb;
+        glGenRenderbuffers(1, &rb);
+        glBindRenderbuffer(GL_RENDERBUFFER, rb);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, w, h);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fc.small);
+        glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb);
+        free(pixels);
+        pixels = malloc((size_t)w * h * 4);
+        shrunk[0] = w, shrunk[1] = h;
+    }
+    glBindTexture(GL_TEXTURE_2D, fc.texture);
+    fc.image_texture(GL_TEXTURE_2D, f->image);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fc.read);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fc.texture, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fc.small);
+    glBlitFramebuffer(0, 0, f->width, f->height, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fc.small);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    if (glGetError() != GL_NO_ERROR)
+        return 0;
+    uint64_t hash = 0xcbf29ce484222325ULL;
+    for (size_t i = 0; i < (size_t)w * h * 4; i++)
+        hash = (hash ^ pixels[i]) * 0x100000001b3ULL;
+    return hash ? hash : 1;
+}
+
 // What the requests that matter do, after the dispatcher has made any object
 // they create (`made`).
 static void act(struct wl_resource *r, const char *request, union wl_argument *args, struct wl_resource *made) {
@@ -193,11 +312,14 @@ static void act(struct wl_resource *r, const char *request, union wl_argument *a
     } else if (!strcmp(request, "wl_surface.frame")) {
         move(made, &s->frames);
     } else if (!strcmp(request, "wl_surface.commit")) {
-        // A buffer is a new frame. Nothing reads it, so it is free again at once.
+        // A buffer is a new frame. It is read here, at once, so it is free
+        // again as soon as it is committed.
         if (!wl_list_empty(&s->attached)) {
             wl_event_source_timer_update(fc.beat, 0);
-            char line[64];
-            snprintf(line, sizeof line, "c %lld\n", monotonic());
+            const long long at = monotonic();
+            const uint64_t seen = fc.log >= 0 ? digest(wl_resource_get_user_data(wl_resource_from_link(s->attached.next))) : 0;
+            char line[80];
+            snprintf(line, sizeof line, "c %lld %016llx\n", at, (unsigned long long)seen);
             note(line);
         }
         struct wl_resource *x, *next;
@@ -210,10 +332,23 @@ static void act(struct wl_resource *r, const char *request, union wl_argument *a
         wl_resource_set_user_data(made, r);
         move(made, &fc.toplevels);
         configure(made);
+    } else if (!strcmp(request, "zwp_linux_buffer_params_v1.add")) {
+        struct params *p = planes(r);
+        const uint32_t plane = args[1].u;
+        if (p && plane < PLANES && p->fds[plane] < 0) {
+            p->fds[plane] = dup(args[0].h);
+            p->offsets[plane] = args[2].u;
+            p->strides[plane] = args[3].u;
+            p->modifier = (uint64_t)args[4].u << 32 | args[5].u;
+        }
     } else if (!strcmp(request, "zwp_linux_buffer_params_v1.create")) {
         struct wl_resource *buffer = make(wl_resource_get_client(r), &wl_buffer_interface, 1, 0);
-        if (buffer)
+        if (buffer) {
+            wl_resource_set_user_data(buffer, import(r, args[0].i, args[1].i, args[2].u));
             zwp_linux_buffer_params_v1_send_created(r, buffer);
+        }
+    } else if (!strcmp(request, "zwp_linux_buffer_params_v1.create_immed")) {
+        wl_resource_set_user_data(made, import(r, args[1].i, args[2].i, args[3].u));
     } else if (!strcmp(request, "zwp_linux_dmabuf_v1.get_default_feedback") ||
                !strcmp(request, "zwp_linux_dmabuf_v1.get_surface_feedback")) {
         feedback(made);
@@ -269,7 +404,8 @@ static void bind(struct wl_client *client, void *data, uint32_t version, uint32_
     }
 }
 
-// The formats and modifiers the GPU renders to, as its EGL reports them.
+// The formats and modifiers the GPU renders to, as its EGL reports them;
+// its EGL then stays, to read frames with.
 static int formats(int node) {
     struct gbm_device *gbm = gbm_create_device(node);
     EGLDisplay egl = gbm ? eglGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, gbm, NULL) : EGL_NO_DISPLAY;
@@ -304,9 +440,26 @@ static int formats(int node) {
         free(external);
     }
     free(list);
-    eglTerminate(egl);
-    gbm_device_destroy(gbm);
-    return fc.entries ? 0 : -1;
+    if (!fc.entries)
+        return -1;
+
+    // The same display, kept with a context current, reads the frames.
+    static const EGLint version[] = {EGL_CONTEXT_MAJOR_VERSION, 3, EGL_NONE};
+    fc.create_image = (void *)eglGetProcAddress("eglCreateImageKHR");
+    fc.destroy_image = (void *)eglGetProcAddress("eglDestroyImageKHR");
+    fc.image_texture = (void *)eglGetProcAddress("glEGLImageTargetTexture2DOES");
+    EGLContext context = EGL_NO_CONTEXT;
+    if (fc.create_image && fc.destroy_image && fc.image_texture && eglBindAPI(EGL_OPENGL_ES_API))
+        context = eglCreateContext(egl, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT, version);
+    if (context == EGL_NO_CONTEXT || !eglMakeCurrent(egl, EGL_NO_SURFACE, EGL_NO_SURFACE, context)) {
+        fprintf(stderr, "frameclock: no GL context to read frames with\n");
+        return -1;
+    }
+    fc.egl = egl;
+    glGenFramebuffers(1, &fc.read);
+    glGenFramebuffers(1, &fc.small);
+    glGenTextures(1, &fc.texture);
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -328,7 +481,6 @@ int main(int argc, char **argv) {
         return 1;
     }
     fc.device = st.st_rdev;
-    close(node);
     globfree(&nodes);
 
     struct wl_display *display = wl_display_create();
