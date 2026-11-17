@@ -2,10 +2,10 @@
 // Hyprland): it names the GPU's render node and the formats it renders to
 // through linux-dmabuf feedback, takes each frame and asks for the next on a
 // fixed 60 Hz vblank, as a display does: a frame committed between two vblanks
-// is shown from the second. Nothing is shown, but each frame is read: what
-// the nested compositor put in the buffer it hands over, which is what a
-// display would scan out. Its own screencopy (grim) is drawn in a pass of its
-// own, so it can be right while the frames are not (issue 43).
+// is shown from the second. Nothing is shown, but each frame is read: the
+// buffer the nested compositor hands over, which is what a display would scan
+// out. Its screencopy (grim) copies the frame before Hyprland's last pass into
+// that buffer, so it can move while the screen holds still (issue 43).
 //
 //   frameclock <socket-name> <width>x<height> [log]
 //
@@ -14,7 +14,7 @@
 // a buffer ("c <ns> <digest>": the digest is a hash of the frame read back at
 // a sixteenth of its size each way, so two frames with the same digest look
 // the same), on CLOCK_MONOTONIC, appending a line at a time so other writers
-// can share the file (tools/smoothness and tools/screen-check read it; a
+// can share the file (tools/smoothness and tools/fresh-user read it; a
 // vblank past the last count means the log stopped, not that a frame was
 // missed).
 //
@@ -241,7 +241,7 @@ static struct frame *import(struct wl_resource *r, int32_t width, int32_t height
     if (!f)
         return NULL;
     *f = (struct frame){EGL_NO_IMAGE_KHR, width, height};
-    if (!p || fc.egl == EGL_NO_DISPLAY)
+    if (!p || fc.log < 0)
         return f;
     static const EGLint keys[PLANES][5] = {
         {EGL_DMA_BUF_PLANE0_FD_EXT, EGL_DMA_BUF_PLANE0_OFFSET_EXT, EGL_DMA_BUF_PLANE0_PITCH_EXT, EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT},
@@ -317,7 +317,7 @@ static void act(struct wl_resource *r, const char *request, union wl_argument *a
         if (!wl_list_empty(&s->attached)) {
             wl_event_source_timer_update(fc.beat, 0);
             const long long at = monotonic();
-            const uint64_t seen = fc.log >= 0 ? digest(wl_resource_get_user_data(wl_resource_from_link(s->attached.next))) : 0;
+            const uint64_t seen = digest(wl_resource_get_user_data(wl_resource_from_link(s->attached.next)));
             char line[80];
             snprintf(line, sizeof line, "c %lld %016llx\n", at, (unsigned long long)seen);
             note(line);
