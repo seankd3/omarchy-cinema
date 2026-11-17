@@ -2,7 +2,7 @@
 # A new Omarchy user's first run, from empty (RELEASE.md, "Release gate"), in
 # a desktop that is never on screen (tools/hidden-desktop --fresh: a first
 # login done, as for a user who installs later): the install, a login whose own config loads the engine with no config errors, a
-# film applied in the session and drawing, Omarchy's first theme again, an
+# film applied in the session and moving on the screen, Omarchy's first theme again, an
 # uninstall refused while Hyprland runs, and one after logging out. Then
 # every path in ~/.config and ~/.local that the install changed is as it was
 # before it, but for Omarchy's own record of theme switches, and nothing
@@ -35,14 +35,22 @@ if [[ ${1:-} == --inside ]]; then
   [[ -z $failed ]] || echo "fresh-user: not covered here (no user systemd manager): $cannot"
   hyprctl plugin list | grep -q '^Plugin backdrop ' || fail "the engine did not load at login"
   clean
-  # The backdrop's draws, as frametrace logs each one's time. Each switch
-  # waits for its hooks, as Omarchy's own installers do, so none is still
-  # writing when the uninstall runs.
-  drawn() { grep -c '^t ' "$out/frames.log" || true; }
-  before=$(drawn)
+  # The film moves on the screen: the frames frameclock was handed since the
+  # switch (their digests in frames.log) change 30 times, half a second of
+  # motion, where the switch itself changes them a few times. The plugin's
+  # own draws are no proof: on 2026-11-17 it drew every frame while the
+  # screen held one (issue 43). Each switch waits for its hooks, as Omarchy's
+  # own installers do, so none is still writing when the uninstall runs.
+  frames() { wc -l <"$out/frames.log"; }
+  moving() {
+    tail -n "+$from" "$out/frames.log" | awk '
+      $1 == "c" { changes += $3 != "0000000000000000" && $3 != last; last = $3 }
+      END { exit changes < 30 }'
+  }
+  from=$(($(frames) + 1))
   OMARCHY_THEME_WAIT=1 omarchy-theme-set "$film" >/dev/null 2>&1 || fail "omarchy-theme-set $film failed"
-  for _ in {1..50}; do (($(drawn) > before)) && break; sleep 0.1; done
-  (($(drawn) > before)) || fail "$film drew no backdrop"
+  for _ in {1..50}; do moving && break; sleep 0.1; done
+  moving || fail "$film does not move on the screen"
   clean
   OMARCHY_THEME_WAIT=1 omarchy-theme-set "Tokyo Night" >/dev/null 2>&1 || fail "omarchy-theme-set Tokyo Night failed"
   ! "$here/install" --uninstall 2>/dev/null || fail "the uninstall ran while Hyprland did"

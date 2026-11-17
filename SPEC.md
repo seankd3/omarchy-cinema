@@ -147,8 +147,10 @@ exactly as they draw live. No HUD text.
 **Previews and visual tests.** `tools/hidden-desktop` logs a real Hyprland in
 where it is never on screen: your desktop with the checkout's `./install`
 and a chosen film applied (Omarchy's own headless theme switch), drawing into
-`tools/frameclock`, a Wayland compositor with no screen that takes each frame
-and asks for the next. It runs in a sandbox with your configuration and the
+`tools/frameclock`, a Wayland compositor with no screen that takes each frame,
+reads it, and asks for the next. What it reads is what a display would scan
+out; a screenshot is drawn in a pass of its own, without the plugin, and
+showed a moving desktop while the panel held one frame (issue 43). It runs in a sandbox with your configuration and the
 checkout as throwaway copies, none of your other files and no route to your
 session (no compositor, Hyprland socket, bus, `/run` or network of yours), and
 every process ends with it. A Hyprland nested in the session drew only while
