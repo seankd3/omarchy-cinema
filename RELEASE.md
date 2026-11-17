@@ -139,7 +139,9 @@ fan-homage note and where every image comes from; MIT);
 puts back the Voxtype settings it changed; `tools/fresh-user`, a new Omarchy
 user from /etc/skel, logged in once for Omarchy's first-run setup, in a
 hidden desktop: install, a login whose own config loads the engine with zero
-config errors, a film applied and drawing, Omarchy's first theme again, an
+config errors, a film applied and moving on the screen (the frames the
+screen is handed, not a screenshot or the plugin's draws), Omarchy's first
+theme again, an
 uninstall refused in the session and run after logging out, and every path
 the install changed back as it was.
 
