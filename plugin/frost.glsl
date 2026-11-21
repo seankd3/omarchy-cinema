@@ -39,15 +39,20 @@ void main() {
                      at(p + vec2(-1.0, -1.0)) + at(p + vec2(1.0, -1.0)) + at(p + vec2(-1.0, 1.0)) + at(p + vec2(1.0, 1.0))) / 16.0;
     } else {
         // A Gaussian along one axis, the target the source's size: each
-        // texel within three widths, weighed exactly.
+        // texel within three widths, weighed exactly, a pair at a time from
+        // the middle out. Each weight is the last times a ratio that grows
+        // by q squared (exp(-k^2 / 2 sigma^2) = q^(k^2)), so the loop
+        // multiplies where it would take an exponential.
         ivec2 c = ivec2(p), last = ivec2(size) - 1, step = ivec2(along);
         int   r = int(ceil(3.0 * sigma));
-        vec4  sum = vec4(0.0);
-        float total = 0.0;
-        for (int k = -r; k <= r; k++) {
-            float w = exp(-0.5 * float(k * k) / (sigma * sigma));
-            sum += w * texelFetch(source, clamp(c + step * k, ivec2(0), last), 0);
-            total += w;
+        float q = exp(-0.5 / (sigma * sigma)), w = 1.0, ratio = q;
+        vec4  sum = texelFetch(source, c, 0);
+        float total = 1.0;
+        for (int k = 1; k <= r; k++) {
+            w *= ratio;
+            ratio *= q * q;
+            sum += w * (texelFetch(source, clamp(c + step * k, ivec2(0), last), 0) + texelFetch(source, clamp(c - step * k, ivec2(0), last), 0));
+            total += 2.0 * w;
         }
         fragColor = sum / total;
     }

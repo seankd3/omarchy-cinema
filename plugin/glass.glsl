@@ -3,6 +3,10 @@
 vec3 cinemaLinear(vec3 c) {
     return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
 }
+// Its inverse: linear light back to sRGB.
+vec3 cinemaEncode(vec3 l) {
+    return mix(l * 12.92, 1.055 * pow(l, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, l));
+}
 float cinemaLuminance(vec3 c) {
     return dot(cinemaLinear(c), vec3(0.2126, 0.7152, 0.0722));
 }
@@ -53,7 +57,7 @@ vec4 cinemaHold(vec4 pix, vec2 uv, float k) {
     // A pixel with no frost in it, or every channel of it on the safe side of
     // the grey that is exactly at the limit, is within it: most of the glass,
     // and all of a layer's empty pixels, stop here.
-    float grey  = 1.055 * pow(max(limit, 0.0), 1.0 / 2.4) - 0.055;
+    float grey  = cinemaEncode(vec3(max(limit, 0.0))).r;
     if ((side > 0.0 ? max(max(shown.r, shown.g), shown.b) <= grey : min(min(shown.r, shown.g), shown.b) >= grey)) return c;
     float y     = cinemaLuminance(shown);
     if ((y - limit) * side <= 0.0) return c;
@@ -61,7 +65,7 @@ vec4 cinemaHold(vec4 pix, vec2 uv, float k) {
     vec3  safe = own.w <= 2.5 / 255.0 ? own.rgb * (pix.a + k) : pix.rgb + CINEMA_BACKGROUND * k;
     float s    = cinemaLuminance(safe);
     vec3  held = mix(cinemaLinear(safe), cinemaLinear(shown), (s - limit) * side < 0.0 ? (limit - s) / (y - s) : 0.0);
-    held       = mix(held * 12.92, 1.055 * pow(held, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, held)) * 255.0;
+    held       = cinemaEncode(held) * 255.0;
     return vec4((side > 0.0 ? floor(held) : ceil(held)) / 255.0, c.a);
 }
 #endif
@@ -75,8 +79,13 @@ vec4 cinemaGlass(vec4 c) {
     // Only a background colour itself is background, within a step or two of
     // rounding. Panels, cards, fields, rows and dividers are shaded a few
     // steps off it, and they are interface, not background: they keep their
-    // opacity with the text, icons and lines.
-    float background = 1.0 - smoothstep(0.5 / 255.0, 2.5 / 255.0, cinemaShade(rgb).w);
+    // opacity with the text, icons and lines. Its colour is known to those two
+    // steps only where the app drew it at least a fifth opaque (8 bits divided
+    // by its alpha), so below that it turns to glass less, and under a tenth
+    // (an antialiased edge, a faint shadow) keeps its own alpha: such a pixel
+    // would flicker between glass and not, and a shadow in the background's
+    // shade would turn to a slab of glass.
+    float background = (1.0 - smoothstep(0.5 / 255.0, 2.5 / 255.0, cinemaShade(rgb).w)) * smoothstep(0.1, 0.2, c.a);
     float a = mix(c.a, CINEMA_GLASS, background);
     return vec4(rgb * a, a);
 }

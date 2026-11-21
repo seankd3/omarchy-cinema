@@ -21,6 +21,7 @@
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/render/SceneResources.hpp>
 #include <hyprland/src/render/Shader.hpp>
 #include <hyprland/src/render/WindowRenderPresentation.hpp>
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
@@ -53,7 +54,6 @@
 #include <regex>
 #include <sstream>
 #include <unordered_map>
-#include <unordered_set>
 
 using namespace Render::GL;
 
@@ -95,6 +95,14 @@ namespace {
     // A reading older than VOICE_STALE is silence: the feed or Voxtype stopped.
     constexpr size_t VOICE_SIZE  = 12;
     constexpr auto   VOICE_STALE = std::chrono::milliseconds(500);
+    // On battery the world at rest is drawn at most this often, on a whole
+    // number of the panel's vblanks (pacing()): 60 on a 120 Hz panel.
+    constexpr double PACED_RATE  = 60.0; // Hz
+    // The desktop is at rest once nothing in its scene has changed for this
+    // long, and no impulse or voice is alive.
+    constexpr auto   REST_AFTER  = std::chrono::milliseconds(250);
+    // How often the power supply is read, at most.
+    constexpr auto   POWER_EVERY = std::chrono::seconds(5);
     // The lettering is 16 by 6 cells; anything larger than this is not an
     // atlas, and is refused from its header before it is decoded.
     constexpr uint32_t GLYPHS_MAX_WIDTH = 1024, GLYPHS_MAX_HEIGHT = 512;
@@ -217,6 +225,11 @@ void main() {
         bool                                  seen = false;
         // Whether the world changed since its coarse world was drawn here.
         bool                                  stale = true;
+        // Whether the frame being drawn is one the plugin asked for, which
+        // alone moves time while the world is paced; and the timer that asks
+        // for the next paced frame (onPresented()), while it is armed.
+        bool                                  asked = false, armed = false;
+        wl_event_source*                      pace  = nullptr;
     };
 
     // One of the plugin's programs (the film's backdrop and frame, the frost) and where
@@ -262,6 +275,12 @@ void main() {
     // kept world does.
     struct SCoarse {
         SFrostPlan plan;
+        // What the plan was made for: the frost's width and the monitor's
+        // pixels (replan()).
+        std::optional<std::pair<double, Vector2D>> planned;
+        // Whether the frost in the glass's texture is made from the world as
+        // it was last drawn here (CBackdropPass).
+        bool       frostCurrent = false;
         // A texture and its framebuffer for each of the plan's sizes (the
         // world first), then for TEMP; and the framebuffer of the level the
         // glass reads.
@@ -375,6 +394,18 @@ void main() {
         }
     }
 
+    // The windows' uniform block as contract.glsl's Windows lays it out.
+    struct SWindowsBlock {
+        std::array<float, WINDOWS_MAX * 12> shapes{};
+        std::array<uint32_t, 32 * 32>       tiles{};
+    };
+    // The impulses as the film's programs read them.
+    struct SImpulseUniforms {
+        std::array<float, 4 * IMPULSES> impulses{};
+        std::array<int, IMPULSES>       kinds{}, windows{};
+        int                             count = 0;
+    };
+
     // What the film's programs draw with: the unit square, the windows'
     // uniform buffer, filled once a frame by the backdrop and read by every
     // frame after it, and the lettering.
@@ -383,6 +414,12 @@ void main() {
         bool     glyphsUploaded = false;
         SProgram backdrop, frame, frost;
         std::unordered_map<MONITORID, SCoarse> coarse;
+        // What the windows' buffer and the programs' impulses hold now, so a
+        // frame that would upload the same skips it. One buffer serves every
+        // monitor in turn, so this is what was uploaded last, not a
+        // monitor's.
+        std::optional<SWindowsBlock>    windowsUploaded;
+        std::optional<SImpulseUniforms> impulsesUploaded;
     };
 
     struct SState {
@@ -410,6 +447,11 @@ void main() {
         double                                  time = 0;
         Clock::time_point                       clocked;
         std::unordered_map<MONITORID, SMonitor> monitors;
+        // When some monitor's scene last changed, and the power supply as last
+        // read (onBattery()), for pacing().
+        Clock::time_point                       changed;
+        Clock::time_point                       powerRead;
+        bool                                    battery = false;
         std::unordered_map<uint64_t, SMotion>   motion; // each window's, by stable id
         std::deque<SImpulse>                    impulses;
         uint64_t                                impulseGeneration = 0;
@@ -843,12 +885,11 @@ void main() {
     // rules again, as the fadeout's own copy sees. Run at each close event and
     // before reading a scene; forgets fadeouts Hyprland has let go.
     void claimFadeouts() {
-        static auto                     ROUNDING = CConfigValue<Config::INTEGER>("decoration:rounding");
-        std::unordered_set<const void*> alive;
-        for (const auto& fadeout : Desktop::fadingOutState()->fadeouts()) {
+        static auto ROUNDING = CConfigValue<Config::INTEGER>("decoration:rounding");
+        const auto& fadeouts = Desktop::fadingOutState()->fadeouts();
+        for (const auto& fadeout : fadeouts) {
             if (!isWindowFadeout(fadeout))
                 continue;
-            alive.insert(fadeout.get());
             if (const auto [entry, fresh] = g->closed.try_emplace(fadeout.get(), SClosed{float(*ROUNDING)}); fresh && g->closing) {
                 entry->second = {g->closing->presentation().rounding(), g->closing->metadata().stableID()};
                 for (auto& [id, state] : g->monitors)
@@ -857,7 +898,7 @@ void main() {
             }
         }
         g->closing.reset();
-        std::erase_if(g->closed, [&](const auto& entry) { return !alive.contains(entry.first); });
+        std::erase_if(g->closed, [&](const auto& entry) { return std::ranges::none_of(fadeouts, [&](const auto& f) { return f.get() == entry.first; }); });
     }
 
     // Whether Hyprland, drawing window w with `drawn` in `ctx`, covers what is
@@ -895,10 +936,13 @@ void main() {
 
     // The windows Hyprland draws on this monitor in this frame, and those
     // fading out after closing, where they are drawn, the first WINDOWS_MAX
-    // of them; and where attention is.
-    SScene readScene(PHLMONITOR monitor, SMonitor& state) {
-        const auto now = Clock::now();
-        SScene     scene;
+    // of them; and where attention is: read into the monitor's pending
+    // scene, whose storage every frame reuses.
+    void readScene(PHLMONITOR monitor, SMonitor& state) {
+        const auto now   = Clock::now();
+        SScene&    scene = state.pending;
+        scene.shapes.clear();
+        scene.focusedIndex = -1;
         const auto focused = Desktop::focusState()->window();
         PHLWINDOW  focusedHere;
         // Each shape's place in the order Hyprland draws it, lowest first
@@ -910,7 +954,9 @@ void main() {
         // fullscreen window, the windows allowed over it, and the fadeouts
         // over it.
         enum ePass : int { TILED, TILED_FADEOUTS, FLOATING, FLOATING_FADEOUTS, FULLSCREEN, OVER_FULLSCREEN, OVER_FULLSCREEN_FADEOUTS };
-        std::vector<double> stacking;
+        static std::vector<double> stacking;
+        static std::vector<size_t> rank;
+        stacking.clear();
         const auto          drawOrder = [](const PHLWORKSPACE& workspace, int pass, double order) {
             int place = 0;
             if (workspace && workspace->type() == Workspace::eWorkspaceType::SPECIAL) {
@@ -993,7 +1039,7 @@ void main() {
                                          fadeout->zIndex()));
         }
         // Depth, 0 on top.
-        std::vector<size_t> rank(stacking.size());
+        rank.resize(stacking.size());
         std::iota(rank.begin(), rank.end(), 0);
         std::ranges::sort(rank, {}, [&](size_t k) { return stacking[k]; });
         for (size_t k = 0; k < rank.size(); k++)
@@ -1028,7 +1074,6 @@ void main() {
         scene.focusAlpha = scene.focusedIndex >= 0 ? scene.shapes[scene.focusedIndex].alpha : state.alphaFrom * (1.F - k);
         const auto& area = monitor->m_reservedArea;
         scene.reserved   = {float(area.top()), float(area.right()), float(area.bottom()), float(area.left())};
-        return scene;
     }
 
     // The impulse ring as it stands, after letting go of impulses that have
@@ -1083,14 +1128,10 @@ void main() {
         return std::clamp(int(std::floor(std::log2(std::max(frostWidth(*SIZE, *PASSES) / 2, 1.0)))), 1, 2);
     }
 
-    // A monitor's frost as Hyprland's blur is set (film.lua sets its size
-    // from the film's frost), worked out as play/scene.js's frost() works it.
-    SFrostPlan frostPlan(const PHLMONITOR& monitor) {
-        static auto SIZE   = CConfigValue<Config::INTEGER>("decoration:blur:size");
-        static auto PASSES = CConfigValue<Config::INTEGER>("decoration:blur:passes");
-        const double sigma  = frostWidth(*SIZE, *PASSES);
-        const auto   pixels = monitor->m_transformedSize;
-        SFrostPlan   plan;
+    // A frost `sigma` screen pixels wide over `pixels`, worked out as
+    // play/scene.js's frost() works it.
+    SFrostPlan frostPlan(double sigma, const Vector2D& pixels) {
+        SFrostPlan plan;
         plan.read          = frostLevel();
         const auto halve   = [](std::array<int, 2> size, int by) { return std::array{(size[0] + (1 << by) - 1) >> by, (size[1] + (1 << by) - 1) >> by}; };
         plan.sizes.push_back(halve({int(pixels.x), int(pixels.y)}, plan.read));
@@ -1113,6 +1154,23 @@ void main() {
         for (int k = depth; k >= 1; k--)
             plan.steps.push_back({.kernel = 2, .from = k, .to = k == 1 ? READ : k - 1});
         return plan;
+    }
+
+    // The monitor's frost planned again as Hyprland's blur is set (film.lua
+    // sets its size from the film's frost), only when that or the monitor's
+    // size changed; whether it did. New sizes let go of the old levels.
+    bool replan(SCoarse& coarse, const PHLMONITOR& monitor) {
+        static auto SIZE   = CConfigValue<Config::INTEGER>("decoration:blur:size");
+        static auto PASSES = CConfigValue<Config::INTEGER>("decoration:blur:passes");
+        const std::pair planned{frostWidth(*SIZE, *PASSES), monitor->m_transformedSize};
+        if (coarse.planned == planned)
+            return false;
+        auto plan = frostPlan(planned.first, planned.second);
+        if (plan.sizes != coarse.plan.sizes)
+            forgetLevels(coarse);
+        coarse.plan    = std::move(plan);
+        coarse.planned = planned;
+        return true;
     }
 
     // Fills the texture bound on the active unit from `data`, with the
@@ -1147,14 +1205,13 @@ void main() {
     // What every draw of this frame reads alike: the windows' block (0,
     // bound; contract.glsl's Windows, a shape a window) and the impulses,
     // kept by the film's programs, aged by the monotonic clock (not `time`,
-    // which wraps), each naming its window by its place in `shapes`.
+    // which wraps), each naming its window by its place in `shapes`. Each is
+    // uploaded only when it differs from what GL holds: at rest, neither.
     void uploadShapes(const PHLMONITOR& monitor, const std::vector<SShape>& shapes) {
-        const auto size = monitor->m_size;
-        const auto now  = Clock::now();
-        struct {
-            std::array<float, WINDOWS_MAX * 12> shapes{};
-            std::array<uint32_t, 32 * 32>       tiles{};
-        } block;
+        const auto       size = monitor->m_size;
+        const auto       now  = Clock::now();
+        SWindowsBlock    block;
+        SImpulseUniforms u;
         const auto tile = [](double v, double across) { return int(std::clamp(std::floor(v / across * 32), 0.0, 31.0)); };
         for (size_t i = 0; i < shapes.size(); i++) {
             const auto& s  = shapes[i];
@@ -1165,9 +1222,7 @@ void main() {
                 for (int x = tile(s.rect[0] - r, size.x); x <= tile(s.rect[0] + s.rect[2] + r, size.x); x++)
                     block.tiles[y * 32 + x] |= 1U << i;
         }
-        std::array<float, 4 * IMPULSES> impulses{};
-        std::array<int, IMPULSES>       kinds{}, windows{};
-        int                             count = 0;
+        auto& [impulses, kinds, windows, count] = u;
         for (const auto& e : g->impulses) {
             const auto  found = e.window ? std::ranges::find(shapes, e.window, &SShape::id) : shapes.end();
             const int   i     = found == shapes.end() ? -1 : int(found - shapes.begin());
@@ -1185,8 +1240,17 @@ void main() {
             else if (e.kind != IMPULSE_CLOSE)
                 flare[0] += 0.6F * rise * rise * (3.F - 2.F * rise) * std::exp(-age * 3.5F) * (e.kind == IMPULSE_OPEN ? 1.F : e.strength);
         }
-        glBufferData(GL_UNIFORM_BUFFER, sizeof(block), &block, GL_STREAM_DRAW);
-        for (const auto* p : {&g->gpu.backdrop, &g->gpu.frame}) {
+        auto& gpu = g->gpu;
+        // A new buffer when it changed, not a write into the one the last
+        // frame's draws may still be reading: no wait on the GPU.
+        if (!gpu.windowsUploaded || std::memcmp(&*gpu.windowsUploaded, &block, sizeof(block)) != 0) {
+            glBufferData(GL_UNIFORM_BUFFER, sizeof(block), &block, GL_STREAM_DRAW);
+            gpu.windowsUploaded = block;
+        }
+        if (gpu.impulsesUploaded && std::memcmp(&*gpu.impulsesUploaded, &u, sizeof(u)) == 0)
+            return;
+        gpu.impulsesUploaded = u;
+        for (const auto* p : {&gpu.backdrop, &gpu.frame}) {
             if (!p->id)
                 continue;
             glUseProgram(p->id);
@@ -1548,15 +1612,23 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             glBindBuffer(GL_UNIFORM_BUFFER, gpu.windows);
             auto&        state = g->monitors[monitor->m_id];
             uploadShapes(monitor, state.drawn.shapes);
-            // The world drawn for the frost and the frost are kept, and drawn
-            // again only when the world changed, or for a new plan or frost
-            // target.
-            const auto plan      = frostPlan(monitor);
+            // The world drawn for the frost is kept, and drawn again only when
+            // the world changed or for a new plan. The frost is made from it
+            // only on a frame something reads it: Hyprland has queued its
+            // precomputed blur for this frame's elements (CRenderPass::render
+            // sets it from them all before any is drawn), so a frosted window
+            // or layer that appears, moves or comes with a workspace reads a
+            // frost made this frame.
             auto&      coarse    = gpu.coarse[monitor->m_id];
+            const bool whole     = replan(coarse, monitor) || state.stale;
+            state.stale          = false;
             const auto resources = monitor->resources();
             const auto blur      = resources && resources->m_blurFB && resources->m_blurFB->isAllocated() ? resources->m_blurFB : nullptr;
-            const bool whole     = coarse.plan != plan || state.stale || !blur || !frosts(coarse, blur);
-            state.stale          = false;
+            const auto scene     = ctx.sceneResources();
+            const bool readers   = scene ? scene->blurQueued() : monitor->m_blurFBShouldRender;
+            if (whole)
+                coarse.frostCurrent = false;
+            const bool frosting = blur && readers && (!coarse.frostCurrent || !frosts(coarse, blur));
             if (!g->glyphPixels.empty()) {
                 glActiveTexture(GL_TEXTURE5);
                 glBindTexture(GL_TEXTURE_2D, gpu.glyphs);
@@ -1578,19 +1650,19 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             const auto proj = g_pHyprRenderer->projectBoxToTarget(ctx, CBox{0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y});
             const auto set  = [&] { setUniforms(gpu.backdrop, monitor, state.drawn, state.answered, proj, CBox{0, 0, monitor->m_size.x, monitor->m_size.y}); };
             // The world over all of the monitor, on the same projection, at
-            // the size of the level the glass reads, made into the glass's
-            // frost (frost()); Hyprland's framebuffers and viewport put back.
-            if (whole) {
+            // the size of the level the glass reads, and the glass's frost
+            // made from it (frost()); Hyprland's framebuffers and viewport put
+            // back.
+            if (whole || frosting) {
                 GLint draw = 0, read = 0;
                 glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
                 glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
                 std::array<GLint, 4> viewport{};
                 glGetIntegerv(GL_VIEWPORT, viewport.data());
-                if (coarse.plan.sizes != plan.sizes) {
+                if (coarse.textures.empty()) {
                     // The world (which the frames read too, worldAt()), each
                     // level it is halved to, and the last's size again (TEMP).
-                    forgetLevels(coarse);
-                    auto sizes = plan.sizes;
+                    auto sizes = coarse.plan.sizes;
                     sizes.push_back(sizes.back());
                     coarse.textures.resize(sizes.size());
                     coarse.fbos.resize(sizes.size());
@@ -1609,16 +1681,20 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
                         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, coarse.textures[k], 0);
                     }
                 }
-                coarse.plan = plan;
-                glBindFramebuffer(GL_FRAMEBUFFER, coarse.fbos[0]);
-                glViewport(0, 0, plan.sizes[0][0], plan.sizes[0][1]);
-                coarse.proj = proj;
-                prepare(coarse, true, set);
-                glUniform1f(gpu.backdrop.spread, (1 << plan.read) / monitor->m_scale);
                 g_pHyprOpenGL->disableScissor();
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-                if (blur)
+                if (whole) {
+                    glBindFramebuffer(GL_FRAMEBUFFER, coarse.fbos[0]);
+                    glViewport(0, 0, coarse.plan.sizes[0][0], coarse.plan.sizes[0][1]);
+                    coarse.proj = proj;
+                    prepare(coarse, true, set);
+                    glUniform1f(gpu.backdrop.spread, (1 << coarse.plan.read) / monitor->m_scale);
+                    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                }
+                if (frosting) {
+                    glBindVertexArray(gpu.vao);
                     frost(coarse, blur);
+                    coarse.frostCurrent = true;
+                }
                 glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
                 glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
                 glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
@@ -1693,8 +1769,10 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             const auto monitor = m_monitor.lock();
             if (!monitor || !g || !g->gpu.frame.id)
                 return {};
-            auto&      state  = g->monitors[monitor->m_id];
-            const auto shapes = state.drawn.shapes;
+            // The scene as the backdrop drew it this frame; nothing changes it
+            // until the next frame's render stage.
+            auto&       state  = g->monitors[monitor->m_id];
+            const auto& shapes = state.drawn.shapes;
             const auto found  = std::ranges::find(shapes, m_window, &SShape::id);
             if (found == shapes.end())
                 return {};
@@ -1845,26 +1923,113 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             g->settling = wl_event_loop_add_idle(g_pCompositor->m_wlEventLoop, settled, nullptr);
     }
 
-    // A frame shown asks for the next wherever the world moves. Otherwise
-    // nothing asks.
-    void onPresented(const PHLMONITOR& monitor) {
+    // Whether this machine runs on its battery: a battery of the system's own
+    // (not a mouse's or a headset's, whose scope is Device) discharging. Read
+    // at most every POWER_EVERY, so frames between read no file.
+    bool onBattery(Clock::time_point now) {
+        if (g->powerRead != Clock::time_point{} && now - g->powerRead < POWER_EVERY)
+            return g->battery;
+        g->powerRead = now;
+        g->battery   = false;
+        std::error_code error;
+        for (auto supply = std::filesystem::directory_iterator("/sys/class/power_supply", error); !error && supply != std::filesystem::directory_iterator{};
+             supply.increment(error)) {
+            const auto read = [&](const char* name) { return readFile(supply->path() / name); };
+            if (read("type").starts_with("Battery") && !read("scope").starts_with("Device") && read("status").starts_with("Discharging"))
+                g->battery = true;
+        }
+        return g->battery;
+    }
+
+    // Whether the world is paced now: on battery with the desktop at rest
+    // (no scene changed for REST_AFTER: no window moving, resizing, opening,
+    // closing or fading, no focus easing, no workspace sliding; no impulse
+    // alive; no voice). Anything else draws at the panel's full rate, from
+    // the very frame it starts.
+    bool pacing(Clock::time_point now) {
+        const bool voice = g->voice > 0 && now - g->voiceReceived <= VOICE_STALE;
+        return now - g->changed >= REST_AFTER && g->impulses.empty() && !voice && onBattery(now);
+    }
+
+    // How many of the monitor's vblanks a paced frame lasts: a whole number,
+    // so each step of the world is as long as the last, down to PACED_RATE
+    // (a 119.88 Hz mode is a 120 Hz panel).
+    int pacedVblanks(const PHLMONITOR& monitor) {
+        return std::max(1, int(std::floor(monitor->m_refreshRate / PACED_RATE + 0.05)));
+    }
+
+    // Asks for a frame of the world moving here.
+    void ask(const PHLMONITOR& monitor, SMonitor& state) {
+        state.asked = true;
+        redraw(monitor);
+    }
+
+    int onPace(void* data) {
+        if (!g)
+            return 0;
+        const auto id = MONITORID(reinterpret_cast<intptr_t>(data));
+        auto&      state = g->monitors[id];
+        state.armed      = false;
+        for (const auto& monitor : State::monitorState()->monitors())
+            if (monitor->m_id == id && moves(monitor))
+                ask(monitor, state);
+        return 0;
+    }
+
+    // A frame shown asks for the next wherever the world moves: at once at
+    // full rate; paced, from a timer a quarter vblank after the vblank before
+    // the one it is drawn for, late enough not to be shown at that one and
+    // early enough to be drawn for the next. A frame shown meanwhile for a
+    // client's damage leaves the timer as it is, so the steps stay even.
+    // Otherwise nothing asks.
+    void onPresented(const PHLMONITOR& monitor, Time::steady_tp shown) {
         if (!g || g->source.empty())
             return;
-        if (moves(monitor))
-            redraw(monitor);
-        else
+        if (!moves(monitor)) {
             standStill();
+            return;
+        }
+        auto&      state  = g->monitors[monitor->m_id];
+        const auto now    = Clock::now();
+        const auto period = std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / std::max(monitor->m_refreshRate, 1.F)));
+        const int  vblanks = pacedVblanks(monitor);
+        if (vblanks < 2 || !pacing(now)) {
+            if (state.armed)
+                wl_event_source_timer_update(state.pace, 0);
+            state.armed = false;
+            ask(monitor, state);
+            return;
+        }
+        if (state.armed)
+            return;
+        // The frame's own vblank, when the backend says it plainly.
+        const auto at   = shown <= now && now - shown < period ? shown : now;
+        const auto wait = std::chrono::ceil<std::chrono::milliseconds>(at + period * (vblanks - 1) + period / 4 - now).count();
+        if (!state.pace)
+            state.pace = wl_event_loop_add_timer(g_pCompositor->m_wlEventLoop, onPace, reinterpret_cast<void*>(intptr_t(monitor->m_id)));
+        if (wait <= 0 || !state.pace) {
+            ask(monitor, state);
+            return;
+        }
+        wl_event_source_timer_update(state.pace, int(wait));
+        state.armed = true;
     }
 
     void onPre(PHLMONITOR monitor) {
         if (!g || g->source.empty())
             return;
-        auto& state   = g->monitors[monitor->m_id];
-        state.pending = readScene(monitor, state);
+        auto&      state = g->monitors[monitor->m_id];
+        const auto now   = Clock::now();
+        readScene(monitor, state);
+        if (state.pending != state.drawn)
+            g->changed = now;
         // The world's clock runs on while it moves here, each frame at its
-        // render.pre, just after the vblank before the one it is shown at.
-        if (moves(monitor))
-            advance(Clock::now());
+        // render.pre, just after the vblank before the one it is shown at;
+        // paced, only on the frames the plugin asked for, so a client's
+        // frame between shows the world as it was.
+        if (moves(monitor) && (state.asked || !pacing(now)))
+            advance(now);
+        state.asked  = false;
         state.answer = readAnswer();
         // A change of the world changes it everywhere: all of it, the frost
         // too, is drawn again in this frame.
@@ -1945,9 +2110,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (!g || !monitor)
             return;
         g->watches.push_back(monitor->m_events.dpmsChanged.listen([] { settle(); }));
-        g->watches.push_back(monitor->m_events.presented.listen([ref = PHLMONITORREF{monitor}](const Time::steady_tp&) {
+        g->watches.push_back(monitor->m_events.presented.listen([ref = PHLMONITORREF{monitor}](const Time::steady_tp& shown) {
             if (const auto monitor = ref.lock())
-                onPresented(monitor);
+                onPresented(monitor, shown);
         }));
     };
     for (const auto& monitor : State::monitorState()->monitors())
@@ -1956,8 +2121,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         watch(monitor);
         settle();
     });
-    // A monitor that leaves takes its coarse world with it.
+    // A monitor that leaves takes its coarse world and its pacing with it.
     static auto REMOVED = Event::bus()->m_events.monitor.removed.listen([](PHLMONITOR monitor) {
+        if (const auto state = g->monitors.find(monitor->m_id); state != g->monitors.end() && state->second.pace) {
+            wl_event_source_remove(state->second.pace);
+            state->second.pace  = nullptr;
+            state->second.armed = false;
+        }
         if (const auto coarse = g->gpu.coarse.find(monitor->m_id); coarse != g->gpu.coarse.end()) {
             g_pHyprOpenGL->makeEGLCurrent();
             forget(coarse->second);
@@ -1973,6 +2143,9 @@ APICALL EXPORT void PLUGIN_EXIT() {
     closeFeed();
     if (g->settling)
         wl_event_source_remove(g->settling);
+    for (const auto& [id, state] : g->monitors)
+        if (state.pace)
+            wl_event_source_remove(state.pace);
     clearProgram();
     if (!g->glassShader.empty())
         g_pHyprRenderer->reloadShaders("");
