@@ -330,6 +330,31 @@ flock 8
 gsettings set org.gnome.desktop.interface icon-theme Omarchy-Cinema 2>/dev/null || true
 EOF
 
+# Foot is glass under a film too: Hyprland blurs, and so turns to glass,
+# only a window whose background is see-through, and foot asks for blur
+# behind only a background less than opaque, which Omarchy's foot.ini leaves
+# at 1. So the applied film's foot.ini gets the 0.999 the other windows have
+# (film.lua), in both palettes; Omarchy writes the file afresh at every
+# switch, so another theme has none, and foot reads it when a terminal starts.
+# The hook holds Omarchy's switch lock, so no switch swaps the theme between
+# its look and its change. Omarchy runs no hooks headless, so the install
+# runs it itself once it has refreshed the theme.
+foot=~/.config/omarchy/hooks/theme-set.d/omarchy-cinema-foot
+[[ -z $remove ]] && made "$foot" 755 <<'EOF'
+#!/bin/bash
+# The applied film's terminals see-through enough to be glass.
+theme=~/.local/state/omarchy/current/theme
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set.lock"
+flock 9
+[[ -f $theme/backdrop.frag && -f $theme/foot.ini ]] || exit 0
+grep -qx 'alpha=0.999' "$theme/foot.ini" && exit 0
+awk '{ print }
+  match($0, /^\[colors-(dark|light)\]/) { print "alpha=0.999"; seen[substr($0, 1, RLENGTH)] }
+  END { for (s in want) if (!(s in seen)) printf "\n%s\nalpha=0.999\n", s }
+  BEGIN { want["[colors-dark]"]; want["[colors-light]"] }' "$theme/foot.ini" >"$theme/foot.ini.new"
+mv "$theme/foot.ini.new" "$theme/foot.ini"
+EOF
+
 # Google Chrome's header follows the applied theme too (browser/chrome-theme):
 # Omarchy runs it after every theme switch, and Chrome takes the theme it
 # writes, in ~/.local/share/omarchy-cinema/chrome, at its next start. This
@@ -389,6 +414,7 @@ fi
 # Omarchy's own installers do, so it has what this changed (film values,
 # popup, icons, or their absence).
 omarchy-theme-refresh || echo "omarchy-theme-refresh failed: the applied theme catches up at the next switch" >&2
+[[ -n $remove ]] || bash "$foot"
 
 # An install in a session takes effect at the next login.
 if [[ -z $remove ]] && running && ! hyprctl plugin list 2>/dev/null | grep -q '^Plugin backdrop '; then

@@ -167,8 +167,8 @@ if [[ ${1:-} == --inside ]]; then
   fi
 
   # What a login finds: this checkout installed, and the theme applied the
-  # way Omarchy's installer applies one (with the GNOME step it leaves to the
-  # session).
+  # way Omarchy's installer applies one, with the GNOME step and the
+  # theme-set hooks (the film's terminals) it leaves to the session.
   if ! said=$("$here/install" 2>&1); then
     printf '%s\nhidden-desktop: ./install failed\n' "$said" >&2
     exit 1
@@ -178,6 +178,7 @@ if [[ ${1:-} == --inside ]]; then
   if [[ -n $theme ]]; then
     OMARCHY_THEME_HEADLESS=1 omarchy-theme-set "$theme"
     omarchy-theme-set-gnome
+    omarchy-hook theme-set "$theme" >/dev/null 2>&1
   fi
   login
   "$@"
