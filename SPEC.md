@@ -111,6 +111,17 @@ gets solid windows and a notice. Glassy mode's 0.75 fade on Files is replaced
 by the same glass. The session's `film.lua` sets glow, glass and frost from
 the film's `colors.toml`: a film theme holds no Lua.
 
+**Layers of glass.** Each background shade in `colors.toml` is its own layer
+(plugin/glass.glsl, `CINEMA_GLASSES` and `CINEMA_FROSTS`). `background` and
+`lighter_background` are the film's `glass`. `dark_background`, where apps
+put sidebars (T3 Code's, Files'), is 35% of the way from it to opaque, and
+`darker_background` is 50% of the way. Both dark shades sit over a frost
+twice as wide, made one level below the other in Hyprland's blur texture.
+So a sidebar reads as a thicker pane of frosted glass, even where its shade
+is only a level or two from the background's. The step adds no setting: a
+film gets the layers from the shades it already names, and a shade it does
+not name is the background's layer.
+
 The same step holds the glass to the palette, so a film draws its world at
 full strength behind it: where a pixel composited over Hyprland's frost
 would leave `colors.toml`'s muted text under 4.5:1 (WCAG), it moves toward

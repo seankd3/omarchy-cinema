@@ -22,6 +22,14 @@ var Scene = (function () {
     return colors;
   }
 
+  // colors.toml's background shades, in the order the glass layers them
+  // (plugin/glass.glsl's CINEMA_BACKGROUNDS, main.cpp's SHADES), a shade it
+  // does not name as its background; none without a background.
+  const SHADES = ["background", "lighter_background", "dark_background", "darker_background"];
+  function shades(colors) {
+    return colors.background ? SHADES.map(n => colors[n] || colors.background) : [];
+  }
+
   // A quoted number colors.toml gives (glass, frost), its first line's, else
   // `otherwise`.
   function setting(text, name, otherwise) {
@@ -127,40 +135,58 @@ var Scene = (function () {
     return passes > 0 ? 2 ** passes * (0.66 * Math.max(size, 0) + 0.2) : 0;
   }
 
-  // The glass's frost for Hyprland's blur of `size` and `passes` on a screen
-  // `pixels` in size, as main.cpp's frost() makes it (plugin/frost.glsl): as
-  // wide as Hyprland's own (frostWidth()), without its steps. `read` is the
-  // level of Hyprland's blur texture the glass reads it at, which the world
-  // is drawn at the size of, at most a quarter, so the frost is at least two
-  // of its texels wide; `sizes` are the world's and those of the levels it
-  // is halved to; and `steps` are in order, { kernel, from, to, sigma,
-  // along } between "world", a level 1, 2, ..., "temp" (the size of the
-  // last) and "read" (the level the glass reads). Each step spreads the
-  // light by a variance (px²) of its source's texel squared times its own:
-  // a halving 1.75, a doubling 0.6875, a Gaussian its width squared, and the
-  // world drawn a point a texel (1/12) and the glass's B-spline read (1/3)
-  // five twelfths. The world is halved while that leaves room under the
-  // frost, and a Gaussian takes the rest.
+  // The glass's frosts for Hyprland's blur of `size` and `passes` on a screen
+  // `pixels` in size, as main.cpp's frost() makes them (plugin/frost.glsl):
+  // "read", as wide as Hyprland's own (frostWidth()) without its steps, and
+  // "deep", twice as wide a level coarser, for the dark shades' thicker glass
+  // (plugin/glass.glsl). `read` is the level of Hyprland's blur texture the
+  // glass reads the first at, which the world is drawn at the size of, at
+  // most a quarter, so the frost is at least two of its texels wide.
+  // `sizes` are the textures': the world, the levels it is halved to (1, 2,
+  // ...), then a temporary one the size of each level a Gaussian runs at;
+  // `steps` are in order, { kernel, from, to, sigma, along } between those
+  // and the two frosts. Each step spreads the light by a variance (px²) of
+  // its source's texel squared times its own: a halving 1.75, a doubling
+  // 0.6875, a Gaussian its width squared, the world drawn a point a texel
+  // (1/12) and the glass's B-spline read (1/3). Each frost halves the world
+  // to its own size and on while that leaves room, and a Gaussian takes the
+  // rest; the deep one goes first, so the read one finds the first halving
+  // made.
   function frost(size, passes, pixels) {
     const sigma = frostWidth(size, passes);
     const read = Math.min(Math.max(Math.floor(Math.log2(Math.max(sigma / 2, 1))), 1), 2);
     const sizes = [pixels.map(p => Math.ceil(p / 2 ** read))];
-    const texel = size => pixels[0] / size[0];
-    let spent = texel(sizes[0]) ** 2 * 5 / 12;
-    for (;;) {
-      const last = sizes[sizes.length - 1], next = last.map(p => Math.ceil(p / 2));
-      const cost = 1.75 * texel(last) ** 2 + 0.6875 * texel(next) ** 2;
-      if (Math.min(...next) < 2 || spent + cost > sigma * sigma) break;
-      sizes.push(next);
-      spent += cost;
+    const half = s => s.map(p => Math.ceil(p / 2));
+    const texel = s => pixels[0] / s[0];
+    // A frost `width` wide, read `first` halvings below the world.
+    const tier = (out, width, first) => {
+      while (sizes.length <= first) sizes.push(half(sizes[sizes.length - 1]));
+      let spent = texel(sizes[0]) ** 2 / 12 + texel(sizes[first]) ** 2 / 3, depth = first;
+      for (let k = 0; k < first; k++) spent += 1.75 * texel(sizes[k]) ** 2;
+      for (;;) {
+        const next = half(sizes[depth]);
+        const cost = 1.75 * texel(sizes[depth]) ** 2 + 0.6875 * texel(next) ** 2;
+        if (Math.min(...next) < 2 || spent + cost > width * width) break;
+        if (sizes.length === depth + 1) sizes.push(next);
+        depth++;
+        spent += cost;
+      }
+      return { out, first, depth, g: Math.max(Math.sqrt(Math.max(width * width - spent, 0)) / texel(sizes[depth]), 0.25) };
+    };
+    const tiers = [tier("deep", 2 * sigma, 1), tier("read", sigma, 0)];
+    // Levels 1 to `halved` hold the world halved; a Gaussian or a doubling
+    // over a level leaves it holding a frost instead.
+    const temps = {}, steps = [];
+    let halved = 0;
+    for (const { out, first, depth, g } of tiers) {
+      for (let k = halved + 1; k <= depth; k++) steps.push({ kernel: 0, from: k - 1, to: k });
+      halved = Math.max(halved, depth);
+      if (!(depth in temps)) temps[depth] = sizes.push(sizes[depth]) - 1;
+      steps.push({ kernel: 1, from: depth, to: temps[depth], sigma: g, along: [1, 0] });
+      steps.push({ kernel: 1, from: temps[depth], to: depth === first ? out : depth, sigma: g, along: [0, 1] });
+      for (let k = depth; k > first; k--) steps.push({ kernel: 2, from: k, to: k === first + 1 ? out : k - 1 });
+      if (depth > first) halved = Math.min(halved, first);
     }
-    const depth = sizes.length - 1, level = k => (k === 0 ? "world" : k);
-    const g = Math.max(Math.sqrt(Math.max(sigma * sigma - spent, 0)) / texel(sizes[depth]), 0.25);
-    const steps = [];
-    for (let k = 1; k <= depth; k++) steps.push({ kernel: 0, from: level(k - 1), to: k });
-    steps.push({ kernel: 1, from: level(depth), to: "temp", sigma: g, along: [1, 0] });
-    steps.push({ kernel: 1, from: "temp", to: depth === 0 ? "read" : depth, sigma: g, along: [0, 1] });
-    for (let k = depth; k >= 1; k--) steps.push({ kernel: 2, from: k, to: k === 1 ? "read" : k - 1 });
     return { read, sizes, steps };
   }
 
@@ -170,5 +196,5 @@ var Scene = (function () {
     return source.replace(/[^!-~]+/g, " ").trim().slice(-RING);
   }
 
-  return { OPEN, CLOSE, LAND, FOCUS, palette, setting, reach, layout, storyboard, flare, uniforms, frostWidth, frost, words };
+  return { OPEN, CLOSE, LAND, FOCUS, palette, shades, setting, reach, layout, storyboard, flare, uniforms, frostWidth, frost, words };
 })();

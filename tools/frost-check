@@ -2,16 +2,17 @@
 # /// script
 # dependencies = ["moderngl", "numpy", "quickjs"]
 # ///
-"""Holds the glass's frost to what it is for: light behind the glass, moving,
-shows through it as a glow that moves with it. The frost once moved a glow up
-to 1.9 px from its light and pulsed it 32% as the light crossed its texels,
-which read as low resolution and lag. This makes the frost as the plugin
-does (plugin/frost.glsl, by play/scene.js's plan), and reads it as the glass
-does (plugin/glass.glsl), from a small light swept
+"""Holds the glass's frosts to what they are for: light behind the glass,
+moving, shows through it as a glow that moves with it. The frost once moved a
+glow up to 1.9 px from its light and pulsed it 32% as the light crossed its
+texels, which read as low resolution and lag. This makes both frosts as the
+plugin does (plugin/frost.glsl, by play/scene.js's plan), and reads each as
+the glass does (plugin/glass.glsl), from a small light swept
 across the world in quarter pixels, and fails when, for any of Hyprland's
-blur sizes 1 to 8 (film.lua's frost), the glow leaves its light by more than
-half a pixel, pulses by more than 3%, or is more than 5% off the width
-Hyprland's own blur of that size has (scene.js, frostWidth()).
+blur sizes 1 to 8 (film.lua's frost), a glow leaves its light by more than
+half a pixel, pulses by more than 3%, or is more than 5% off its width: the
+width Hyprland's own blur of that size has (scene.js, frostWidth()), and
+twice that for the deep frost the dark shades' glass reads.
 
     tools/frost-check
 
@@ -49,13 +50,16 @@ quad = ctx.buffer(np.array([0, 0, 1, 0, 0, 1, 1, 1], dtype="f4").tobytes())
 vao = ctx.vertex_array(program, [(quad, "2f", "pos")])
 
 
+TIERS = {"read": 1, "deep": 2}  # each frost, and its width in Hyprland's
+
+
 def frost(plan, world):
-    """The frost the glass reads, made from `world` (float RGBA rows, at the
-    plan's world size) by the plan's steps."""
-    sizes = {"world": plan["sizes"][0], "temp": plan["sizes"][-1], "read": [PIXELS[0] >> plan["read"], PIXELS[1] >> plan["read"]]}
-    sizes.update({k: s for k, s in enumerate(plan["sizes"][1:], 1)})
+    """The frosts the glass reads, by name, made from `world` (float RGBA
+    rows, at the plan's world size) by the plan's steps."""
+    read = [PIXELS[0] >> plan["read"], PIXELS[1] >> plan["read"]]
+    sizes = {"read": read, "deep": [max(s >> 1, 1) for s in read], **dict(enumerate(plan["sizes"]))}
     textures = {str(k): ctx.texture(tuple(s), 4, dtype="f4") for k, s in sizes.items()}
-    textures["world"].write(world.astype("f4").tobytes())
+    textures["0"].write(world.astype("f4").tobytes())
     for texture in textures.values():
         texture.repeat_x = texture.repeat_y = False
     for step in plan["steps"]:
@@ -66,7 +70,7 @@ def frost(plan, world):
         if step["kernel"] == 1:
             program["sigma"].value, program["along"].value = step["sigma"], tuple(step["along"])
         vao.render(moderngl.TRIANGLE_STRIP)
-    out = np.frombuffer(textures["read"].read(), dtype="f4").reshape(sizes["read"][1], sizes["read"][0], 4)[..., 0]
+    out = {t: np.frombuffer(textures[t].read(), dtype="f4").reshape(sizes[t][1], sizes[t][0], 4)[..., 0] for t in TIERS}
     for texture in textures.values():
         texture.release()
     return out
@@ -105,21 +109,24 @@ def light(x, y, size):
 failed = False
 for size in range(1, 9):
     plan = model("frost", size, 2, PIXELS)
-    want = model("frostWidth", size, 2)
-    off, peaks, widths = [], [], []
+    off, peaks, widths = ({t: [] for t in TIERS} for _ in range(3))
     for k in range(32):
         x = 500 + k / 4
-        out = shown(frost(plan, light(x, 128, plan["sizes"][0])))
-        gx = np.arange(PIXELS[0]) + 0.5
-        row = out.sum(axis=0)
-        c = (row * gx).sum() / row.sum()
-        off.append(c - x)
-        peaks.append(out.max())
-        widths.append(np.sqrt((row * (gx - c) ** 2).sum() / row.sum()))
-    off = (max(off) - min(off)) / 2
-    pulse = max(peaks) / min(peaks) - 1
-    width = float(np.mean(widths))
-    ok = off <= 0.5 and pulse <= 0.03 and abs(width / want - 1) <= 0.05
-    failed |= not ok
-    print(f"size {size}: glow off its light ±{off:.2f} px, pulses {100 * pulse:.1f}%, {width:.2f} px wide for {want:.2f}{'' if ok else '  FAILS'}")
+        made = frost(plan, light(x, 128, plan["sizes"][0]))
+        for t in TIERS:
+            out = shown(made[t])
+            gx = np.arange(PIXELS[0]) + 0.5
+            row = out.sum(axis=0)
+            c = (row * gx).sum() / row.sum()
+            off[t].append(c - x)
+            peaks[t].append(out.max())
+            widths[t].append(np.sqrt((row * (gx - c) ** 2).sum() / row.sum()))
+    for t, times in TIERS.items():
+        want = times * model("frostWidth", size, 2)
+        drift = (max(off[t]) - min(off[t])) / 2
+        pulse = max(peaks[t]) / min(peaks[t]) - 1
+        width = float(np.mean(widths[t]))
+        ok = drift <= 0.5 and pulse <= 0.03 and abs(width / want - 1) <= 0.05
+        failed |= not ok
+        print(f"size {size} {t}: glow off its light ±{drift:.2f} px, pulses {100 * pulse:.1f}%, {width:.2f} px wide for {want:.2f}{'' if ok else '  FAILS'}")
 sys.exit(1 if failed else 0)

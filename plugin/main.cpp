@@ -82,6 +82,9 @@ namespace {
         IMPULSE_LAND,
         IMPULSE_FOCUS,
     };
+    // colors.toml's background shades, in the order glass.glsl's layers of
+    // glass take them (CINEMA_BACKGROUNDS): the background first.
+    constexpr std::array<std::string_view, 4> SHADES{"background", "lighter_background", "dark_background", "darker_background"};
     // The most windows a monitor's scene holds: the contract's Windows block
     // has room for this many, three vec4s each.
     constexpr size_t WINDOWS_MAX = 256;
@@ -245,14 +248,16 @@ void main() {
         UNIFORMS(DECLARE)
     };
 
-    // How a monitor's frost is made (frost(), plugin/frost.glsl, and
+    // How a monitor's frosts are made (frost(), plugin/frost.glsl, and
     // play/scene.js's frost(), which it follows): the level of Hyprland's
-    // blur texture the glass reads it at, the sizes of the world drawn for
-    // it and of the levels that is halved to, and the steps. A step reads
-    // level `from` into level `to` by its kernel (0 halves, 1 is a Gaussian
-    // `sigma` texels wide along `along`, 2 doubles); level 0 is the world,
-    // TEMP the last level's size and READ the level the glass reads.
-    constexpr int TEMP = -1, READ = -2;
+    // blur texture the glass reads the frost at (the deep frost, twice as
+    // wide, one below it), the sizes of the textures they are made through
+    // (the world drawn for them, the levels that is halved to, then one the
+    // size of each level a Gaussian runs at), and the steps. A step reads
+    // texture `from` into `to` by its kernel (0 halves, 1 is a Gaussian
+    // `sigma` texels wide along `along`, 2 doubles); READ and DEEP are the
+    // two levels the glass reads.
+    constexpr int READ = -1, DEEP = -2;
     struct SFrostStep {
         int                  kernel = 0, from = 0, to = 0;
         float                sigma  = 0;
@@ -282,10 +287,11 @@ void main() {
         // it was last drawn here (CBackdropPass).
         bool       frostCurrent = false;
         // A texture and its framebuffer for each of the plan's sizes (the
-        // world first), then for TEMP; and the framebuffer of the level the
-        // glass reads.
-        std::vector<GLuint> textures, fbos;
-        GLuint              feed = 0, frostFbo = 0;
+        // world first), and the framebuffers of the two levels the glass
+        // reads (READ, then DEEP).
+        std::vector<GLuint>   textures, fbos;
+        std::array<GLuint, 2> frostFbos{};
+        GLuint                feed = 0;
         Mat3x3              proj;
         uint64_t            feedUploaded = 0;
         uint32_t            feedCount = 0, feedPos = 0;
@@ -296,9 +302,9 @@ void main() {
         GLuint world() const {
             return textures.empty() ? 0 : textures[0];
         }
-        // Where a level is kept: its texture's index (TEMP after the levels).
-        size_t at(int level) const {
-            return level == TEMP ? plan.sizes.size() : size_t(level);
+        // The framebuffer a step draws into.
+        GLuint fbo(int to) const {
+            return to < 0 ? frostFbos[READ - to] : fbos[to];
         }
     };
 
@@ -371,10 +377,10 @@ void main() {
     void forgetLevels(SCoarse& coarse) {
         glDeleteTextures(coarse.textures.size(), coarse.textures.data());
         glDeleteFramebuffers(coarse.fbos.size(), coarse.fbos.data());
-        glDeleteFramebuffers(1, &coarse.frostFbo);
+        glDeleteFramebuffers(coarse.frostFbos.size(), coarse.frostFbos.data());
         coarse.textures.clear();
         coarse.fbos.clear();
-        coarse.frostFbo = 0;
+        coarse.frostFbos = {};
         coarse.frosted.reset();
     }
 
@@ -426,10 +432,12 @@ void main() {
         HANDLE                                  handle = nullptr;
         std::string                             source; // the theme's shader, empty when it has none
         std::optional<std::string>              refused; // the theme and contract last refused, said once
-        std::array<float, 3>                    accent{1, 1, 1}, background{0, 0, 0}, muted{1, 1, 1};
-        // The colours the theme paints backgrounds in: these turn to glass,
-        // keeping `glass` of themselves (colors.toml's, 0.85 without one).
-        std::vector<std::array<float, 3>>       backgrounds;
+        std::array<float, 3>                    accent{1, 1, 1}, muted{1, 1, 1};
+        // The colours the theme paints backgrounds in, as SHADES names them:
+        // these turn to glass, the background keeping `glass` of itself
+        // (colors.toml's, 0.85 without one) and the others as glass.glsl
+        // layers them.
+        std::array<std::optional<std::array<float, 3>>, SHADES.size()> shades;
         float                                   glass = 0.85F;
         uint64_t                                generation = 1;
         uint64_t                                compiled   = 0;
@@ -632,8 +640,8 @@ void main() {
         static const std::regex PALETTE(R"re(^\s*([a-z_]+)\s*=\s*"#([0-9a-fA-F]{6})")re");
         static const std::regex SETTING(R"re(^\s*(glass|reach)\s*=\s*"\s*([^"\s]*)\s*")re");
         std::istringstream      colors(readFile(dir + "/colors.toml"));
-        g->backgrounds.clear();
-        g->glass = 0.85F;
+        g->shades = {};
+        g->glass  = 0.85F;
         g->reach = INFINITY;
         for (std::string line; std::getline(colors, line);) {
             std::smatch match;
@@ -651,10 +659,8 @@ void main() {
                 g->accent = value;
             else if (name == "muted")
                 g->muted = value;
-            if (name == "background")
-                g->background = value;
-            if (name == "background" || name == "dark_background" || name == "darker_background" || name == "lighter_background")
-                g->backgrounds.push_back(value);
+            if (const auto shade = std::ranges::find(SHADES, name); shade != SHADES.end())
+                g->shades[shade - SHADES.begin()] = value;
         }
 
         readGlyphs(dir + "/glyphs.png");
@@ -1121,38 +1127,71 @@ void main() {
     // The level of Hyprland's blur texture the glass reads the frost at, the
     // same on every monitor (Hyprland's blur is as wide in each one's
     // pixels): the world is drawn at its size, at most a quarter of the
-    // screen's, so the frost is at least two of its texels wide.
+    // screen's, so the frost is at least two of its texels wide. The deep
+    // frost, twice as wide, is read at the level below it.
     int frostLevel() {
         static auto SIZE   = CConfigValue<Config::INTEGER>("decoration:blur:size");
         static auto PASSES = CConfigValue<Config::INTEGER>("decoration:blur:passes");
         return std::clamp(int(std::floor(std::log2(std::max(frostWidth(*SIZE, *PASSES) / 2, 1.0)))), 1, 2);
     }
 
-    // A frost `sigma` screen pixels wide over `pixels`, worked out as
-    // play/scene.js's frost() works it.
+    // The frosts for `sigma` screen pixels over `pixels`, worked out as
+    // play/scene.js's frost() works them: each halves the world to its own
+    // size and on while that leaves room, a Gaussian takes the rest, and it
+    // is doubled back; the deep one goes first, so the other finds the first
+    // halving made.
     SFrostPlan frostPlan(double sigma, const Vector2D& pixels) {
         SFrostPlan plan;
-        plan.read          = frostLevel();
-        const auto halve   = [](std::array<int, 2> size, int by) { return std::array{(size[0] + (1 << by) - 1) >> by, (size[1] + (1 << by) - 1) >> by}; };
-        plan.sizes.push_back(halve({int(pixels.x), int(pixels.y)}, plan.read));
+        plan.read        = frostLevel();
+        const auto halve = [](std::array<int, 2> size, int by) { return std::array{(size[0] + (1 << by) - 1) >> by, (size[1] + (1 << by) - 1) >> by}; };
         const auto texel = [&](std::array<int, 2> size) { return pixels.x / size[0]; };
-        double     spent = texel(plan.sizes[0]) * texel(plan.sizes[0]) * 5 / 12;
-        for (;;) {
-            const auto last = plan.sizes.back(), next = halve(last, 1);
-            const auto cost = 1.75 * texel(last) * texel(last) + 0.6875 * texel(next) * texel(next);
-            if (std::min(next[0], next[1]) < 2 || spent + cost > sigma * sigma)
-                break;
-            plan.sizes.push_back(next);
-            spent += cost;
+        auto&      sizes = plan.sizes;
+        sizes.push_back(halve({int(pixels.x), int(pixels.y)}, plan.read));
+        // A frost `width` wide into `out`, read `first` halvings below the world.
+        struct STier {
+            int   out, first, depth;
+            float g;
+        };
+        const auto tier = [&](int out, double width, int first) {
+            while (int(sizes.size()) <= first)
+                sizes.push_back(halve(sizes.back(), 1));
+            double spent = texel(sizes[0]) * texel(sizes[0]) / 12 + texel(sizes[first]) * texel(sizes[first]) / 3;
+            for (int k = 0; k < first; k++)
+                spent += 1.75 * texel(sizes[k]) * texel(sizes[k]);
+            int depth = first;
+            for (;;) {
+                const auto next = halve(sizes[depth], 1);
+                const auto cost = 1.75 * texel(sizes[depth]) * texel(sizes[depth]) + 0.6875 * texel(next) * texel(next);
+                if (std::min(next[0], next[1]) < 2 || spent + cost > width * width)
+                    break;
+                if (int(sizes.size()) == depth + 1)
+                    sizes.push_back(next);
+                depth++;
+                spent += cost;
+            }
+            return STier{out, first, depth, float(std::max(std::sqrt(std::max(width * width - spent, 0.0)) / texel(sizes[depth]), 0.25))};
+        };
+        const std::array tiers{tier(DEEP, 2 * sigma, 1), tier(READ, sigma, 0)};
+        // Levels 1 to `halved` hold the world halved; a Gaussian or a
+        // doubling over a level leaves it holding a frost instead.
+        std::vector<int> temps(sizes.size(), -1);
+        int              halved = 0;
+        for (const auto& [out, first, depth, g] : tiers) {
+            for (int k = halved + 1; k <= depth; k++)
+                plan.steps.push_back({.kernel = 0, .from = k - 1, .to = k});
+            halved = std::max(halved, depth);
+            if (temps[depth] < 0) {
+                const auto size = sizes[depth];
+                temps[depth]    = sizes.size();
+                sizes.push_back(size);
+            }
+            plan.steps.push_back({.kernel = 1, .from = depth, .to = temps[depth], .sigma = g, .along = {1, 0}});
+            plan.steps.push_back({.kernel = 1, .from = temps[depth], .to = depth == first ? out : depth, .sigma = g, .along = {0, 1}});
+            for (int k = depth; k > first; k--)
+                plan.steps.push_back({.kernel = 2, .from = k, .to = k == first + 1 ? out : k - 1});
+            if (depth > first)
+                halved = std::min(halved, first);
         }
-        const int   depth = plan.sizes.size() - 1;
-        const float g     = std::max(std::sqrt(std::max(sigma * sigma - spent, 0.0)) / texel(plan.sizes[depth]), 0.25);
-        for (int k = 1; k <= depth; k++)
-            plan.steps.push_back({.kernel = 0, .from = k - 1, .to = k});
-        plan.steps.push_back({.kernel = 1, .from = depth, .to = TEMP, .sigma = g, .along = {1, 0}});
-        plan.steps.push_back({.kernel = 1, .from = TEMP, .to = depth == 0 ? READ : depth, .sigma = g, .along = {0, 1}});
-        for (int k = depth; k >= 1; k--)
-            plan.steps.push_back({.kernel = 2, .from = k, .to = k == 1 ? READ : k - 1});
         return plan;
     }
 
@@ -1421,7 +1460,7 @@ void main() {
     // written to one of the plugin's and loaded with reloadShaders.
     std::string glassShaderSource() {
         const auto glass = g->glass;
-        if (g->source.empty() || glass >= 1.F || g->backgrounds.empty())
+        if (g->source.empty() || glass >= 1.F || !g->shades[0])
             return "";
         const auto found = std::ranges::find(SHADERS, std::string_view{"surface.frag"}, [](const auto& pair) { return pair.first; });
         if (found == SHADERS.end())
@@ -1438,15 +1477,15 @@ void main() {
         }
         const auto vec3 = [](const std::array<float, 3>& c) { return std::format("vec3({:.6f}, {:.6f}, {:.6f})", c[0], c[1], c[2]); };
         std::string keys;
-        for (const auto& c : g->backgrounds)
-            keys += (keys.empty() ? "" : ", ") + vec3(c);
+        for (const auto& c : g->shades)
+            keys += (keys.empty() ? "" : ", ") + vec3(c.value_or(*g->shades[0]));
         source.insert(at, std::format(R"(// omarchy-cinema glass: see the backdrop plugin.
 const vec3  CINEMA_BACKGROUNDS[{}] = vec3[]({});
 const float CINEMA_GLASS = {:.4f};
-const int   CINEMA_FROST_LEVEL = {};
+const int   CINEMA_FROST_LEVEL = {}, CINEMA_FROST_DEEP_LEVEL = {};
 const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
 )",
-                                      g->backgrounds.size(), keys, glass, frostLevel(), vec3(g->background), vec3(g->muted)) +
+                                      SHADES.size(), keys, glass, frostLevel(), frostLevel() + 1, vec3(*g->shades[0]), vec3(g->muted)) +
                               DITHER + GLASS);
         source.insert(source.find(read), "float cinemaOwn = pixColor.a, cinemaCard = 1.0;\n#if USE_BLUR\n#if USE_DISCARD\n    if (discardAlpha) cinemaCard = smoothstep(discardAlphaValue, 0.95, cinemaOwn);\n#endif\n    pixColor = mix(pixColor, cinemaGlass(pixColor), cinemaCard);\n#endif\n\n");
         source = std::regex_replace(source, std::regex(R"(\w+\.a <= discardAlphaValue)"), "cinemaOwn <= discardAlphaValue");
@@ -1490,7 +1529,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         glUniform2f(p.resolution, monitor->m_size.x, monitor->m_size.y);
         glUniform1f(p.time, answer.time);
         glUniform3fv(p.accent, 1, g->accent.data());
-        glUniform3fv(p.background, 1, g->background.data());
+        glUniform3fv(p.background, 1, g->shades[0].value_or(std::array<float, 3>{}).data());
         glUniform4fv(p.focused, 1, scene.focus.data());
         glUniform4fv(p.reserved, 1, scene.reserved.data());
         glUniform1i(p.drawnWorld, 4);
@@ -1536,26 +1575,31 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         return blur->getTexture() == coarse.frosted.lock() && coarse.frostedAs == std::tuple{blur->m_size, blur->m_drmFormat, coarse.plan.read};
     }
 
-    // The glass's frost: the world drawn for it, through the plan's steps
-    // (frost.glsl), into level `read` of Hyprland's blur texture, which every
-    // read of it is held to, so each reader samples it by its own coordinates
-    // and nothing is drawn screen-sized. Level 0 stays Hyprland's (forget()).
-    // It leaves the viewport and the draw framebuffer its own.
+    // The glass's frosts: the world drawn for them, through the plan's steps
+    // (frost.glsl), into levels `read` and `read` + 1 of Hyprland's blur
+    // texture, which every read of it is held to (a plain read, by its
+    // screen-sized coordinates, to `read`), so each reader samples it by its
+    // own coordinates and nothing is drawn screen-sized. Every step reads one
+    // of the plan's own textures, never the blur texture it draws into.
+    // Level 0 stays Hyprland's (forget()). It leaves the viewport and the
+    // draw framebuffer its own.
     void frost(SCoarse& coarse, const SP<Render::IFramebuffer>& blur) {
         const auto  glass = blur->getTexture();
         const auto& plan  = coarse.plan;
         glActiveTexture(GL_TEXTURE4);
         if (!frosts(coarse, blur)) {
-            // Its levels down to the one read, made from level 0 as it is.
+            // Its levels down to the deep one, made from level 0 as it is.
             glBindTexture(GL_TEXTURE_2D, glass->m_texID);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, plan.read);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, plan.read + 1);
             glGenerateMipmap(GL_TEXTURE_2D);
             glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_LOD, plan.read);
-            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, plan.read);
+            glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_LOD, plan.read + 1);
             glass->minFilter = GL_LINEAR_MIPMAP_NEAREST;
             glass->setTexParameter(GL_TEXTURE_MIN_FILTER, glass->minFilter);
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.frostFbo);
-            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glass->m_texID, plan.read);
+            for (int level = 0; level < 2; level++) {
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.frostFbos[level]);
+                glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glass->m_texID, plan.read + level);
+            }
             coarse.frosted   = glass;
             coarse.frostedAs = {blur->m_size, blur->m_drmFormat, plan.read};
         }
@@ -1564,11 +1608,13 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
         glUniformMatrix3fv(p.proj, 1, GL_TRUE, std::array<float, 9>{2, 0, -1, 0, 2, -1, 0, 0, 1}.data());
         glUniform4f(p.area, 0, 0, 1, 1);
         glUniform1i(p.source, 4);
-        const std::array<int, 2> frost{std::max(int(blur->m_size.x) >> plan.read, 1), std::max(int(blur->m_size.y) >> plan.read, 1)};
+        // The two levels' sizes, as GL makes them from level 0.
+        const auto       sized = [&](int by) { return std::array{std::max(int(blur->m_size.x) >> by, 1), std::max(int(blur->m_size.y) >> by, 1)}; };
+        const std::array read{sized(plan.read), sized(plan.read + 1)};
         for (const auto& step : plan.steps) {
-            const auto size = step.to == READ ? frost : plan.sizes[step.to == TEMP ? plan.sizes.size() - 1 : step.to];
-            glBindTexture(GL_TEXTURE_2D, coarse.textures[coarse.at(step.from)]);
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, step.to == READ ? coarse.frostFbo : coarse.fbos[coarse.at(step.to)]);
+            const auto size = step.to < 0 ? read[READ - step.to] : plan.sizes[step.to];
+            glBindTexture(GL_TEXTURE_2D, coarse.textures[step.from]);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, coarse.fbo(step.to));
             glViewport(0, 0, size[0], size[1]);
             glUniform2f(p.resolution, size[0], size[1]);
             glUniform1i(p.kernel, step.kernel);
@@ -1661,14 +1707,13 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
                 glGetIntegerv(GL_VIEWPORT, viewport.data());
                 if (coarse.textures.empty()) {
                     // The world (which the frames read too, worldAt()), each
-                    // level it is halved to, and the last's size again (TEMP).
-                    auto sizes = coarse.plan.sizes;
-                    sizes.push_back(sizes.back());
+                    // level it is halved to, and the Gaussians' temporaries.
+                    const auto& sizes = coarse.plan.sizes;
                     coarse.textures.resize(sizes.size());
                     coarse.fbos.resize(sizes.size());
                     glGenTextures(sizes.size(), coarse.textures.data());
                     glGenFramebuffers(sizes.size(), coarse.fbos.data());
-                    glGenFramebuffers(1, &coarse.frostFbo);
+                    glGenFramebuffers(coarse.frostFbos.size(), coarse.frostFbos.data());
                     glActiveTexture(GL_TEXTURE4);
                     for (size_t k = 0; k < sizes.size(); k++) {
                         glBindTexture(GL_TEXTURE_2D, coarse.textures[k]);

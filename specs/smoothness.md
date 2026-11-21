@@ -56,7 +56,12 @@ Hyprland only composites.
   0.41 px, the quarter-size world's own floor, and pulses at most 2.1%
   (tools/frost-check). At 2880x1800, GPU at 2340 MHz: the frost 0.05 to
   0.07 ms (was 0.01 to 0.03), the B-spline read 0.22 ms over a whole screen
-  of glass (0.06 bilinear). The bar, the dock and the
+  of glass (0.06 bilinear). The same plan makes a deep frost, twice as
+  wide, in the level below (an eighth of the screen; a quarter for a light
+  frost), from the world halved again: the dark shades' thicker glass reads
+  it (SPEC.md, "Glass"). It runs first, so the other finds the first
+  halving made, and it is held to the same drift, pulse and width
+  (tools/frost-check); its cost is not measured yet. The bar, the dock and the
   notifications read the same frost (film.lua's xray rule): their layers
   cover the screen or stay mapped empty down its edges, and a live blur under
   them runs every frame (0.8 ms under the bar; +0.30 ms a frame at rest

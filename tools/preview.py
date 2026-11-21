@@ -233,11 +233,11 @@ def coarse_world(ctx, theme, t, windows, focused, **answers):
 
 
 def frosted(ctx, theme, world):
-    """The frost the glass reads, as main.cpp's frost() makes it from the
-    world (frost.glsl), into the level read, in 8 bits."""
+    """The two frosts the glass reads, as main.cpp's frost() makes them from
+    the world (frost.glsl), in 8 bits, as levels 0 and 1 of one texture."""
     p = plan(theme)
-    textures = {"world": world, "read": ctx.texture((PIXELS[0] >> p["read"], PIXELS[1] >> p["read"]), 4)}
-    textures["temp"] = ctx.texture(tuple(p["sizes"][-1]), 4, internal_format=0x8059)
+    read = (PIXELS[0] >> p["read"], PIXELS[1] >> p["read"])
+    textures = {0: world, "read": ctx.texture(read, 4), "deep": ctx.texture(tuple(max(s >> 1, 1) for s in read), 4)}
     for k, size in enumerate(p["sizes"][1:], 1):
         textures[k] = ctx.texture(tuple(size), 4, internal_format=0x8059)
     for texture in textures.values():
@@ -256,7 +256,11 @@ def frosted(ctx, theme, world):
             program["sigma"].value = step["sigma"]
             program["along"].value = tuple(step["along"])
         vao.render(moderngl.TRIANGLE_STRIP)
-    return textures["read"]
+    frost = textures["read"]
+    frost.build_mipmaps(0, 1)
+    frost.write(textures["deep"].read(), level=1)
+    frost.filter = (moderngl.LINEAR_MIPMAP_NEAREST, moderngl.LINEAR)
+    return frost
 
 
 def render(theme, t, windows, focused, frame=None, **answers):
@@ -312,8 +316,7 @@ def surface(theme, colors):
     used = set(re.findall(r"\b(USE_\w+)", " ".join(l for l in source.splitlines() if l.lstrip().startswith(("#if", "#elif")))))
     defines = "".join(f"#define {u} {int(u in ('USE_RGBA', 'USE_BLUR'))}\n" for u in sorted(used)) + "#define SOURCE_TF 9\n#define TARGET_TF 9\n"
     source = source.replace("#version 300 es", "#version 300 es\n" + defines, 1)
-    names = ("background", "dark_background", "darker_background", "lighter_background")
-    shades = [c for n, c in colors.items() if n in names]
+    shades = model("shades", colors)
     glass = setting(theme, "glass", 0.85)
     if glass >= 1 or not shades:
         return source
@@ -321,7 +324,7 @@ def surface(theme, colors):
     out = "layout(location = 0) out vec4 fragColor;"
     source = source.replace(out, f"""const vec3  CINEMA_BACKGROUNDS[{len(shades)}] = vec3[]({", ".join(map(vec3, shades))});
 const float CINEMA_GLASS = {min(max(glass, 0.0), 1.0):.4f};
-const int   CINEMA_FROST_LEVEL = 0;
+const int   CINEMA_FROST_LEVEL = 0, CINEMA_FROST_DEEP_LEVEL = 1;
 const vec3  CINEMA_BACKGROUND = {vec3(colors["background"])}, CINEMA_MUTED = {vec3(colors.get("muted", (0.5, 0.5, 0.5)))};
 """ + DITHER + (ROOT / "plugin/glass.glsl").read_text() + out, 1)
     read = "#if USE_DISCARD && !USE_BLUR"
@@ -347,9 +350,10 @@ def glass(theme, image, t, windows, focused, border=True, **answers):
     """`image` with the windows over it as the film's glass shows them: the
     plugin's frost (frosted()),
     then each window, 0.999 opaque, drawn by Hyprland's window shader with
-    the glass in it: its background the theme's, a block of text lines in
-    the foreground and muted colours, and a lit border on the focused one
-    where the film draws no frame."""
+    the glass in it: its background the theme's, a sidebar in its
+    dark_background (the thicker glass), a block of text lines in the
+    foreground and muted colours, and a lit border on the focused one where
+    the film draws no frame."""
     from PIL import ImageDraw
 
     colors = palette(theme)
@@ -370,9 +374,12 @@ def glass(theme, image, t, windows, focused, border=True, **answers):
         x, y, w, h = (round(v * scale) for v in (x, y, w, h))
         app = Image.new("RGBA", (w, h), ink("background"))
         draw = ImageDraw.Draw(app)
+        side = w // 4
+        draw.rectangle((0, 0, side - 1, h), fill=ink("dark_background" if "dark_background" in colors else "background"))
         for row in range(6):
             ty = 60 + row * 44
-            draw.rectangle((50, ty, 50 + int(w * (0.75 - 0.08 * (row % 3))), ty + 14), fill=ink("muted" if row % 3 == 2 else "foreground"))
+            draw.rectangle((24, ty, side - 24 - 20 * (row % 3), ty + 14), fill=ink("muted" if row % 2 else "foreground"))
+            draw.rectangle((side + 50, ty, side + 50 + int((w - side) * (0.75 - 0.08 * (row % 3))), ty + 14), fill=ink("muted" if row % 3 == 2 else "foreground"))
         tex = ctx.texture((w, h), 4, app.tobytes())
         tex.use(0)
         program["box"].value = (x, y, w, h)

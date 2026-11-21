@@ -65,7 +65,7 @@ const vec3 = c => `vec3(${c.map(v => v.toFixed(6)).join(", ")})`;
 // the variant for windows it blurs (its other steps off): the app's pixel
 // turned to glass, then the frost under it held to the palette.
 function glassSource(colors, glass) {
-  const shades = ["background", "dark_background", "darker_background", "lighter_background"].filter(n => colors[n]).map(n => colors[n]);
+  const shades = Scene.shades(colors);
   const held = glass < 1 && shades.length;
   return `#version 300 es
 #define USE_BLUR 1
@@ -79,7 +79,7 @@ uniform float alpha;
 layout(location = 0) out vec4 fragColor;
 ` + (held ? `const vec3 CINEMA_BACKGROUNDS[${shades.length}] = vec3[](${shades.map(vec3).join(", ")});
 const float CINEMA_GLASS = ${Math.min(Math.max(glass, 0), 1).toFixed(4)};
-const int CINEMA_FROST_LEVEL = 0;
+const int CINEMA_FROST_LEVEL = 0, CINEMA_FROST_DEEP_LEVEL = 1;
 const vec3 CINEMA_BACKGROUND = ${vec3(colors.background)}, CINEMA_MUTED = ${vec3(colors.muted || [0.5, 0.5, 0.5])};
 ${engine.dither}${engine.glass}` : "") + `
 void main() {
@@ -333,39 +333,48 @@ function scene(t, empty) {
 
 // ---- Drawing
 
-let coarse = null;    // { key, plan, textures: { world, 1, 2, ..., temp, read }, fbs: likewise, frostSize }
+let coarse = null;    // { key, plan, sizes, textures, fbs, texture, frostTex }
 const apps = new Map();
 
 function targets(target) {
   // film.lua sets the film's frost as Hyprland's blur size, with 2 passes.
   const plan = Scene.frost(film.frost, 2, [target.width, target.height]);
-  // The frost the glass reads, in 8 bits as Hyprland keeps it.
-  const frostSize = [target.width, target.height].map(p => Math.max(1, p >> plan.read));
-  const key = JSON.stringify([plan, frostSize]);
+  // The two frosts the glass reads, in 8 bits as Hyprland keeps them: the
+  // levels of its blur texture main.cpp's frost() draws into, here 0 and 1.
+  const read = [target.width, target.height].map(p => Math.max(1, p >> plan.read));
+  const key = JSON.stringify([plan, read]);
   if (coarse && coarse.key === key) return coarse;
   if (coarse) {
-    Object.values(coarse.textures).forEach(t => gl.deleteTexture(t));
+    [...coarse.textures, coarse.frostTex].forEach(t => gl.deleteTexture(t));
     Object.values(coarse.fbs).forEach(f => gl.deleteFramebuffer(f));
   }
-  // The world drawn for the frost (which the frames read too), each level
-  // it is halved to, the last's size again, and the frost.
-  const sizes = { world: plan.sizes[0], temp: plan.sizes[plan.sizes.length - 1] };
-  plan.sizes.slice(1).forEach((s, k) => { sizes[k + 1] = s; });
-  const textures = {}, fbs = {};
-  for (const [name, [w, h]] of Object.entries(sizes)) textures[name] = texture(w, h, gl.RGB10_A2, gl.RGBA, gl.UNSIGNED_INT_2_10_10_10_REV, null);
-  textures.read = texture8(frostSize);
-  for (const [name, t] of Object.entries(textures)) {
+  // The textures the plan's steps go through, the world first (which the
+  // frames read too), and the frosts' texture.
+  const textures = plan.sizes.map(([w, h]) => texture(w, h, gl.RGB10_A2, gl.RGBA, gl.UNSIGNED_INT_2_10_10_10_REV, null));
+  const frostTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, frostTex);
+  gl.texStorage2D(gl.TEXTURE_2D, 2, gl.RGBA8, ...read);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbs = {};
+  const attach = (name, t, level) => {
     fbs[name] = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbs[name]);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
-  }
-  coarse = { key, plan, sizes: { ...sizes, read: frostSize }, textures, fbs, texture: textures.world, frostTex: textures.read };
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, level);
+  };
+  textures.forEach((t, k) => attach(k, t, 0));
+  attach("read", frostTex, 0);
+  attach("deep", frostTex, 1);
+  const sizes = { ...plan.sizes, read, deep: read.map(p => Math.max(1, p >> 1)) };
+  coarse = { key, plan, sizes, textures, fbs, texture: textures[0], frostTex };
   return coarse;
 }
-const texture8 = ([w, h]) => texture(w, h, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, null);
 
-// A window's contents: the theme's background, a title and lines of text in
-// its foreground and muted colours, as tools/preview.py draws them.
+// A window's contents: the theme's background, a sidebar in its
+// dark_background, a title and lines of text in its foreground and muted
+// colours, as tools/preview.py draws them.
 function app(w) {
   const [pw, ph] = [Math.max(1, Math.round(w.rect[2] * scale)), Math.max(1, Math.round(w.rect[3] * scale))];
   const key = `${w.id} ${pw} ${ph}`;
@@ -376,13 +385,18 @@ function app(w) {
   x.fillStyle = css("background");
   x.fillRect(0, 0, pw, ph);
   x.scale(scale, scale);
+  const side = Math.round(w.rect[2] / 4);
+  x.fillStyle = css(film.palette.dark_background ? "dark_background" : "background");
+  x.fillRect(0, 0, side, w.rect[3]);
   x.fillStyle = css("foreground");
   x.font = "600 13px ui-monospace, monospace";
-  x.fillText(w.title, 18, 26);
+  x.fillText(w.title, side + 18, 26);
   x.fillText("×", w.rect[2] - 24, 26);
   for (let row = 0; row < 6; row++) {
+    x.fillStyle = css(row % 2 ? "muted" : "foreground");
+    x.fillRect(14, 48 + row * 30, side - 28 - 12 * (row % 3), 9);
     x.fillStyle = css(row % 3 === 2 ? "muted" : "foreground");
-    x.fillRect(18, 48 + row * 30, w.rect[2] * (0.75 - 0.08 * (row % 3)) - 18, 9);
+    x.fillRect(side + 18, 48 + row * 30, (w.rect[2] - side) * (0.75 - 0.08 * (row % 3)) - 18, 9);
   }
   const t = texture(pw, ph, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, c);
   apps.set(key, t);
@@ -427,12 +441,12 @@ function render(t, target = { fb: null, width: canvas.width, height: canvas.heig
   gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, ubo);
   gl.disable(gl.BLEND);
 
-  // The world drawn for the frost, and the frost the glass reads made from
+  // The world drawn for the frosts, and the frosts the glass reads made from
   // it by the plan's steps (frost.glsl), in 8 bits.
   gl.bindTexture(gl.TEXTURE_2D, null);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, c.fbs.world);
-  gl.viewport(0, 0, ...c.sizes.world);
-  filmProgram(programs.backdrop, u, all, size[0] / c.sizes.world[0]);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, c.fbs[0]);
+  gl.viewport(0, 0, ...c.sizes[0]);
+  filmProgram(programs.backdrop, u, all, size[0] / c.sizes[0][0]);
   gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, null);
   draw();
   gl.useProgram(frost.p);
