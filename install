@@ -333,12 +333,13 @@ EOF
 # Foot is glass under a film too: Hyprland blurs, and so turns to glass,
 # only a window whose background is see-through, and foot asks for blur
 # behind only a background less than opaque, which Omarchy's foot.ini leaves
-# at 1. So the applied film's foot.ini gets the 0.999 the other windows have
-# (film.lua), in both palettes; Omarchy writes the file afresh at every
-# switch, so another theme has none, and foot reads it when a terminal starts.
-# The hook holds Omarchy's switch lock, so no switch swaps the theme between
-# its look and its change. Omarchy runs no hooks headless, so the install
-# runs it itself once it has refreshed the theme.
+# at 1. So the applied film's foot.ini gets alpha=0.99 in both palettes —
+# 0.99 instead of 0.999 so omarchy-theme-set-foot sends 99% rather than
+# rounding to 100%, keeping already-open foot terminals glass across theme
+# switches as well. Omarchy writes the file afresh at every switch, so
+# another theme has none. The hook holds Omarchy's switch lock while editing,
+# then retints running terminals. Omarchy runs no hooks headless, so the
+# install runs it itself once it has refreshed the theme.
 foot=~/.config/omarchy/hooks/theme-set.d/omarchy-cinema-foot
 [[ -z $remove ]] && made "$foot" 755 <<'EOF'
 #!/bin/bash
@@ -347,12 +348,17 @@ theme=~/.local/state/omarchy/current/theme
 exec 9>"${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set.lock"
 flock 9
 [[ -f $theme/backdrop.frag && -f $theme/foot.ini ]] || exit 0
-grep -qx 'alpha=0.999' "$theme/foot.ini" && exit 0
-awk '{ print }
-  match($0, /^\[colors-(dark|light)\]/) { print "alpha=0.999"; seen[substr($0, 1, RLENGTH)] }
-  END { for (s in want) if (!(s in seen)) printf "\n%s\nalpha=0.999\n", s }
-  BEGIN { want["[colors-dark]"]; want["[colors-light]"] }' "$theme/foot.ini" >"$theme/foot.ini.new"
-mv "$theme/foot.ini.new" "$theme/foot.ini"
+if ! grep -qx 'alpha=0.99' "$theme/foot.ini"; then
+  awk '{ print }
+    match($0, /^\[colors-(dark|light)\]/) { print "alpha=0.99"; seen[substr($0, 1, RLENGTH)] }
+    END { for (s in want) if (!(s in seen)) printf "\n%s\nalpha=0.99\n", s }
+    BEGIN { want["[colors-dark]"]; want["[colors-light]"] }' "$theme/foot.ini" >"$theme/foot.ini.new"
+  mv "$theme/foot.ini.new" "$theme/foot.ini"
+fi
+exec 9>&-
+if [[ $HOME == "$(getent passwd "$(id -u)" | cut -d: -f6)" ]] && command -v omarchy-theme-set-foot >/dev/null; then
+  omarchy-theme-set-foot 2>/dev/null || true
+fi
 EOF
 
 # Google Chrome's header follows the applied theme too (browser/chrome-theme):

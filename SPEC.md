@@ -58,7 +58,11 @@ reads and measures once each window that reaches it (contract.glsl's `window()` 
 
 **The world keeps moving.** The world's own motion runs on the wall clock
 (contract.glsl, `time`) wherever it is seen, and each frame there draws it
-whole, glass and frost included, and asks for the next. Time stands still with
+whole, glass and frost included, and asks for the next. On battery, once the
+desktop has been at rest for 250 ms (no scene change, impulse or voice), a
+high-refresh display paces redraws to whole vblanks down to 60 Hz (every
+second vblank at 120 Hz) and returns to full rate on the frame anything
+changes. Time stands still with
 animations off, the session locked, or every monitor asleep or fullscreen;
 then the world is drawn again only when a window, the focus, voice, an
 answer or the agents' text changes, and what clients redraw (a cursor, a

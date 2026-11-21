@@ -136,7 +136,10 @@ Discussion's job).
 Held: the README (install, the toggles, uninstall, authoring, the
 fan-homage note and where every image comes from; MIT);
 `./install --uninstall`, which takes away only what the install added and
-puts back the Voxtype settings it changed; `tools/fresh-user`, a new Omarchy
+puts back the Voxtype settings it changed; `tools/check-shader-reload`, a fast
+regression gate for #43 verifying real frame commits and zero freed-program GL
+binds across `hyprctl reloadshaders` and `applyGlass()` film switches;
+`tools/fresh-user`, a new Omarchy
 user from /etc/skel, logged in once for Omarchy's first-run setup, in a
 hidden desktop: install, a login whose own config loads the engine with zero
 config errors, a film applied and moving on the screen (the frames the

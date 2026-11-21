@@ -136,11 +136,14 @@ drawn whole.
 
 It replaced a clock that ran only while the desktop changed and eased to a
 stop 2.6 s after (contract 7 to 15): a window streaming text made the film
-move, stop and move again. A film rate below the display's at rest was
-weighed and not built: every film moves something at 190 to 1200 logical px
-a second (Tron's runner round the focused window the fastest), which at 60
-frames on a 120 Hz screen steps 3 to 20 px a shown frame, and a rate below
-the display's needs a timer held to its vblanks.
+move, stop and move again. On AC power the world always runs at the display's
+full rate. On battery, once no monitor's scene has changed for 250 ms and no
+impulse or voice is alive, a display above 60 Hz paces redraws to whole
+vblanks down to 60 Hz (2 vblanks on a 120 Hz panel) via a timer armed a
+quarter vblank after the skipped vblank; only plugin-asked frames advance
+`time`, so client damage between paced frames shows the world as it was and
+steps stay even, and any scene change, impulse or voice wakes immediately to
+full rate.
 
 ## Measuring
 
