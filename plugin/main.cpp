@@ -21,6 +21,7 @@
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/render/Shader.hpp>
 #include <hyprland/src/render/WindowRenderPresentation.hpp>
 #include <hyprland/src/render/decorations/IHyprWindowDecoration.hpp>
 #include <hyprland/src/render/pass/PassElement.hpp>
@@ -282,6 +283,26 @@ void main() {
         }
     };
 
+    // Clears Hyprland's cached GL program binding (m_currentProgram) and
+    // unbinds any shader from the GL context. Hyprland's initShaders()
+    // destroys the previous SPreparedShaders without clearing
+    // m_currentProgram (Hyprland 0.57.2 src/render/OpenGL.cpp:988, 2418):
+    // a deleted-while-bound program stays alive until SGuest switches away,
+    // is then freed, and on NVIDIA its numeric ID is immediately reused for
+    // the next compiled shader (e.g. passthru.frag). useShader() then sees
+    // m_currentProgram == prog->program(), skips glUseProgram(), and the
+    // shader's first proj upload lands on the wrong program while its C++
+    // uniform cache locks the constant monitor matrix in—freezing scanout
+    // forever while mirrorFB (surface.frag) keeps updating (issue #43).
+    void clearProgram() {
+        if (!g_pHyprOpenGL)
+            return;
+        g_pHyprOpenGL->makeEGLCurrent();
+        const auto none = makeShared<CShader>();
+        g_pHyprOpenGL->useShader(none);
+        glUseProgram(0);
+    }
+
     // A pass is a guest in Hyprland's GL context. Hyprland skips binding a
     // program or texture unit it believes is still current, so a pass holds
     // one of these from its first GL call to its last, uploads included, and
@@ -293,6 +314,18 @@ void main() {
         std::array<GLint, 3> textures{};
         SGuest() {
             glGetIntegerv(GL_CURRENT_PROGRAM, &program);
+            if (program) {
+                GLint deleted = 0;
+                glGetProgramiv(program, GL_DELETE_STATUS, &deleted);
+                if (deleted) {
+                    if (g_pHyprOpenGL) {
+                        const auto none = makeShared<CShader>();
+                        g_pHyprOpenGL->useShader(none);
+                    }
+                    glUseProgram(0);
+                    program = 0;
+                }
+            }
             glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
             glGetIntegerv(GL_ACTIVE_TEXTURE, &unit);
             glGetIntegerv(GL_UNIFORM_BUFFER_BINDING, &uniforms);
@@ -1375,6 +1408,7 @@ const vec3  CINEMA_BACKGROUND = {}, CINEMA_MUTED = {};
             std::filesystem::create_directories(glassDir());
             std::ofstream(glassDir() + "/surface.frag") << wanted;
         }
+        clearProgram();
         if (g_pHyprRenderer->reloadShaders(wanted.empty() ? "" : glassDir()))
             g->glassShader = wanted;
     }
@@ -1939,10 +1973,10 @@ APICALL EXPORT void PLUGIN_EXIT() {
     closeFeed();
     if (g->settling)
         wl_event_source_remove(g->settling);
+    clearProgram();
     if (!g->glassShader.empty())
         g_pHyprRenderer->reloadShaders("");
     g_pHyprRenderer->context().m_pass.removeAllOfType("CBackdropPass");
-    g_pHyprOpenGL->makeEGLCurrent();
     deleteProgram();
     g.reset();
 }
