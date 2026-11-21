@@ -63,16 +63,19 @@ if [[ ${1:-} == --inside ]]; then
     join -t $'\t' -a 1 <(find .config .local -printf '%p\t%y %l %m\n' | sort -t $'\t' -k 1,1) \
       <(find .config .local -type f -exec sha256sum {} + | sed -E 's/^([0-9a-f]+)  (.*)$/\2\t\1/' | sort -t $'\t' -k 1,1)
   }
-  # A theme switch counts itself and keeps each theme's background.
+  # A theme switch counts itself and keeps each theme's background. A
+  # directory the install made stays while something else is in it, as the
+  # uninstall says (~/.local/share/icons once the session's switches link
+  # Omarchy's app icons there, issue 44); what is in it is held below.
   switches='^[.]local/state/omarchy/(current/theme[.]generation|theme-backgrounds)'
   awk -F '\t' -v switches="$switches" '
     FILENAME == ARGV[1] { before[$1] = $0; next }
     FILENAME == ARGV[2] { installed[$1] = $0; next }
-    { after[$1] = $0 }
+    { after[$1] = $0; parent = $1; sub("/[^/]*$", "", parent); full[parent] }
     END {
       for (p in installed) if (before[p] != installed[p]) changed[p]
       for (p in before) if (before[p] != installed[p]) changed[p]
-      for (p in changed) if (before[p] != after[p] && p !~ switches) print "changed by the install, not restored: " p
+      for (p in changed) if (before[p] != after[p] && p !~ switches && !(p in full)) print "changed by the install, not restored: " p
       for (p in after) if (!(p in before) && tolower(p) ~ /cinema/) print "left: " p
     }' <(list "$XDG_RUNTIME_DIR/fresh/before") <(list "$XDG_RUNTIME_DIR/fresh/installed") <(list ~) | sort >"$out/left.txt"
   [[ ! -s $out/left.txt ]] || fail "the uninstall left $(wc -l <"$out/left.txt") paths as they were not ($out/left.txt)"
