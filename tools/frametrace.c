@@ -7,6 +7,12 @@
 // The backdrop's program is the one with the plugin's vertex `area` (which
 // places every pixel, so no compiler drops it) and no `frameWindow` (only the
 // frame's program has that).
+//
+// It also appends "u <ns> <program>" each time a program is bound after GL
+// freed it (issue 43): Hyprland's shader reload deleted the bound program,
+// GL freed it once something else was bound, putting it back failed, and the
+// name went to the next program compiled, which Hyprland then took for bound
+// already and never bound.
 
 #define _GNU_SOURCE
 #include <GLES3/gl32.h>
@@ -27,6 +33,22 @@ static struct {
 } programs[PROGRAMS];
 static GLuint current;
 static int    out = -2;
+
+// A line for $FRAMETRACE, stamped on CLOCK_MONOTONIC.
+static void say(const char* kind, const char* value) {
+    if (out == -2) {
+        const char* path = getenv("FRAMETRACE");
+        out              = path ? open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644) : -1;
+    }
+    if (out < 0)
+        return;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    char      line[64];
+    const int n = snprintf(line, sizeof line, "%s %lld %s\n", kind, now.tv_sec * 1000000000LL + now.tv_nsec, value);
+    if (write(out, line, n) < 0)
+        out = -1;
+}
 
 static int slot(GLuint program) {
     return program % PROGRAMS;
@@ -51,8 +73,16 @@ GLint glGetUniformLocation(GLuint program, const GLchar* name) {
 
 void glUseProgram(GLuint program) {
     static void (*next)(GLuint);
-    if (!next)
-        next = dlsym(RTLD_NEXT, "glUseProgram");
+    static GLboolean (*exists)(GLuint);
+    if (!next) {
+        next   = dlsym(RTLD_NEXT, "glUseProgram");
+        exists = dlsym(RTLD_NEXT, "glIsProgram");
+    }
+    if (program && !exists(program)) {
+        char name[16];
+        snprintf(name, sizeof name, "%u", program);
+        say("u", name);
+    }
     current = program;
     next(program);
 }
@@ -63,18 +93,9 @@ void glUniform1f(GLint location, GLfloat value) {
         next = dlsym(RTLD_NEXT, "glUniform1f");
     const int s = slot(current);
     if (current && programs[s].program == current && programs[s].area && !programs[s].frame && location >= 0 && location == programs[s].time) {
-        if (out == -2) {
-            const char* path = getenv("FRAMETRACE");
-            out              = path ? open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644) : -1;
-        }
-        if (out >= 0) {
-            struct timespec now;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            char      line[64];
-            const int n = snprintf(line, sizeof line, "t %lld %.6f\n", now.tv_sec * 1000000000LL + now.tv_nsec, value);
-            if (write(out, line, n) < 0)
-                out = -1;
-        }
+        char seconds[32];
+        snprintf(seconds, sizeof seconds, "%.6f", value);
+        say("t", seconds);
     }
     next(location, value);
 }

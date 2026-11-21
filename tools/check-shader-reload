@@ -1,0 +1,137 @@
+#!/bin/bash
+# Issue 43's check: Hyprland's shader reloads leave no program bound that GL
+# has freed, and the film keeps moving on the screen through them. On
+# 2026-11-17 a reload deleted the bound program, GL freed it once the plugin
+# bound its own, the plugin's putting it back failed, and the name went to
+# the next program compiled, which Hyprland took for bound already: on the
+# P16's screen the last pass ran with no projection and the panel held one
+# frame. A nested Hyprland shows the freed program (frametrace's "u" lines)
+# but its screen still moves, so both are read.
+#
+#   tools/check-shader-reload [film] [other film]
+#
+# A bare Hyprland with this checkout's plugin logs in on tools/frameclock, in
+# a runtime, config and state directory of its own (no socket, bus or file of
+# your session's), under a theme with no film. Then the first film (jarvis)
+# is applied, `hyprctl reloadshaders` runs, and the other film (tron-legacy)
+# is applied: each film's glass the plugin loads with Hyprland's
+# reloadShaders. After each, the frames frameclock is handed change 30 times
+# within 2 s, where a frozen screen changes none. It takes about 7 s and
+# keeps nothing; it exits 0 when all of it held, else names the step that did
+# not and prints Hyprland's log.
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+first=${1:-jarvis} second=${2:-tron-legacy}
+for film in "$first" "$second"; do
+  [[ -f $here/themes/$film/backdrop.frag ]] || { echo "check-shader-reload: $film is not a film theme" >&2; exit 2; }
+done
+[[ $first != "$second" ]] || { echo "check-shader-reload: the films must differ, so the second loads new glass" >&2; exit 2; }
+make -s -C "$here/plugin"
+make -s -C "$here/tools"
+"$here/tools/yield" --within 1280x800 || { (($? == 1)) && exec "$here/tools/yield" "$0" "$@"; exit 75; }
+
+# The session's own directories, under a short path: a socket's path holds
+# at most 107 bytes, and Hyprland's is $XDG_RUNTIME_DIR/hypr/<instance>/.socket2.sock.
+run=$(mktemp -d /tmp/ct.XXXX)
+frameclock="" hyprland=""
+# However this ends, the session ends with it and leaves nothing.
+stop() {
+  local pid
+  for pid in $hyprland $frameclock; do
+    kill -TERM "$pid" 2>/dev/null || continue
+    for _ in {1..20}; do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    kill -KILL "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+  rm -rf "$run"
+}
+trap stop EXIT
+trap 'exit 130' INT TERM HUP
+fail() {
+  echo "check-shader-reload: $*" >&2
+  cat "$run"/hypr/*/hyprland.log >&2 2>/dev/null || cat "$run/hyprland.out" >&2
+  exit 1
+}
+
+unset HYPRLAND_INSTANCE_SIGNATURE DBUS_SESSION_BUS_ADDRESS WAYLAND_DISPLAY DISPLAY
+export HOME=$run XDG_RUNTIME_DIR=$run XDG_CONFIG_HOME=$run/config XDG_STATE_HOME=$run/state XDG_DATA_HOME=$run/data XDG_CACHE_HOME=$run/cache
+theme=$XDG_STATE_HOME/omarchy/current/theme
+mkdir -p "$run/stock" "${theme%/*}"
+ln -s "$run/stock" "$theme"
+# Only what draws a film: its plugin, Hyprland's blur in the shader the
+# glass patches, and the screen frameclock gives.
+cat >"$run/hyprland.lua" <<EOF
+hl.monitor({ output = "WAYLAND-1", mode = "preferred", position = "0x0", scale = 1 })
+hl.config({
+  render = { use_shader_blur_blend = true },
+  cursor = { invisible = true },
+  xwayland = { enabled = false },
+  misc = { disable_hyprland_logo = true, disable_splash_rendering = true },
+  ecosystem = { no_update_news = true, no_donation_nag = true },
+})
+hl.plugin.load("$here/plugin/build/backdrop.so")
+EOF
+
+frames=$run/frames.log
+: >"$frames"
+"$here/tools/build/frameclock" frameclock 1280x800 "$frames" &
+frameclock=$!
+until [[ -S $run/frameclock ]]; do kill -0 "$frameclock" 2>/dev/null || fail "frameclock did not start"; sleep 0.05; done
+LD_PRELOAD=$here/tools/build/frametrace.so FRAMETRACE=$frames WAYLAND_DISPLAY=frameclock Hyprland -c "$run/hyprland.lua" >"$run/hyprland.out" 2>&1 &
+hyprland=$!
+until HYPRLAND_INSTANCE_SIGNATURE=$(ls "$run/hypr" 2>/dev/null | head -1) && export HYPRLAND_INSTANCE_SIGNATURE &&
+  hyprctl -j monitors 2>/dev/null | jq -e 'any(.name == "WAYLAND-1" and .width > 0)' >/dev/null 2>&1; do
+  kill -0 "$hyprland" 2>/dev/null || fail "Hyprland did not start"
+  sleep 0.05
+done
+hyprctl plugin list | grep -q '^Plugin backdrop ' || fail "the plugin did not load"
+
+# Since line $1 of frames.log: no freed program bound, and the frames handed
+# over changed 30 times, within 2 s.
+held() {
+  local from=$1 _
+  for _ in {1..40}; do
+    tail -n "+$from" "$frames" | awk '
+      $1 == "u" { freed = 1; exit }
+      $1 == "c" { changes += $3 != "0000000000000000" && $3 != last; last = $3 }
+      END { exit freed ? 2 : changes < 30 }'
+    case $? in
+      0) return ;;
+      2) echo "a freed program was bound (frametrace: $(grep -c '^u ' "$frames") times)"; return 1 ;;
+    esac
+    sleep 0.05
+  done
+  echo "the screen did not move"
+  return 1
+}
+# Film $1 applied as a theme switch does: the theme, then a config reload,
+# and its glass loaded, as its colors.toml gives it.
+apply() {
+  local want
+  ln -sfn "$here/themes/$1" "$theme"
+  hyprctl reload >/dev/null || fail "hyprctl reload failed"
+  want=$(LC_ALL=C printf '%.4f' "$(sed -n 's/^glass = "\(.*\)"/\1/p' "$here/themes/$1/colors.toml")")
+  for _ in {1..40}; do
+    grep -qF "CINEMA_GLASS = $want;" "$run/omarchy-cinema/shaders/surface.frag" 2>/dev/null && return
+    sleep 0.05
+  done
+  fail "the plugin did not load $1's glass"
+}
+lines() { wc -l <"$frames"; }
+
+apply "$first"
+why=$(held 1) || fail "$first, applied: $why"
+from=$(($(lines) + 1))
+hyprctl reloadshaders >/dev/null || fail "hyprctl reloadshaders failed"
+why=$(held "$from") || fail "$first, after hyprctl reloadshaders: $why"
+from=$(($(lines) + 1))
+apply "$second"
+why=$(held "$from") || fail "$second, applied: $why"
+errors=$(hyprctl configerrors)
+[[ -z ${errors//[[:space:]]/} ]] || fail "config errors: $errors"
+
+# Hyprland's own exit, for a Lua config; the trap ends what is left.
+hyprctl dispatch 'hl.dsp.exit()' >/dev/null 2>&1 || true
+for _ in {1..20}; do kill -0 "$hyprland" 2>/dev/null || break; sleep 0.1; done
+echo "check-shader-reload: $first and $second hold through shader reloads"

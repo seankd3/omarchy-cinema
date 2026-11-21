@@ -205,21 +205,7 @@ done
 (($#)) || { echo "usage: tools/hidden-desktop [--fresh] [--size WxH] [--scale S] [--theme SLUG] [--plugin SO] [--out DIR] <command> [args...]" >&2; exit 2; }
 "$here/tools/yield" --within "$size" || { (($? == 1)) && exec "$here/tools/yield" "$0" "${args[@]}"; exit 75; }
 
-build=$here/tools/build
-frameclock=$build/frameclock
-if [[ ! $frameclock -nt $here/tools/frameclock.c ]]; then
-  mkdir -p "$build"
-  for xml in stable/xdg-shell/xdg-shell stable/linux-dmabuf/linux-dmabuf-v1; do
-    name=${xml##*/}
-    wayland-scanner server-header "/usr/share/wayland-protocols/$xml.xml" "$build/$name-server-protocol.h"
-    wayland-scanner private-code "/usr/share/wayland-protocols/$xml.xml" "$build/$name-protocol.c"
-  done
-  gcc -O2 -I"$build" -o "$frameclock" "$here/tools/frameclock.c" "$build/xdg-shell-protocol.c" \
-    "$build/linux-dmabuf-v1-protocol.c" $(pkg-config --cflags --libs wayland-server egl gbm glesv2)
-fi
-if [[ ! $build/frametrace.so -nt $here/tools/frametrace.c ]]; then
-  gcc -O2 -shared -fPIC -o "$build/frametrace.so" "$here/tools/frametrace.c" -ldl
-fi
+make -s -C "$here/tools"
 
 sandbox=(
   --die-with-parent --unshare-all
