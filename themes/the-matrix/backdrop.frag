@@ -3,31 +3,29 @@
 // on this machine are writing once the user turns that on
 // (specs/agent-rain.md). It rains down the black screen in mirrored glyphs,
 // each stream led by a white-hot head carrying the newest characters and
-// leaving a fading phosphor tail. The rain stands at three
-// distances, nearer columns larger, brighter and faster: the far rain out of
-// focus, soft dots whose letters are lost in the air, and the mid rain, both
-// behind the windows, so the glass shows them and the windows shade them;
-// the near rain at the windows' own depth, falling round them, so it never
-// shows through their glass and no window shades it. The rain parts round
-// the windows: drops flare where they strike a window's top edge, and streams run down its sides, brightest beside the
-// focused window. The gaps between windows glow faintly green. The windows
-// stand in the rain, lit from above with it (specs/depth.md).
+// leaving a fading phosphor tail, at three distances, nearer columns larger,
+// brighter and faster: the far rain out of focus, its letters lost in the
+// air, and the mid rain, both behind the windows' glass and shaded by them;
+// the near rain at the windows' own depth, falling round them. Drops flare on
+// a window's top edge and streams run down its sides, brightest beside the
+// focused window; the gaps glow faintly green. The windows stand in the rain,
+// lit from above with it (specs/depth.md).
 
 const vec3 HEAD = vec3(0.78, 1.0, 0.84);
 // Where the light comes from: above, with the rain, a little to the right.
 const vec2 LIGHT = vec2(0.12, -0.99);
-// Periods (seconds) a drop takes to fall one repeat, four to a depth from the
-// nearest, slower further back; each divides 3600. Near drops average about
-// 340 px a second, mid 210 and far 130: a screen in four seconds up close,
-// the film's pace and calm enough to work beside (twice that read as busy at
-// 120 fps).
-const float PERIODS[6] = float[](6.0, 8.0, 10.0, 12.0, 16.0, 20.0);
+// Seconds a drop takes to fall one repeat: 6, 8, 10, 12, 16, 20 for k 0 to
+// 5, four to a depth from its layer, slower further back; each divides 3600.
+// Near drops average 340 px a second, mid 210, far 130: calm enough to work
+// beside. Worked out: a table indexed per column lives in slow memory.
+float period(float k) {
+    return k < 4.0 ? 6.0 + 2.0 * k : 4.0 * k;
+}
 
-// One column's light at height y: a head falls a repeat of `span` pixels
-// every `period` seconds, lighting cell after cell, and the cells behind it
-// fade out over `tail` pixels, leaving the rest of the repeat black. Measured
-// at the cell's middle, so the light steps from glyph to glyph as it does on
-// the film's screens. Returns the light, how much of it is the head (y), and
+// One column's light at height y: a head falls a repeat of `span` px every
+// `period` seconds, lighting cell after cell; the cells behind fade over
+// `tail` px, leaving the rest black. Measured at the cell's middle, so the
+// light steps glyph to glyph. Returns the light, how much is the head (y) and
 // how many cells behind the head this one is (z).
 vec3 drops(float y, float cellH, float span, float period, float phase, float tail) {
     float mid = (floor(y / cellH) + 0.5) * cellH;
@@ -36,13 +34,13 @@ vec3 drops(float y, float cellH, float span, float period, float phase, float ta
     return vec3(fade * fade * (0.35 + 0.65 * fade), 1.0 - step(cellH, behind), floor(behind / cellH));
 }
 
-// How much of character `code` covers the glyph cell, `cell` pixels big, at
-// `at` (in cells).
-float inCell(vec2 at, vec2 cell, int code) {
+// How much character `i` back in the text covers the glyph cell, `cell`
+// pixels big, at `at` (in cells); read only inside the glyph's box.
+float inCell(vec2 at, vec2 cell, int i) {
     vec2 box = cell * vec2(0.62, 0.7);
     vec2 q = (fract(at) - 0.5) * cell + box * 0.5;
-    float inBox = step(0.0, min(q.x, q.y)) * step(max(q.x - box.x, q.y - box.y), 0.0);
-    return glyph(code, q / box) * inBox;
+    if (min(q.x, q.y) < 0.0 || max(q.x - box.x, q.y - box.y) > 0.0) return 0.0;
+    return glyph(feedChar(i), q / box);
 }
 
 // One column of glyph cells `cell` pixels big, at `at` in cells (x across
@@ -58,20 +56,19 @@ vec3 column(vec2 at, vec2 cell, float id, float span, float period, float phase,
     // it at the head and older characters up its tail, so the text falls
     // with the drop.
     int start = int(hash(vec2(id, 3.3)) * float(feedCount));
-    float ink = inCell(at, cell, feedChar(start + int(lit.z)));
+    float ink = inCell(at, cell, start + int(lit.z));
     return vec3(ink * lit.x, ink * lit.y, glow);
 }
 
 // A rain column's drops at one depth: (period, span, phase, tail), each
 // varied per column round the depth's `span` and `tail`; a zero period is an
-// empty column, so the streams stand apart.
+// empty column, so the streams stand apart. Two hashes give all five.
 vec4 drop(float id, float layer, float span, float tail) {
     vec2 key = vec2(id, layer * 17.0);
-    if (hash(key + vec2(0.0, 5.0)) < 0.22) return vec4(0.0);
-    return vec4(PERIODS[int(layer) + int(hash(key) * 4.0)],
-                span * (0.8 + 0.8 * hash(key + vec2(0.0, 3.0))),
-                hash(key + vec2(0.0, 11.0)),
-                tail * (0.5 + hash(key + vec2(0.0, 7.0))));
+    float a = hash(key + vec2(0.0, 5.0));
+    if (a < 0.22) return vec4(0.0);
+    float b = hash(key) * 4.0;
+    return vec4(period(layer + floor(b)), span * (0.8 + 0.8 * fract(b)), (a - 0.22) / 0.78, tail * (0.5 + fract(a * 11.0)));
 }
 
 // The rain's depths: glyph cell in pixels, then the drops' span and tail.
@@ -108,7 +105,7 @@ vec2 nearCell(vec2 px, float shift) {
 // How much of a character of the agents' text covers px in that cell.
 float nearInk(vec2 px, float shift) {
     vec2 at = vec2(px.x + shift, px.y) / NEAR_RAIN.xy;
-    return inCell(at, NEAR_RAIN.xy, feedChar(int(hash(floor(at) + 7.7) * float(feedCount))));
+    return inCell(at, NEAR_RAIN.xy, int(hash(floor(at) + 7.7) * float(feedCount)));
 }
 
 // The rain answering what happened, at px, whose near glyph cell is centred
@@ -166,9 +163,11 @@ vec4 backdrop(vec2 px) {
         see(seen, w);
         float d = w.d;
         near += exp(-max(d, 0.0) / 60.0);
-        float soft = 18.0 + 40.0 * w.lift;
-        float s = rectDistance(px + LIGHT * (26.0 + 46.0 * w.lift), w.rect, w.rounding);
-        shadow = max(shadow, (1.0 - smoothstep(-soft, soft, s)) * w.alpha);
+        float soft = 18.0 + 40.0 * w.lift, offset = 26.0 + 46.0 * w.lift;
+        if (edgeDistance(w) - offset < soft) {
+            float s = rectDistance(px + LIGHT * offset, w.rect, w.rounding);
+            shadow = max(shadow, (1.0 - smoothstep(-soft, soft, s)) * w.alpha);
+        }
         vec2 v = w.velocity;
         float speed = length(v);
         if (speed < 40.0) continue;
@@ -287,13 +286,12 @@ vec4 backdrop(vec2 px) {
     return vec4(background + (1.0 - exp(-light * 1.3)), 1.0);
 }
 
-// Each window's edge (specs/depth.md, part 2): a phosphor line, a crisp
-// core in its own bloom, brightest along the top where the rain falls from
-// and as focus lifts it, flaring when the window lands and brightening softly
-// for a moment when it opens or takes focus. The glass's outer pixels show the rain bent
-// from behind it, and that light catches on the line, so a drop passing
-// behind the glass lights the edge. Its light stays within a few pixels, so
-// it never lies over the text of a window beneath.
+// Each window's edge (specs/depth.md, part 2): a phosphor line, a crisp core
+// in its own bloom, brightest along the top where the rain falls from and as
+// focus lifts it, flaring on a landing, brightening softly on opening or
+// focus. The glass's outer pixels show the rain bent from behind, and a drop
+// passing there lights the line. Its light stays within a few pixels, never
+// over a window beneath.
 vec4 frame(vec2 px, Window w) {
     float d = edgeDistance(w);
     if (d < -2.0 || d > 48.0) return vec4(0.0);

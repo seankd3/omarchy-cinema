@@ -41,34 +41,38 @@ vec3 view(vec3 p, float c, float s) {
     return vec3(p.xy * 6.0 / (6.0 + p.z), p.z);
 }
 
-// Distance in pixels to the wedge's near and far edges, the wedge being
-// `size` pixels to a unit and stood at `at`.
-vec2 wedge(vec2 px, vec2 at, float size) {
-    float a = cycle(60.0) * TAU;
-    float c = cos(a), s = sin(a);
+// The wedge's edge from a to b, as seen: q's squared distance to it, filed
+// near (x) or far (y) by its depth.
+void edge(inout vec2 d, vec2 q, vec3 a, vec3 b) {
+    vec2 ab = b.xy - a.xy, aq = q - a.xy;
+    vec2 e = aq - ab * clamp(dot(aq, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+    if (a.z + b.z < 0.0) d.x = min(d.x, dot(e, e)); else d.y = min(d.y, dot(e, e));
+}
+
+// Distance in pixels to the wedge's near and far edges, the wedge `size`
+// pixels to a unit, stood at `at`, turned by `turn` (cosine, sine), its
+// corners met one at a time.
+vec2 wedge(vec2 px, vec2 at, float size, vec2 turn) {
+    float c = turn.x, s = turn.y;
     vec2 q = (px - at) / size * vec2(1.0, -1.0);
-    vec3 L[8], R[8];
-    for (int i = 0; i < 8; i++) {
-        L[i] = view(SIDE[i], c, s);
-        R[i] = view(SIDE[i] * vec3(1.0, 1.0, -1.0), c, s);
-    }
+    const vec3 MIRROR = vec3(1.0, 1.0, -1.0);
+    vec3 l0 = view(SIDE[0], c, s), r0 = view(SIDE[0] * MIRROR, c, s), l = l0, r = r0;
     vec2 d = vec2(FAR);
-    for (int i = 0; i < 8; i++) {
-        int j = (i + 1) % 8;
-        // Each side's outline, filed near or far by its depth.
-        float dl = segment(q, L[i].xy, L[j].xy);
-        float dr = segment(q, R[i].xy, R[j].xy);
-        if (L[i].z + L[j].z < 0.0) d.x = min(d.x, dl); else d.y = min(d.y, dl);
-        if (R[i].z + R[j].z < 0.0) d.x = min(d.x, dr); else d.y = min(d.y, dr);
+    // Each side's outline, and ribs joining the sides: across the nose, the
+    // windscreen, the roof and the tail (not the fender, which would cut the
+    // hood in two).
+    edge(d, q, l, r);
+    for (int i = 1; i < 8; i++) {
+        vec3 nl = view(SIDE[i], c, s), nr = view(SIDE[i] * MIRROR, c, s);
+        edge(d, q, l, nl);
+        edge(d, q, r, nr);
+        if (i != 2) edge(d, q, nl, nr);
+        l = nl;
+        r = nr;
     }
-    // Ribs joining the sides: across the nose, the windscreen, the roof and
-    // the tail (not the fender, which would cut the hood in two).
-    for (int k = 0; k < 7; k++) {
-        int i = k < 2 ? k : k + 1;
-        float dc = segment(q, L[i].xy, R[i].xy);
-        if (L[i].z + R[i].z < 0.0) d.x = min(d.x, dc); else d.y = min(d.y, dc);
-    }
-    return d * size;
+    edge(d, q, l, l0);
+    edge(d, q, r, r0);
+    return sqrt(d) * size;
 }
 
 // The cockpit answering what happened lately, briefly and softly, at px: the
@@ -122,46 +126,43 @@ vec3 answers(vec2 px, vec3 red, float horizon, out float lit) {
     return light;
 }
 
-// A moving window's speed lines, which may shine: streaks of light back from its trailing edge across its width, and the
-// flight path marker riding ahead of it, gone as soon as the window stops.
+// A moving window's speed lines, which may shine: streaks of light back from
+// its trailing edge across its width, and the flight path marker riding ahead
+// of it. Only a moving window is met here.
 vec3 speedLines(vec2 px, Window w, vec3 red) {
     vec3 light = vec3(0.0);
     vec2 v = w.velocity;
     float speed = length(v);
-    // Only a moving window pays for its lines (a loop count, not a
-    // branch, so the work is skipped, not merely masked).
-    for (int on = 0; on < (speed < 40.0 ? 0 : 1); on++) {
-        float k = wakeStrength(w, 1200.0);
-        vec4 r = w.rect;
-        vec2 n = v / max(speed, 1e-3);
-        vec2 side = vec2(-n.y, n.x);
-        vec2 q = px - r.xy - r.zw * 0.5;
-        float ext = 0.5 * (abs(n.x) * r.z + abs(n.y) * r.w);
-        float wide = 0.5 * (abs(side.x) * r.z + abs(side.y) * r.w);
-        float off = dot(q, side);
-        float back = -dot(q, n) - ext;
-        if (back > 0.0 && abs(off) < wide) {
-            float lane = floor(off / 18.0);
-            float seed = hash(vec2(lane, float(w.i) + 3.1));
-            float start = seed * 40.0;
-            float len = speed * (0.06 + 0.14 * hash(vec2(lane, 9.7)));
-            float across = abs(fract(off / 18.0) - 0.5) * 18.0;
-            float streak = step(0.35, seed) * step(start, back) * (1.0 - smoothstep(start, start + len, back))
-                * (1.0 - smoothstep(0.5, 1.4, across));
-            light += mix(red, WHITE, 0.55 + 0.4 * seed) * streak * 1.2 * k;
-            light += red * exp(-back / (speed * 0.12)) * 0.22 * k;
-        }
-        // The flight path marker: a ring with wings and a fin, ahead of
-        // the leading edge, as present as the speed, drawn only within its
-        // glow's reach past its 25 px wings.
-        vec2 m = px - (r.xy + r.zw * 0.5 + n * (ext + 50.0 + speed * 0.02));
-        if (length(m) > 25.0 + glowReach(0.42, 7.0)) continue;
-        float ring = abs(length(m) - 9.0);
-        float wings = abs(m.y) + max(abs(abs(m.x) - 17.0) - 8.0, 0.0);
-        float fin = abs(m.x) + max(abs(m.y + 13.0) - 4.0, 0.0);
-        float marker = glowLine(min(ring, min(wings, fin)), 1.4);
-        light += mix(red, WHITE, 0.7) * marker * smoothstep(150.0, 600.0, speed) * 1.3 * w.alpha;
+    float k = wakeStrength(w, 1200.0);
+    vec4 r = w.rect;
+    vec2 n = v / max(speed, 1e-3);
+    vec2 side = vec2(-n.y, n.x);
+    vec2 q = px - r.xy - r.zw * 0.5;
+    float ext = 0.5 * (abs(n.x) * r.z + abs(n.y) * r.w);
+    float wide = 0.5 * (abs(side.x) * r.z + abs(side.y) * r.w);
+    float off = dot(q, side);
+    float back = -dot(q, n) - ext;
+    if (back > 0.0 && abs(off) < wide) {
+        float lane = floor(off / 18.0);
+        float seed = hash(vec2(lane, float(w.i) + 3.1));
+        float start = seed * 40.0;
+        float len = speed * (0.06 + 0.14 * hash(vec2(lane, 9.7)));
+        float across = abs(fract(off / 18.0) - 0.5) * 18.0;
+        float streak = step(0.35, seed) * step(start, back) * (1.0 - smoothstep(start, start + len, back))
+            * (1.0 - smoothstep(0.5, 1.4, across));
+        light += mix(red, WHITE, 0.55 + 0.4 * seed) * streak * 1.2 * k;
+        light += red * exp(-back / (speed * 0.12)) * 0.22 * k;
     }
+    // The flight path marker: a ring with wings and a fin ahead of the
+    // leading edge, as present as the speed, drawn only within its glow's
+    // reach past its 25 px wings.
+    vec2 m = px - (r.xy + r.zw * 0.5 + n * (ext + 50.0 + speed * 0.02));
+    if (length(m) > 25.0 + glowReach(0.42, 7.0)) return light;
+    float ring = abs(length(m) - 9.0);
+    float wings = abs(m.y) + max(abs(abs(m.x) - 17.0) - 8.0, 0.0);
+    float fin = abs(m.x) + max(abs(m.y + 13.0) - 4.0, 0.0);
+    float marker = glowLine(min(ring, min(wings, fin)), 1.4);
+    light += mix(red, WHITE, 0.7) * marker * smoothstep(150.0, 600.0, speed) * 1.3 * w.alpha;
     return light;
 }
 
@@ -171,13 +172,12 @@ vec4 backdrop(vec2 px) {
     float horizon = resolution.y * 0.42;
     vec3 light = vec3(0.0);
 
-    // One pass over the windows: the nearest edge, how near any is, how much
-    // window there is, their shadows on the floor (cast toward the viewer
-    // from the horizon, further and softer with lift), and faint corner
-    // brackets 22 to 31 px out (lit to their glow's 31 px) on every window
-    // but the focused one, which the lock frame holds. The floor's lanes bow
-    // out round each window's foot (`bend`, pixels across). And a moving
-    // window's speed lines.
+    // One pass over the windows: the nearest edge, how near any is, their
+    // shadows on the floor (cast toward the viewer, further and softer with
+    // lift), faint corner brackets 22 to 31 px out on every window but the
+    // focused one, which the lock frame holds, the floor's lanes bowing round
+    // each window's foot (`bend`, px across), and a moving window's speed
+    // lines.
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0, bend = 0.0;
     vec3 speeding = vec3(0.0);
@@ -195,7 +195,7 @@ vec4 backdrop(vec2 px) {
         if (i != focusedIndex && abs(edgeDistance(w) - 22.0) < 54.0 + w.rounding) light += red * glowLine(brackets(px, r, 22.0, 34.0), 1.0) * 0.4 * a;
         float side = px.x < r.x + r.z * 0.5 ? -1.0 : 1.0;
         bend += side * 34.0 * e * e * smoothstep(r.y, r.y + r.w, px.y) * (1.0 - 0.6 * lift) * a;
-        speeding += speedLines(px, w, red);
+        if (length(w.velocity) >= 40.0) speeding += speedLines(px, w, red);
     }
     // Only a window standing on the floor (its foot below the horizon) has
     // floor lines, and they run on from the corner, never back, past its
@@ -271,21 +271,20 @@ vec4 backdrop(vec2 px) {
     light += WHITE * glowLine(toHorizon, 0.9) * 0.55 * veil;
     light += red * (0.18 * exp(-toHorizon / 40.0) + 0.05 * exp(-toHorizon / 300.0)) * veil;
 
-    // The wedge turns once a minute on the floor behind the focused window.
-    // It glides with the eased focus rect, sized and placed so the box it
-    // turns through fits that rect, as low as the floor allows; what shows of
-    // it is only what lies on the focused window itself (on any window while
-    // none here is focused), so it never crosses a seam, even mid-glide. It
-    // is a faint ghost behind the glass, as present as the focus, and the
-    // hero of an empty screen, which it crossfades with as the first window
-    // opens or the last one fades out (the windows' summed opacity is under 1
-    // only then; a reviewer read this as a containment gap, and it is kept as
-    // the empty desktop's presentation). Only pixels in its box pay for its
-    // edges, and a window too small to hold it shows none.
+    // The wedge turns once a minute on the floor behind the focused window,
+    // gliding with the eased focus rect, its turning box fitted to that rect
+    // as low as the floor allows. Only what lies on the focused window shows
+    // (on any window while none here is focused), so it never crosses a seam:
+    // a faint ghost behind the glass, as present as the focus, and the hero
+    // of an empty screen, crossfading as the first window opens or the last
+    // fades (only then is the windows' summed opacity under 1). Only pixels
+    // in the box it fills at this turn (its nearest corner 1.23 times as big)
+    // pay for its edges; a window too small to hold it shows none.
     float size = min(focused.z / 2.8, focused.w / 1.4);
     vec2 at = vec2(focused.x + focused.z * 0.5,
                    clamp(horizon + size * 0.5, focused.y + 0.7 * size, focused.y + focused.w - 0.7 * size));
-    vec2 reach = abs(px - at) - vec2(1.4, 0.7) * size;
+    vec2 turn = vec2(cos(cycle(60.0) * TAU), sin(cycle(60.0) * TAU)), t = abs(turn);
+    vec2 reach = abs(px - at) - 1.23 * vec2(1.04 * t.x + 0.44 * t.y, 0.19 + 0.34 * (1.04 * t.y + 0.44 * t.x)) * size;
     if (size > 8.0 && max(reach.x, reach.y) < 24.0) {
         float on = focusedIndex < 0 ? inside : 1.0 - smoothstep(-1.0, 1.0, edgeDistance(window(px, focusedIndex)));
         // The windows' summed opacity, a fact of the desktop, not of px.
@@ -294,7 +293,7 @@ vec4 backdrop(vec2 px) {
         float shown = mix(1.0, 0.35 * focusAlpha * on, min(present, 1.0));
         // Off the window it lies on it shows nothing, so it is not worked out.
         if (shown > 0.0) {
-            vec2 d = wedge(px, at, size);
+            vec2 d = wedge(px, at, size, turn);
             light += mix(red, WHITE, 0.65) * glowLine(d.x, 1.3) * shown;
             light += red * glowLine(d.y, 1.0) * 0.4 * shown;
         }

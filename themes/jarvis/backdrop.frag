@@ -52,7 +52,7 @@ float globe(vec2 p, float R, out float rim) {
     rim = 0.0;
     if (q2 > 1.0) return 0.0;
     float z = sqrt(1.0 - q2);
-    rim = pow(1.0 - z, 3.0);
+    rim = (1.0 - z) * (1.0 - z) * (1.0 - z);
     float spin = cycle(60.0) * TAU;
     const float ct = cos(0.4), st = sin(0.4);
     float step_ = TAU / 24.0;
@@ -61,9 +61,9 @@ float globe(vec2 p, float R, out float rim) {
         vec3 P = vec3(q.x, q.y, side == 0 ? z : -z);
         P = vec3(P.x, P.y * ct - P.z * st, P.y * st + P.z * ct);
         float lon = atan(P.x, P.z) + spin;
-        float lat = asin(clamp(P.y, -1.0, 1.0));
-        float dLat = abs(fract(lat / step_ + 0.5) - 0.5) * step_;
-        float dLon = abs(fract(lon / step_ + 0.5) - 0.5) * step_ * cos(lat);
+        float y = clamp(P.y, -1.0, 1.0);
+        float dLat = abs(fract(asin(y) / step_ + 0.5) - 0.5) * step_;
+        float dLon = abs(fract(lon / step_ + 0.5) - 0.5) * step_ * sqrt(1.0 - y * y);
         // Lines crowd toward the edge, where the surface turns away.
         float d = min(dLat, dLon) * R * max(z, 0.15);
         lines += glowLine(d, 0.9, HALO) * (side == 0 ? 1.0 : 0.22);
@@ -71,19 +71,15 @@ float globe(vec2 p, float R, out float rim) {
     return lines;
 }
 
-// A ring of radius `R` tipped `tilt` out of the screen and turned `yaw` in it.
-// Returns the distance to it in pixels; `angle` is the angle around the ring,
-// and `depth` is above zero on the half nearer the viewer.
-float gyro(vec2 p, float R, float tilt, float yaw, out float angle, out float depth) {
-    float cy = cos(yaw), sy = sin(yaw);
-    vec2 r = vec2(cy * p.x + sy * p.y, -sy * p.x + cy * p.y);
-    float ct = max(abs(cos(tilt)), 0.12);
-    vec2 e = vec2(r.x, r.y / ct);
-    angle = atan(e.y, e.x);
-    depth = sin(angle) * sin(tilt);
+// A ring of radius `R` tipped `tilt` (0.7 to 1.3) out of the screen and
+// turned `yaw` in it: p in the ring's plane (xy, y above zero on the half
+// nearer the viewer) and its distance to the ring in pixels (z).
+vec3 gyro(vec2 p, float R, float tilt, float yaw) {
+    vec2 c = vec2(cos(yaw), sin(yaw));
+    float ct = max(cos(tilt), 0.12);
+    vec2 e = vec2(dot(p, c), (c.x * p.y - c.y * p.x) / ct);
     float len = max(length(e), 1e-3);
-    float grad = length(vec2(e.x, e.y / ct)) / len;
-    return abs(len - R) / max(grad, 1e-3);
+    return vec3(e, abs(len - R) * len / max(length(vec2(e.x, e.y / ct)), 1e-3));
 }
 
 // Holo lines holding window i: they run along its edges 10 px out and
@@ -102,11 +98,10 @@ vec3 holdLines(vec2 px, int i, vec3 cyan) {
     return tint * (glowLine(o, 0.9, HALO) * (0.1 + 0.3 * dash) * exp(-toCorner / 150.0) + node * 0.45) * w.alpha;
 }
 
-// A moving window's wake, which may shine: dashed afterimages of it where it just was over a wash of scanned light,
-// outside the window itself, and the lattice it sweeps across lit up
-// (`lattice`). It is gone as soon as the window stops, and drawn only
-// within its dashes' reach of where the window was in the last 0.16 s (its
-// last afterimage's lag); the wash ends nearer.
+// A moving window's wake, which may shine: dashed afterimages where it just
+// was, over a wash of scanned light outside it, and the lattice it sweeps
+// lit up (`lattice`). Gone as soon as it stops; drawn only within its
+// dashes' reach of where it was in the last 0.16 s.
 vec3 afterimage(vec2 px, Window w, vec3 cyan, inout float lattice) {
     vec3 light = vec3(0.0);
     vec2 v = w.velocity;
@@ -120,12 +115,12 @@ vec3 afterimage(vec2 px, Window w, vec3 cyan, inout float lattice) {
             vec4 ghost = ago(w, 0.04 * float(g));
             float d = rectDistance(px, ghost, w.rounding);
             float fade = 1.0 - 0.22 * float(g);
+            wash = max(wash, (1.0 - smoothstep(-30.0, 30.0, d)) * fade);
             // Dashes run along each edge of the outline.
             vec2 q = px - ghost.xy - ghost.zw * 0.5;
             float along = abs(q.x) * ghost.w > abs(q.y) * ghost.z ? q.y : q.x;
-            float dash = step(0.4, fract(along / 20.0));
-            light += tint * glowLine(abs(d), 1.5, HALO) * dash * fade * 1.3 * k;
-            wash = max(wash, (1.0 - smoothstep(-30.0, 30.0, d)) * fade);
+            if (abs(d) < glowReach(0.4, 7.5) && fract(along / 20.0) >= 0.4)
+                light += tint * glowLine(abs(d), 1.5, HALO) * fade * 1.3 * k;
         }
         light += tint * wash * (0.55 + 0.45 * sin(px.y * TAU / 5.0)) * 0.5 * k;
         lattice += 3.0 * wash * k;
@@ -245,29 +240,29 @@ vec4 backdrop(vec2 px) {
 
     // The gyroscope: three rings tumbling about the globe, slowly and at
     // different rates. The far half of each ring is dim, and dimmer still
-    // where the globe stands in front of it.
-    // Only pixels near the gyroscope pay for it.
+    // where the globe stands in front of it. Only pixels within a ring's
+    // widest glow pay for it.
     for (int i = 0; i < (r < Rg * 1.75 ? 3 : 0); i++) {
         float fi = float(i);
         float tilt = 1.0 + 0.3 * sin(TAU * cycle(30.0 * (fi + 2.0)) + fi * 1.7);
         float yaw = TAU * cycle(40.0 * (fi + 1.0)) * (i == 1 ? -1.0 : 1.0) + fi * 2.1 + swing * (1.0 + fi);
         float R = Rg * (1.22 + 0.2 * fi);
-        float angle, depth;
-        float d = gyro(p, R, tilt, yaw, angle, depth);
-        float shade_ = depth >= 0.0 ? 1.0 : (r < Rg ? 0.12 : 0.4);
-        light += cyan * glowLine(d, 1.3, HALO) * shade_ * 0.75;
-        light += cyan * glowLine(d, 4.0, HALO) * dashes(angle, R, 12.0, 0.18, cycle(20.0)) * shade_ * 0.35;
+        vec3 g = gyro(p, R, tilt, yaw);
+        if (g.z > glowReach(0.1, 20.0)) continue;
+        float shade_ = g.y >= 0.0 ? 1.0 : (r < Rg ? 0.12 : 0.4);
+        float dash = dashes(atan(g.y, g.x), R, 12.0, 0.18, cycle(20.0));
+        light += cyan * (glowLine(g.z, 1.3, HALO) * 0.75 + glowLine(g.z, 4.0, HALO) * dash * 0.35) * shade_;
     }
 
     // Flat rings in the screen's plane, out past the window's edges, paid for
-    // within their glows' reach.
-    if (abs(r - reach * 1.12) < reach * 0.12 + glowReach(0.14, 30.0)) {
-        float a = atan(p.y, p.x);
-        float turned = a - swing;
-        light += cyan * glowLine(abs(r - reach * 1.04), 1.0, HALO) * dashes(turned, r, 120.0, 0.45, -cycle(120.0)) * 0.5;
-        light += cyan * glowLine(abs(r - reach * 1.12), 6.0, HALO) * dashes(a + swing * 2.0, r, 6.0, 0.06, cycle(24.0)) * 0.5;
-        light += AMBER * glowLine(abs(r - reach * 1.12), 2.0, HALO) * dashes(turned, r, 1.0, 0.05, -cycle(24.0)) * 0.9;
-        light += cyan * glowLine(abs(r - reach * 1.24), 0.8, HALO) * 0.3;
+    // within their glows' reach; the sparse dashes only where lit.
+    vec3 flat_ = abs(r - reach * vec3(1.04, 1.12, 1.24));
+    if (min(flat_.x, flat_.z) < glowReach(0.14, 5.0) || flat_.y < glowReach(0.14, 30.0)) {
+        float a = atan(p.y, p.x), turned = a - swing;
+        light += cyan * glowLine(flat_.x, 1.0, HALO) * dashes(turned, r, 120.0, 0.45, -cycle(120.0)) * 0.5;
+        float six = dashes(a + swing * 2.0, r, 6.0, 0.06, cycle(24.0)), one = dashes(turned, r, 1.0, 0.05, -cycle(24.0));
+        if (six + one > 0.0) light += cyan * glowLine(flat_.y, 6.0, HALO) * six * 0.5 + AMBER * glowLine(flat_.y, 2.0, HALO) * one * 0.9;
+        light += cyan * glowLine(flat_.z, 0.8, HALO) * 0.3;
     }
 
     // Light pools in the seams between windows and runs along them.
@@ -314,13 +309,11 @@ vec4 backdrop(vec2 px) {
 }
 
 // Each window's edge (specs/depth.md, part 2): a holographic pane. Its outer
-// five pixels bend the workshop behind them, the way the side of a thick pane
-// does; its rim is a crisp line of projected light, cyan running to amber
-// across the focused window as its border did, a dim blue on the others,
-// brightest on the side facing the reactor and as focus lifts it. Light
-// passing behind the window, a ring, a wave or the rays, runs into the rim,
-// and the window glows a little in the reactor's light, as Hyprland's shadow
-// made it.
+// five pixels bend the workshop behind them, as a thick pane's side does; its
+// rim is a crisp line of projected light, cyan running to amber across the
+// focused window, dim blue on the others, brightest facing the reactor and as
+// focus lifts it. Light passing behind runs into the rim, and the window
+// glows a little in the reactor's light.
 vec4 frame(vec2 px, Window w) {
     vec4 r = w.rect;
     float d = edgeDistance(w);

@@ -228,9 +228,19 @@ vec4 backdrop(vec2 px) {
     float horizon = horizonY();
     vec2 sun = sunAt();
 
+    // The sun is low beyond the deck, so each puff's far rim catches it, where
+    // its tops climb down the screen (in px, so any rotation lights the same
+    // rim). That slope is a derivative, undefined on some drivers unless all
+    // of a 2x2 quad takes it, so sky and deck are worked out a quad past the
+    // horizon and past the wash under the panes, where neither shows.
+    mat2 toScreen = inverse(mat2(dFdx(px), dFdy(px)));
+    float quad = abs(dFdx(px).y) + abs(dFdy(px).y); // how far down the screen a quad reaches
+    bool onDeck = px.y > horizon - quad;
+
     // The window nearest this point, for its line and its sunlit edge; how
     // near any is and how near a lifted one; and how the cloud flows round
-    // them: pushed out from each edge and curling along it.
+    // them where the deck shows: pushed out from each edge and curling along
+    // it, by no puff a fiftieth of a px past 500 px.
     Seen seen = UNSEEN;
     float near = 0.0, lifted = 0.0;
     vec2 flow = vec2(0.0);
@@ -238,12 +248,13 @@ vec4 backdrop(vec2 px) {
     for (int i = -1; next(left, i);) {
         Window w = window(px, i);
         see(seen, w);
-        float d = w.d;
-        near += exp(-max(d, 0.0) / 70.0);
-        float a = w.alpha;
-        lifted = max(lifted, w.lift * exp(-max(d, 0.0) / 120.0) * a);
-        vec2 n = edgeNormal(px, w.rect, w.rounding);
-        flow += (n * 26.0 * exp(-max(d, 0.0) / 70.0) + vec2(n.y, -n.x) * 16.0 * exp(-max(d, 0.0) / 45.0)) * a;
+        float d = max(w.d, 0.0), e = exp(-d / 70.0);
+        near += e;
+        if (w.lift > 0.0) lifted = max(lifted, w.lift * exp(-d / 120.0) * w.alpha);
+        if (onDeck && d < 500.0 && w.d > -1.0 - 2.0 * quad) {
+            vec2 n = edgeNormal(px, w.rect, w.rounding);
+            flow += (n * 26.0 * e + vec2(n.y, -n.x) * 16.0 * exp(-d / 45.0)) * w.alpha;
+        }
     }
     float nearest = seen.nearest;
     int closest = seen.closest;
@@ -253,18 +264,10 @@ vec4 backdrop(vec2 px) {
     // A dragged pane pulls the deck after it, near rows more than far ones;
     // the sky and the sun stay put.
     float lean = focusVelocity().x * 0.012;
-    // The sun is low beyond the deck, so each puff's far rim catches it: where
-    // its tops climb going down the screen. Their slope is a derivative, which
-    // some drivers leave undefined unless every pixel of a 2x2 quad takes it,
-    // so sky and deck are worked out a quad's reach past the horizon and past
-    // the wash under the panes (inside 1, where neither shows). Down the
-    // screen, in px, so any monitor rotation lights the same rim.
-    mat2 toScreen = inverse(mat2(dFdx(px), dFdy(px)));
-    float quad = abs(dFdx(px).y) + abs(dFdy(px).y); // how far down the screen a quad reaches
     bool open = nearest > -1.0 - 2.0 * quad;
     vec2 tops = vec2(0.0);
     float slope = 0.0;
-    if (open && px.y > horizon - quad) {
+    if (open && onDeck) {
         tops = deckTops(px + flow, horizon, lean);
         vec2 climb = vec2(dFdx(tops.x), dFdy(tops.x)) * toScreen, away = vec2(dFdx(tops.y), dFdy(tops.y)) * toScreen;
         slope = climb.y / max(abs(away.y), 1e-4);

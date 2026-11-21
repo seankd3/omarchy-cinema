@@ -43,12 +43,10 @@ float lines(float x, float w, float h) {
 // viewer and coming round again every `period` seconds, its trail fading
 // behind it; `unit` is how many px a floor unit spans across.
 float lightCycle(vec2 world, float unit, float lane, float period, float phase) {
-    float laneX = lane * CELL;
-    float head = fract(cycle(period) + phase) * 1600.0 + 200.0 + cycle(16.0) * 8.0 * CELL;
-    float behind = head - world.y;
-    if (behind < 0.0) return 0.0;
-    float trail = exp(-behind / 320.0);
-    return (1.0 - smoothstep(0.0, 2.0, abs(world.x - laneX) * unit)) * trail * (behind < 6.0 ? 3.0 : 1.0);
+    float across = abs(world.x - lane * CELL) * unit;
+    float behind = fract(cycle(period) + phase) * 1600.0 + 200.0 + cycle(16.0) * 8.0 * CELL - world.y;
+    if (across >= 2.0 || behind < 0.0) return 0.0;
+    return (1.0 - smoothstep(0.0, 2.0, across)) * exp(-behind / 320.0) * (behind < 6.0 ? 3.0 : 1.0);
 }
 
 // A wave through the grid from an impulse at `at`, `age` seconds old: a ring
@@ -94,21 +92,15 @@ vec4 backdrop(vec2 px) {
     vec3 light = vec3(0.0);
 
     // One pass over the windows: the nearest, for its circuit line and
-    // pulses, and the one whose glass this point is behind; the light pooled
-    // round them, adding up in the seams; and on the floor, how it gives under
-    // them and their shadows.
-    //
-    // The floor gives under the windows standing on it: points near a window's
-    // foot are pulled toward it, so the grid lines bend round its weight, less
-    // as focus lifts it off the floor. Lit from the horizon behind them, a
-    // pane standing on the Grid throws its shadow forward, onto the floor in
-    // front of its foot, longer and softer as focus lifts it; the floor behind
-    // it, seen through the glass, stays lit (1 in full shadow).
-    //
-    // A moving window leaves its circuit behind it as a fading light trail,
-    // outside the window itself, drawn only within its five glows' reach (7 px
-    // out, held to a hundredth of a level: five times their strength) of
-    // where the window was in the last 0.125 s (its last ghost's lag).
+    // pulses; the one whose glass this point is behind; the light pooled
+    // round them, adding up in the seams; and the floor under them. It gives
+    // near a window's foot, pulled toward it so the lines bend round its
+    // weight, less as focus lifts it. Lit from the horizon, a pane throws its
+    // shadow forward onto the floor before its foot, longer and softer as
+    // focus lifts it; the floor seen through the glass stays lit (1 in full
+    // shadow). A moving window trails its circuit as fading light outside
+    // itself, drawn only within its five glows' reach (7 px out, to a
+    // hundredth of a level) of where it was in the last 0.125 s.
     bool ground = px.y > horizon;
     Seen seen = UNSEEN;
     float near = 0.0, shadow = 0.0;
@@ -120,10 +112,11 @@ vec4 backdrop(vec2 px) {
         see(seen, w);
         near += exp(-max(w.d, 0.0) / 90.0);
         vec4 r = w.rect;
-        vec2 foot = vec2(clamp(px.x, r.x, r.x + r.z), r.y + r.w);
-        vec2 to = foot - px;
-        pull += to * 0.18 * (1.0 - 0.7 * w.lift) * w.alpha * exp(-length(to * vec2(1.0, 2.4)) / 70.0);
         if (ground) {
+            // The pull moves no point a hundredth of a px past 700 px.
+            vec2 to = vec2(clamp(px.x, r.x, r.x + r.z), r.y + r.w) - px;
+            if (abs(to.y) < 700.0 / 2.4)
+                pull += to * 0.18 * (1.0 - 0.7 * w.lift) * w.alpha * exp(-length(to * vec2(1.0, 2.4)) / 70.0);
             float reach = 36.0 + 70.0 * w.lift;
             float below = px.y - (r.y + r.w);
             if (below >= -2.0 && below <= reach * 2.0) {

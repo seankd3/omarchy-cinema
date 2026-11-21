@@ -120,7 +120,8 @@ vec4 backdrop(vec2 px) {
         if (i < 32 && abs(w.d) < glowReach(0.6, 28.0) + 17.0) near |= 1u << i;
         float beyond = max(w.d, 0.0);
         float grip = exp(-beyond / 70.0) * (1.0 - smoothstep(250.0, 450.0, beyond));
-        held += vec3(edgeNormal(px, w.rect, w.rounding) * 0.7 * beyond, 1.0) * grip;
+        held.z += grip;
+        if (beyond > 0.0) held.xy += edgeNormal(px, w.rect, w.rounding) * 0.7 * beyond * grip;
         // Exactly 0 past offset plus softness from the window's edge.
         float soft = 18.0 + 40.0 * w.lift, offset = 24.0 + 44.0 * w.lift;
         if (edgeDistance(w) - offset >= soft) continue;
@@ -140,9 +141,11 @@ vec4 backdrop(vec2 px) {
     // shifts against it by a few pixels, the far lattice by a third of that.
     vec2 view = focusVelocity() * 0.003;
 
-    // Far behind: slow purple haze and a lattice three times the size, offset
-    // against the focused window so it reads as deeper than the near one.
-    float haze = 0.5 * noise(px * 0.0016 + orbit(180.0, 1.5));
+    // Far behind: slow purple haze, 0 to 0.5 (three broad waves crossing, as
+    // faint as a value noise at a fraction of its cost), and a lattice three
+    // times the size, offset against the focused window so it reads deeper.
+    vec2 h = px * 0.0016 + orbit(180.0, 1.5);
+    float haze = 0.25 + (sin(h.x * 2.1 + h.y * 0.7) + sin(h.y * 2.3 - h.x * 0.9) + sin((h.x + h.y) * 1.3 + 1.7)) / 12.0;
     vec3 far = hexCell(px + (centre - resolution * 0.5) * 0.05 + view * 0.35, CELL * 3.0);
     light += PURPLE * (0.1 * haze * haze + glowLine(far.z, 1.0) * (0.015 + 0.25 * haze) * veil);
 
@@ -153,11 +156,10 @@ vec4 backdrop(vec2 px) {
     cell.xy -= shift;
 
     // How awake the cell is: near any window's edge (inside or out, so seams
-    // between windows add up) and most near the focused one. A moving window
-    // sets it rippling: rings of cells light and run outward from the window,
-    // and the cells where it has just been stay lit behind it, fading.
-    // The cell is a point of its own, so the windows are met again there:
-    // those whose wake reaches it, and the moving ones.
+    // add up), most near the focused one. A moving window sets rings of cells
+    // running outward, and the cells it just left stay lit, fading. The cell
+    // is a point of its own, so the windows whose wake reaches it and the
+    // moving ones are met again there.
     float wake = 0.0, stir = 0.0;
     for (int i = 0; i < windowCount; i++) {
         if (i < 32 && (near >> i & 1u) == 0u && windowTexels[3 * i + 2].xy == vec2(0.0)) continue;
@@ -168,7 +170,8 @@ vec4 backdrop(vec2 px) {
         float pace = min(speed / 1400.0, 1.0) * w.alpha;
         float fc = fieldDistance(cell.xy, w.rect);
         if (fc < 0.0) continue;
-        stir += 2.2 * pace * exp(-fc / 160.0) * pow(0.5 + 0.5 * cos(fc / 26.0 - cycle(1.0) * TAU * 3.0), 3.0);
+        float wave = 0.5 + 0.5 * cos(fc / 26.0 - cycle(1.0) * TAU * 3.0);
+        stir += 2.2 * pace * exp(-fc / 160.0) * wave * wave * wave;
         // Its ghosts, 2.6 exp(-d / 26) of a burn, only within their reach of
         // where it was in the last 0.12 s (its last ghost's lag).
         for (int k = 1; k <= (fc < glowReach(2.6, 26.0) + speed * 0.12 ? 4 : 0); k++) {
@@ -242,14 +245,12 @@ vec4 backdrop(vec2 px) {
 }
 
 // Each window's edge (specs/depth.md, part 2): its own AT field. A wall of
-// orange light hugs the glass a few pixels out, its corners cut at 45
-// degrees, brightest facing the light, at its corners and as focus lifts it;
-// Unit-01's purple round the windows without focus. The glass's outer pixels
-// show the field bent from behind it, and that light catches on the wall, so
-// light passing behind the glass lights the edge. The wall flares when the
-// window lands and brightens softly for a moment when it opens or takes
-// focus. Its light stays within a dozen pixels of the wall, so it never lies
-// over the text of a window beneath.
+// orange light hugs the glass a few pixels out, corners cut at 45 degrees,
+// brightest facing the light, at its corners and as focus lifts it; Unit-01's
+// purple round unfocused windows. The glass's outer pixels show the field
+// bent from behind, and light passing there catches on the wall. It flares
+// on a landing and brightens softly on opening or focus, and stays within a
+// dozen pixels of the wall, never over a window beneath.
 vec4 frame(vec2 px, Window w) {
     vec4 r = w.rect;
     float d = edgeDistance(w);
