@@ -41,9 +41,13 @@ if [[ ${1:-} == --inside ]]; then
   # The desktop's own output goes to the log; the command's goes where it was
   # going.
   exec >&3 2>&4 3>&- 4>&-
-  size=$2 theme=$3 out=$4 plugin=$5 fresh=$6
-  shift 6
+  size=$2 theme=$3 out=$4 plugin=$5 fresh=$6 split=$7
+  shift 7
   run=$XDG_RUNTIME_DIR
+  # The own files of each directory copied whole by its children.
+  while IFS= read -r dir; do
+    [[ -z $dir ]] || find "/run/home$dir" -mindepth 1 -maxdepth 1 ! -type d -exec cp -a -t "$dir" {} +
+  done <<<"$split"
 
   # With --out, frames.log has each frame shown and the backdrop's time in
   # it: frameclock's vblanks and commits, and frametrace's reading of the
@@ -225,10 +229,31 @@ for device in /dev/dri/renderD* /dev/nvidia[0-9]* /dev/nvidiactl; do
   [[ -c $device ]] && sandbox+=(--dev-bind "$device" "$device")
 done
 sandbox+=(--tmpfs "$HOME")
+# A directory as a throwaway copy: an overlay whose lower directory is it.
+# An overlay takes no lower directory with a filesystem mounted below it
+# (issue 24: ~/.local/share/footage, ~/.config/t3code-v2), so such a
+# directory's own files are copied in at the start (in `split`, read from its
+# view in /run/home) and each directory in it is a copy of its own; a mount
+# point is one too.
+mapfile -t mounts < <(findmnt -ln -o TARGET)
+split=()
+copy() {
+  local dir
+  for dir in "${mounts[@]}" ""; do
+    [[ $dir == "$1"/* ]] && break
+  done
+  if [[ -z $dir ]]; then
+    sandbox+=(--overlay-src "$1" --tmp-overlay "$1")
+    return
+  fi
+  split+=("$1")
+  sandbox+=(--ro-bind "$1" "/run/home$1")
+  while IFS= read -r -d '' dir; do copy "$dir"; done < <(find "$1" -mindepth 1 -maxdepth 1 -type d -print0)
+}
 mine=("$HOME/.config" "$HOME/.local" "$HOME/.cache")
 [[ -n $fresh ]] && mine=()
 for dir in "${mine[@]}" "$here"; do
-  [[ -d $dir ]] && sandbox+=(--overlay-src "$dir" --tmp-overlay "$dir")
+  [[ -d $dir ]] && copy "$dir"
 done
 for file in .bashrc .bash_profile; do
   [[ -z $fresh && -f $HOME/$file ]] && sandbox+=(--ro-bind "$HOME/$file" "$HOME/$file")
@@ -251,5 +276,5 @@ cd "$here"
 # systemd-coredump, whose journal entry Omarchy's crash watcher turns into a
 # toast on your screen, and a limit of one byte is the kernel's own "never
 # pipe this core".
-exec prlimit --core=1 bwrap "${sandbox[@]}" -- dbus-run-session -- "$here/tools/hidden-desktop" --inside "$size" "$theme" "$out" "$plugin" "$fresh" "$@" \
+exec prlimit --core=1 bwrap "${sandbox[@]}" -- dbus-run-session -- "$here/tools/hidden-desktop" --inside "$size" "$theme" "$out" "$plugin" "$fresh" "$(printf '%s\n' "${split[@]}")" "$@" \
   3>&1 4>&2 >"$log" 2>&1
