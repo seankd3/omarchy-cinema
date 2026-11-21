@@ -281,7 +281,7 @@ vec4 backdrop(vec2 px) {
     if (closest >= 0 && edge > 0.0 && edge < 30.0) light += holdLines(px, closest, cyan);
 
     // The glass catches the workshop's light: behind each window the world
-    // draws the sheen on it, the streak and the reactor's glow along its
+    // draws the sheen on it, a faint streak and the reactor's glow along its
     // lower glass. Only the glass shows it; the window's text stays over it,
     // opaque.
     int over = seen.over;
@@ -289,7 +289,7 @@ vec4 backdrop(vec2 px) {
         Window o = window(px, over);
         vec4 r = o.rect;
         float low = exp(-(r.y + r.w - px.y) / 90.0);
-        light += mix(cyan, HOT, 0.5) * (0.22 * glassStreak(px, r) + 0.3 * low) * o.alpha;
+        light += mix(cyan, HOT, 0.5) * (0.1 * glassStreak(px, r) + 0.3 * low) * o.alpha;
     }
 
     // The bar's lower edge: a thin holographic line, a tick every 40 pixels
@@ -303,6 +303,10 @@ vec4 backdrop(vec2 px) {
         light += AMBER * marker * glowLine(abs(below), 2.0, HALO) * 0.9;
         light += cyan * 0.04 * step(below, 0.0);
     }
+
+    // A lens's falloff: the corners dim, so the eye rests on the windows.
+    vec2 lens = px / resolution - 0.5;
+    light *= 1.0 - 0.6 * dot(lens, lens);
 
     // Bright light saturates toward white, as it does on film.
     return vec4(base + (1.0 - exp(-light * 1.4)), 1.0);

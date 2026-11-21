@@ -226,6 +226,9 @@ vec4 backdrop(vec2 px) {
         light += cyan * 0.06 * step(below, 0.0);
     }
 
+    // A lens's falloff: the corners dim, so the eye rests on the windows.
+    vec2 lens = px / resolution - 0.5;
+    light *= 1.0 - 0.6 * dot(lens, lens);
     return vec4(col + (1.0 - exp(-light * 1.3)), 1.0);
 }
 

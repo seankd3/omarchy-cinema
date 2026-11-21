@@ -210,10 +210,11 @@ vec4 backdrop(vec2 px) {
     // cell by cell. Where the field packs tight round a window its rims glow
     // brighter, as if holding the window. A rim fades out at its cell's
     // edge, so float noise cannot hand an edge pixel to the next cell.
+    // Sleeping seams come and go with the haze, so the field at rest has depth.
     float lit = min(wake, 2.5) * 0.85 + ripple * 1.6;
     float tile = smoothstep(2.0, 3.5, cell.z);
     float rim = glowLine(abs(cell.z - 3.0), 0.9) * (1.0 + 0.5 * min(held.z, 1.0)) * smoothstep(0.0, 0.5, cell.z);
-    light += orange * glowLine(cell.z, 0.8) * 0.035;
+    light += orange * glowLine(cell.z, 0.8) * 0.035 * (0.4 + 1.2 * haze);
     light += orange * (tile * 0.06 + rim * 0.3) * lit * veil * shade;
 
     // A cell the field's answer or a moving window reaches burns whole, its
@@ -239,6 +240,10 @@ vec4 backdrop(vec2 px) {
     }
 
     if (seen.over >= 0) light += sheen(px, seen.over);
+
+    // A lens's falloff: the corners dim, so the eye rests on the windows.
+    vec2 lens = px / resolution - 0.5;
+    light *= 1.0 - 0.6 * dot(lens, lens);
 
     // Bright light saturates toward white, as it does on film.
     return vec4(background + (1.0 - exp(-light * 1.3)), 1.0);
